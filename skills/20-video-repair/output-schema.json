@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.shiguang.invalid/schemas/20-video-repair-output.json",
+  "title": "20-video-repair-output",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "projectId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "projectVersion": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "payload": {
+      "type": "object",
+      "properties": {
+        "repairPlan": {},
+        "revisedShot": {}
+      },
+      "required": [
+        "repairPlan",
+        "revisedShot"
+      ],
+      "additionalProperties": true
+    },
+    "trace": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "status": {
+      "enum": [
+        "READY",
+        "HUMAN_REVIEW_REQUIRED",
+        "FAILED"
+      ]
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "projectId",
+    "projectVersion",
+    "payload",
+    "status",
+    "warnings"
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "valid": [
+    {
+      "projectId": "project-example",
+      "projectVersion": 1,
+      "payload": {
+        "episodePlan": {
+          "example": true
+        }
+      },
+      "trace": {
+        "requestKey": "example-04-script-writing"
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "missing-project-version",
+      "value": {
+        "projectId": "project-example",
+        "payload": {
+          "episodePlan": {
+            "example": true
+          }
+        }
+      }
+    }
+  ]
+}

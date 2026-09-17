@@ -1,0 +1,18 @@
+{
+  "projectId": "project-example",
+  "projectVersion": 1,
+  "payload": {
+    "timeline": {
+      "version": 1
+    },
+    "items": {
+      "version": 1
+    }
+  },
+  "status": "READY",
+  "warnings": [],
+  "trace": {
+    "skill": "26-timeline-planning",
+    "skillVersion": "1.0.0"
+  }
+}

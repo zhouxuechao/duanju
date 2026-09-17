@@ -1,0 +1,35 @@
+{
+  "valid": [
+    {
+      "projectId": "project-example",
+      "projectVersion": 1,
+      "payload": {
+        "keyframe": {
+          "example": true
+        },
+        "prompt": {
+          "example": true
+        }
+      },
+      "trace": {
+        "requestKey": "example-18-video-generation"
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "missing-project-version",
+      "value": {
+        "projectId": "project-example",
+        "payload": {
+          "keyframe": {
+            "example": true
+          },
+          "prompt": {
+            "example": true
+          }
+        }
+      }
+    }
+  ]
+}

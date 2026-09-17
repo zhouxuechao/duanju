@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.shiguang.invalid/schemas/13-image-prompt-compile-input.json",
+  "title": "13-image-prompt-compile-input",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "projectId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "projectVersion": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "payload": {
+      "type": "object",
+      "properties": {
+        "shot": {},
+        "anchors": {}
+      },
+      "required": [
+        "shot",
+        "anchors"
+      ],
+      "additionalProperties": true
+    },
+    "trace": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "projectId",
+    "projectVersion",
+    "payload"
+  ]
+}

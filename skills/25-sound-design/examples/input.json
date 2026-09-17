@@ -1,0 +1,15 @@
+{
+  "projectId": "project-example",
+  "projectVersion": 1,
+  "payload": {
+    "timeline": {
+      "example": true
+    },
+    "scenes": {
+      "example": true
+    }
+  },
+  "trace": {
+    "requestKey": "example-25-sound-design"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "projectId": "project-example",
+  "projectVersion": 1,
+  "payload": {
+    "storyBible": {
+      "example": true
+    }
+  },
+  "trace": {
+    "requestKey": "example-02-character-planning"
+  }
+}

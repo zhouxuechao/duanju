@@ -1,0 +1,21 @@
+{
+  "projectId": "project-example",
+  "projectVersion": 1,
+  "payload": {
+    "startState": {
+      "version": 1
+    },
+    "endState": {
+      "version": 1
+    },
+    "risks": {
+      "version": 1
+    }
+  },
+  "status": "READY",
+  "warnings": [],
+  "trace": {
+    "skill": "08-continuity-planning",
+    "skillVersion": "1.0.0"
+  }
+}

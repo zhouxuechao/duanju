@@ -1,0 +1,15 @@
+{
+  "projectId": "project-example",
+  "projectVersion": 1,
+  "payload": {
+    "videoTake": {
+      "version": 1
+    }
+  },
+  "status": "READY",
+  "warnings": [],
+  "trace": {
+    "skill": "18-video-generation",
+    "skillVersion": "1.0.0"
+  }
+}

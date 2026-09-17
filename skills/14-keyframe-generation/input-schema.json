@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.shiguang.invalid/schemas/14-keyframe-generation-input.json",
+  "title": "14-keyframe-generation-input",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "projectId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "projectVersion": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "payload": {
+      "type": "object",
+      "properties": {
+        "prompt": {},
+        "references": {}
+      },
+      "required": [
+        "prompt",
+        "references"
+      ],
+      "additionalProperties": true
+    },
+    "trace": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "projectId",
+    "projectVersion",
+    "payload"
+  ]
+}

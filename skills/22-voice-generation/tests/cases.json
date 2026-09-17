@@ -1,0 +1,35 @@
+{
+  "valid": [
+    {
+      "projectId": "project-example",
+      "projectVersion": 1,
+      "payload": {
+        "speechText": {
+          "example": true
+        },
+        "voiceProfile": {
+          "example": true
+        }
+      },
+      "trace": {
+        "requestKey": "example-22-voice-generation"
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "missing-project-version",
+      "value": {
+        "projectId": "project-example",
+        "payload": {
+          "speechText": {
+            "example": true
+          },
+          "voiceProfile": {
+            "example": true
+          }
+        }
+      }
+    }
+  ]
+}

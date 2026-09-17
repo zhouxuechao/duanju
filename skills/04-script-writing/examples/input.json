@@ -1,0 +1,12 @@
+{
+  "projectId": "project-example",
+  "projectVersion": 1,
+  "payload": {
+    "episodePlan": {
+      "example": true
+    }
+  },
+  "trace": {
+    "requestKey": "example-04-script-writing"
+  }
+}

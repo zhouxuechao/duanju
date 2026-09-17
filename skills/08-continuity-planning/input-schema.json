@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.shiguang.invalid/schemas/08-continuity-planning-input.json",
+  "title": "08-continuity-planning-input",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "projectId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "projectVersion": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "payload": {
+      "type": "object",
+      "properties": {
+        "shot": {},
+        "sceneState": {}
+      },
+      "required": [
+        "shot",
+        "sceneState"
+      ],
+      "additionalProperties": true
+    },
+    "trace": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "projectId",
+    "projectVersion",
+    "payload"
+  ]
+}

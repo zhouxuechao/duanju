@@ -1,0 +1,41 @@
+{
+  "valid": [
+    {
+      "projectId": "project-example",
+      "projectVersion": 1,
+      "payload": {
+        "shot": {
+          "example": true
+        },
+        "strategy": {
+          "example": true
+        },
+        "continuity": {
+          "example": true
+        }
+      },
+      "trace": {
+        "requestKey": "example-17-video-prompt-compile"
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "missing-project-version",
+      "value": {
+        "projectId": "project-example",
+        "payload": {
+          "shot": {
+            "example": true
+          },
+          "strategy": {
+            "example": true
+          },
+          "continuity": {
+            "example": true
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "projectId": "project-example",
+  "projectVersion": 1,
+  "payload": {
+    "episode": {
+      "example": true
+    },
+    "lockedAssets": {
+      "example": true
+    }
+  },
+  "trace": {
+    "requestKey": "example-26-timeline-planning"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "projectId": "project-example",
+  "projectVersion": 1,
+  "payload": {
+    "speechText": {
+      "example": true
+    },
+    "voiceProfile": {
+      "example": true
+    }
+  },
+  "trace": {
+    "requestKey": "example-22-voice-generation"
+  }
+}

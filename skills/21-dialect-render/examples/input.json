@@ -1,0 +1,15 @@
+{
+  "projectId": "project-example",
+  "projectVersion": 1,
+  "payload": {
+    "displayText": {
+      "example": true
+    },
+    "knowledgeBase": {
+      "example": true
+    }
+  },
+  "trace": {
+    "requestKey": "example-21-dialect-render"
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.shiguang.invalid/schemas/17-video-prompt-compile-input.json",
+  "title": "17-video-prompt-compile-input",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "projectId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "projectVersion": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "payload": {
+      "type": "object",
+      "properties": {
+        "shot": {},
+        "strategy": {},
+        "continuity": {}
+      },
+      "required": [
+        "shot",
+        "strategy",
+        "continuity"
+      ],
+      "additionalProperties": true
+    },
+    "trace": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "projectId",
+    "projectVersion",
+    "payload"
+  ]
+}

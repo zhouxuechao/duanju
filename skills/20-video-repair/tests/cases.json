@@ -1,0 +1,35 @@
+{
+  "valid": [
+    {
+      "projectId": "project-example",
+      "projectVersion": 1,
+      "payload": {
+        "videoTake": {
+          "example": true
+        },
+        "risks": {
+          "example": true
+        }
+      },
+      "trace": {
+        "requestKey": "example-20-video-repair"
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "missing-project-version",
+      "value": {
+        "projectId": "project-example",
+        "payload": {
+          "videoTake": {
+            "example": true
+          },
+          "risks": {
+            "example": true
+          }
+        }
+      }
+    }
+  ]
+}

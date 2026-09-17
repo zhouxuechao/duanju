@@ -1,0 +1,15 @@
+{
+  "projectId": "project-example",
+  "projectVersion": 1,
+  "payload": {
+    "shot": {
+      "example": true
+    },
+    "anchors": {
+      "example": true
+    }
+  },
+  "trace": {
+    "requestKey": "example-13-image-prompt-compile"
+  }
+}

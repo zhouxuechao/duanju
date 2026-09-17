@@ -1,0 +1,29 @@
+{
+  "valid": [
+    {
+      "projectId": "project-example",
+      "projectVersion": 1,
+      "payload": {
+        "storyBible": {
+          "example": true
+        }
+      },
+      "trace": {
+        "requestKey": "example-02-character-planning"
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "missing-project-version",
+      "value": {
+        "projectId": "project-example",
+        "payload": {
+          "storyBible": {
+            "example": true
+          }
+        }
+      }
+    }
+  ]
+}

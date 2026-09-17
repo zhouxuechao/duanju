@@ -1,0 +1,15 @@
+{
+  "projectId": "project-example",
+  "projectVersion": 1,
+  "payload": {
+    "scenes": {
+      "version": 1
+    }
+  },
+  "status": "READY",
+  "warnings": [],
+  "trace": {
+    "skill": "05-scene-extraction",
+    "skillVersion": "1.0.0"
+  }
+}

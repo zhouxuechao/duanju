@@ -1,0 +1,2 @@
+package com.yourapp.drama.domain;
+public enum ShotRelation { CONTINUOUS, REVERSE_SHOT, REACTION, INSERT, CUTAWAY, ESTABLISHING, MATCH_CUT, TIME_JUMP, LOCATION_CHANGE }

@@ -1,0 +1,29 @@
+{
+  "valid": [
+    {
+      "projectId": "project-example",
+      "projectVersion": 1,
+      "payload": {
+        "dialogues": {
+          "example": true
+        }
+      },
+      "trace": {
+        "requestKey": "example-24-subtitle-generation"
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "missing-project-version",
+      "value": {
+        "projectId": "project-example",
+        "payload": {
+          "dialogues": {
+            "example": true
+          }
+        }
+      }
+    }
+  ]
+}

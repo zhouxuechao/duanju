@@ -1,0 +1,15 @@
+{
+  "projectId": "project-example",
+  "projectVersion": 1,
+  "payload": {
+    "storyboard": {
+      "version": 1
+    }
+  },
+  "status": "READY",
+  "warnings": [],
+  "trace": {
+    "skill": "12-storyboard-generation",
+    "skillVersion": "1.0.0"
+  }
+}

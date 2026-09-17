@@ -1,0 +1,7 @@
+[
+ {"id":"modern-city","genre":"现代都市","characters":6,"locations":4,"props":3,"plannedShots":20,"style":"现代都市写实","state":"通勤装","fact":"合同已转交"},
+ {"id":"xianxia","genre":"古装仙侠","characters":7,"locations":5,"props":4,"plannedShots":24,"style":"东方仙侠写实","state":"宗门法衣","fact":"法器认主"},
+ {"id":"mystery","genre":"悬疑","characters":6,"locations":4,"props":3,"plannedShots":30,"style":"低照度悬疑写实","state":"便装","fact":"侦探已知线索"},
+ {"id":"complex-time","genre":"复杂时间线","characters":5,"locations":4,"props":2,"plannedShots":32,"style":"跨年代写实","state":"currentAgeMarker-20岁","fact":"回忆中已知事实"},
+ {"id":"long-series","genre":"长剧","characters":10,"locations":10,"props":20,"plannedShots":200,"style":"连续剧写实","state":"currentAgeMarker-50岁","fact":"第十镜已知事实"}
+]

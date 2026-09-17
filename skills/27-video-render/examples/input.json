@@ -1,0 +1,12 @@
+{
+  "projectId": "project-example",
+  "projectVersion": 1,
+  "payload": {
+    "timeline": {
+      "example": true
+    }
+  },
+  "trace": {
+    "requestKey": "example-27-video-render"
+  }
+}

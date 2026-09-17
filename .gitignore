@@ -1,0 +1,15 @@
+target/
+node_modules/
+frontend/dist/
+.tools/
+.env
+.env.*
+!.env.example
+data/
+logs/
+*.log
+*.pid
+.idea/
+.vscode/
+test-results/
+playwright-report/

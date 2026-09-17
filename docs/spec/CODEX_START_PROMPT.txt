@@ -1,0 +1,64 @@
+你现在接手一个从 0 重做的个人 AI 短剧生产系统。
+
+请先完整阅读此目录所有 Markdown，尤其：
+
+1. README.md
+2. 01_PRODUCT_AND_ARCHITECTURE.md
+3. 02_DOMAIN_MODEL_AND_DATABASE.md
+4. 03_WORKFLOW_AND_STATE_MACHINE.md
+5. 04_VOLCENGINE_PIPELINE.md
+6. 06_CONTINUITY_ENGINE.md
+7. 07_DIALECT_SYSTEM.md
+8. 09_MILESTONES.md
+9. 10_JAVA_PACKAGE_STRUCTURE.md
+
+项目定位：
+- 个人自用
+- 不做 SaaS
+- 操作简单
+- 底层影视生产链完整
+- 目标是高质量 AI 短剧生成
+
+固定模型：
+- 豆包 Seed 2.1：剧本、故事、导演、Prompt、QC
+- Seedream 5.0：Storyboard、关键帧、图片
+- Seedance 2.5：视频
+- 人物：火山虚拟人物
+- FFmpeg：最终渲染
+
+最重要的项目级硬规则：
+
+【Seedream → Seedance 原始链路必须保留】
+
+旧系统已实际验证：
+Seedream 5.0 生成的关键帧，在继续给 Seedance 2.5 时，不能先下载、保存、上传自己的 OSS 后再作为普通图重新传。
+
+必须：
+Seedream 返回 providerUrl
+→ 原样直接用于 Seedance
+→ 视频任务创建后，归档可以异步另存 archiveUrl
+
+archiveUrl 永远不能替代 providerUrl 用于 Seedance 生产。
+
+请先做 P0/P1，不要先做 UI。
+
+第一步输出：
+1. Maven 多模块或单模块建议
+2. package 结构
+3. PostgreSQL V1 migration
+4. 核心 entity
+5. Shot JSON schema
+6. Shot state machine
+7. GenerationJob state machine
+8. Model Adapter interfaces
+9. Volcengine Seedream/Seedance handoff 设计
+10. 第一个集成测试：火山虚拟人物 → Seedream Keyframe → providerUrl 原样传 Seedance → 视频成功
+
+要求：
+- 每一步可运行
+- 每一步带测试
+- 不提前堆无关 UI
+- 不做会员/支付/团队/社区
+- 不让 Agent 自由改写核心数据结构
+- 所有 Agent 输出必须结构化
+- 所有生成必须可追溯、可回退、可重拍

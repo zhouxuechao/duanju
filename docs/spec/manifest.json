@@ -1,0 +1,16 @@
+{
+  "version": "2.0",
+  "purpose": "Codex development handoff",
+  "critical_change": "Seedream 5.0 provider URL must be handed directly to Seedance 2.5; archive copy is separate and must not replace provider URL.",
+  "stack": {
+    "backend": "Java 21 + Spring Boot",
+    "database": "PostgreSQL",
+    "queue_cache": "Redis",
+    "frontend": "Vue 3",
+    "render": "FFmpeg",
+    "llm": "Doubao Seed 2.1",
+    "image": "Seedream 5.0",
+    "video": "Seedance 2.5",
+    "character_identity": "Volcengine virtual humans"
+  }
+}

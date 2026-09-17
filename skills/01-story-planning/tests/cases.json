@@ -1,0 +1,29 @@
+{
+  "valid": [
+    {
+      "projectId": "project-example",
+      "projectVersion": 1,
+      "payload": {
+        "idea": {
+          "example": true
+        }
+      },
+      "trace": {
+        "requestKey": "example-01-story-planning"
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "missing-project-version",
+      "value": {
+        "projectId": "project-example",
+        "payload": {
+          "idea": {
+            "example": true
+          }
+        }
+      }
+    }
+  ]
+}

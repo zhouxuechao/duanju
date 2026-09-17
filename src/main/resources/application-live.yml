@@ -1,0 +1,4 @@
+# Local H2 with real providers: start with profiles demo,live.
+drama:
+  provider:
+    mode: volcengine

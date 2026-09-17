@@ -1,0 +1,18 @@
+{
+  "projectId": "project-example",
+  "projectVersion": 1,
+  "payload": {
+    "prompt": {
+      "version": 1
+    },
+    "references": {
+      "version": 1
+    }
+  },
+  "status": "READY",
+  "warnings": [],
+  "trace": {
+    "skill": "17-video-prompt-compile",
+    "skillVersion": "1.0.0"
+  }
+}

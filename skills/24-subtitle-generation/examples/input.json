@@ -1,0 +1,12 @@
+{
+  "projectId": "project-example",
+  "projectVersion": 1,
+  "payload": {
+    "dialogues": {
+      "example": true
+    }
+  },
+  "trace": {
+    "requestKey": "example-24-subtitle-generation"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "projectId": "project-example",
+  "projectVersion": 1,
+  "payload": {
+    "passed": {
+      "version": 1
+    },
+    "score": {
+      "version": 1
+    },
+    "observedState": {
+      "version": 1
+    },
+    "risks": {
+      "version": 1
+    }
+  },
+  "status": "READY",
+  "warnings": [],
+  "trace": {
+    "skill": "19-video-qc",
+    "skillVersion": "1.0.0"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "projectId": "project-example",
+  "projectVersion": 1,
+  "payload": {
+    "shot": {
+      "example": true
+    }
+  },
+  "trace": {
+    "requestKey": "example-07-shot-difficulty"
+  }
+}

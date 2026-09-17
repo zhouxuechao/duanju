@@ -1,0 +1,18 @@
+{
+  "projectId": "project-example",
+  "projectVersion": 1,
+  "payload": {
+    "srt": {
+      "version": 1
+    },
+    "cues": {
+      "version": 1
+    }
+  },
+  "status": "READY",
+  "warnings": [],
+  "trace": {
+    "skill": "24-subtitle-generation",
+    "skillVersion": "1.0.0"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "valid": [
+    {
+      "projectId": "project-example",
+      "projectVersion": 1,
+      "payload": {
+        "prompt": {
+          "example": true
+        },
+        "references": {
+          "example": true
+        }
+      },
+      "trace": {
+        "requestKey": "example-14-keyframe-generation"
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "missing-project-version",
+      "value": {
+        "projectId": "project-example",
+        "payload": {
+          "prompt": {
+            "example": true
+          },
+          "references": {
+            "example": true
+          }
+        }
+      }
+    }
+  ]
+}

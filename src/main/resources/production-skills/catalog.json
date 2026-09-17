@@ -1,0 +1,470 @@
+{
+  "version": "1.0.0",
+  "agents": [
+    "StoryAgent",
+    "DirectorAgent",
+    "ContinuityQcAgent",
+    "EditingAgent"
+  ],
+  "skills": [
+    {
+      "id": "01-story-planning",
+      "agent": "StoryAgent",
+      "version": "1.0.0",
+      "goal": "把创意整理为可版本化的故事圣经",
+      "inputs": [
+        "idea"
+      ],
+      "outputs": [
+        "storyBible"
+      ],
+      "hardRules": [
+        "人物目标、冲突和结局方向必须明确"
+      ]
+    },
+    {
+      "id": "02-character-planning",
+      "agent": "StoryAgent",
+      "version": "1.0.0",
+      "goal": "建立角色身份、关系和长期状态",
+      "inputs": [
+        "storyBible"
+      ],
+      "outputs": [
+        "characters"
+      ],
+      "hardRules": [
+        "角色身份锚点跨集保持稳定"
+      ]
+    },
+    {
+      "id": "03-episode-planning",
+      "agent": "StoryAgent",
+      "version": "1.0.0",
+      "goal": "把故事拆为有钩子和承接的集纲",
+      "inputs": [
+        "storyBible",
+        "characters"
+      ],
+      "outputs": [
+        "episodes"
+      ],
+      "hardRules": [
+        "每集结尾必须给下一集可执行的承接状态"
+      ]
+    },
+    {
+      "id": "04-script-writing",
+      "agent": "StoryAgent",
+      "version": "1.0.0",
+      "goal": "生成场景化剧本和三轨对白底稿",
+      "inputs": [
+        "episodePlan"
+      ],
+      "outputs": [
+        "script",
+        "dialogues"
+      ],
+      "hardRules": [
+        "对白保留 displayText、dialectText、speechText 三轨"
+      ]
+    },
+    {
+      "id": "05-scene-extraction",
+      "agent": "DirectorAgent",
+      "version": "1.0.0",
+      "goal": "从剧本提取场景和初始连续性状态",
+      "inputs": [
+        "script"
+      ],
+      "outputs": [
+        "scenes"
+      ],
+      "hardRules": [
+        "同一场景只绑定一个主地点状态"
+      ]
+    },
+    {
+      "id": "06-shot-planning",
+      "agent": "DirectorAgent",
+      "version": "2.0.0",
+      "goal": "把场景拆成原子镜头",
+      "inputs": [
+        "scene",
+        "episodeScript",
+        "continuitySnapshot",
+        "assets"
+      ],
+      "outputs": [
+        "shots"
+      ],
+      "hardRules": [
+        "镜头 2 至 5 秒且只有一个主要动作和视觉重点"
+      ],
+      "contract": "DirectorContract"
+    },
+    {
+      "id": "07-shot-difficulty",
+      "agent": "DirectorAgent",
+      "version": "1.0.0",
+      "goal": "评估镜头生成难度并给出拆分建议",
+      "inputs": [
+        "shot"
+      ],
+      "outputs": [
+        "difficulty",
+        "reasons"
+      ],
+      "hardRules": [
+        "难度只使用 A、B、C、D"
+      ]
+    },
+    {
+      "id": "08-continuity-planning",
+      "agent": "ContinuityQcAgent",
+      "version": "1.0.0",
+      "goal": "继承并验证镜头起止状态",
+      "inputs": [
+        "shot",
+        "sceneState"
+      ],
+      "outputs": [
+        "startState",
+        "endState",
+        "risks"
+      ],
+      "hardRules": [
+        "只有已质检并锁定的 Take 才能推进 Scene State"
+      ]
+    },
+    {
+      "id": "09-character-design",
+      "agent": "StoryAgent",
+      "version": "2.0.0",
+      "goal": "设计人物身份锚点和基础定妆",
+      "inputs": [
+        "asset",
+        "sourceSnapshot",
+        "referenceViewIds",
+        "view"
+      ],
+      "outputs": [
+        "characterBible",
+        "baseLook"
+      ],
+      "hardRules": [
+        "身份源必须是已授权服务商人物素材"
+      ],
+      "contract": "AssetViewService"
+    },
+    {
+      "id": "10-location-design",
+      "agent": "StoryAgent",
+      "version": "2.0.0",
+      "goal": "设计地点圣经和可复用视觉锚点",
+      "inputs": [
+        "asset",
+        "sourceSnapshot",
+        "referenceViewIds",
+        "view"
+      ],
+      "outputs": [
+        "locationBible"
+      ],
+      "hardRules": [
+        "同一场景只引用当前地点或地点定妆"
+      ],
+      "contract": "AssetViewService"
+    },
+    {
+      "id": "11-prop-design",
+      "agent": "StoryAgent",
+      "version": "2.0.0",
+      "goal": "设计关键道具及其状态变化",
+      "inputs": [
+        "asset",
+        "sourceSnapshot",
+        "referenceViewIds",
+        "view"
+      ],
+      "outputs": [
+        "propBible",
+        "propState"
+      ],
+      "hardRules": [
+        "道具归属、位置和损坏状态必须可追踪"
+      ],
+      "contract": "AssetViewService"
+    },
+    {
+      "id": "12-storyboard-generation",
+      "agent": "DirectorAgent",
+      "version": "1.0.0",
+      "goal": "生成低成本分镜候选",
+      "inputs": [
+        "shot",
+        "continuity"
+      ],
+      "outputs": [
+        "storyboard"
+      ],
+      "hardRules": [
+        "分镜不能代替正式关键帧身份源"
+      ]
+    },
+    {
+      "id": "13-image-prompt-compile",
+      "agent": "DirectorAgent",
+      "version": "1.0.0",
+      "goal": "把结构化镜头编译为图片模型提示词",
+      "inputs": [
+        "shot",
+        "anchors"
+      ],
+      "outputs": [
+        "prompt",
+        "references"
+      ],
+      "hardRules": [
+        "只带当前可见人物及最多一个定妆或地点参考"
+      ]
+    },
+    {
+      "id": "14-keyframe-generation",
+      "agent": "DirectorAgent",
+      "version": "1.0.0",
+      "goal": "提交并记录正式关键帧",
+      "inputs": [
+        "prompt",
+        "references"
+      ],
+      "outputs": [
+        "keyframe"
+      ],
+      "hardRules": [
+        "同时保存 providerUrl 与 archiveUrl，二者用途不可互换"
+      ]
+    },
+    {
+      "id": "15-keyframe-qc",
+      "agent": "ContinuityQcAgent",
+      "version": "1.0.0",
+      "goal": "检查关键帧身份、服装、场景、道具和构图",
+      "inputs": [
+        "keyframe",
+        "expectedState"
+      ],
+      "outputs": [
+        "passed",
+        "score",
+        "risks",
+        "repairPlan"
+      ],
+      "hardRules": [
+        "质检通过后才能锁定"
+      ]
+    },
+    {
+      "id": "16-video-strategy",
+      "agent": "DirectorAgent",
+      "version": "1.0.0",
+      "goal": "选择首帧、参考视频或多模态生成策略",
+      "inputs": [
+        "shot",
+        "keyframe"
+      ],
+      "outputs": [
+        "strategy",
+        "reasons"
+      ],
+      "hardRules": [
+        "正式关键帧只能作为视频首帧，不作为普通参考图重复传入"
+      ]
+    },
+    {
+      "id": "17-video-prompt-compile",
+      "agent": "DirectorAgent",
+      "version": "1.0.0",
+      "goal": "把原子动作编译为视频模型提示词",
+      "inputs": [
+        "shot",
+        "strategy",
+        "continuity"
+      ],
+      "outputs": [
+        "prompt",
+        "references"
+      ],
+      "hardRules": [
+        "禁止把小说段落直接送入视频模型"
+      ]
+    },
+    {
+      "id": "18-video-generation",
+      "agent": "DirectorAgent",
+      "version": "1.0.0",
+      "goal": "提交 Seedance 任务并跟踪多 Take",
+      "inputs": [
+        "keyframe",
+        "prompt"
+      ],
+      "outputs": [
+        "videoTake"
+      ],
+      "hardRules": [
+        "Seedream 原始 providerUrl 必须原样直传 Seedance"
+      ]
+    },
+    {
+      "id": "19-video-qc",
+      "agent": "ContinuityQcAgent",
+      "version": "1.0.0",
+      "goal": "检查动作、身份和起止状态",
+      "inputs": [
+        "videoTake",
+        "expectedState"
+      ],
+      "outputs": [
+        "passed",
+        "score",
+        "observedState",
+        "risks"
+      ],
+      "hardRules": [
+        "通过并锁定后才可进入时间线"
+      ]
+    },
+    {
+      "id": "20-video-repair",
+      "agent": "ContinuityQcAgent",
+      "version": "1.0.0",
+      "goal": "把失败诊断转为局部重拍方案",
+      "inputs": [
+        "videoTake",
+        "risks"
+      ],
+      "outputs": [
+        "repairPlan",
+        "revisedShot"
+      ],
+      "hardRules": [
+        "只重做失败镜头并保留旧版本"
+      ]
+    },
+    {
+      "id": "21-dialect-render",
+      "agent": "EditingAgent",
+      "version": "1.0.0",
+      "goal": "基于知识库生成人工可修正的方言文本",
+      "inputs": [
+        "displayText",
+        "knowledgeBase"
+      ],
+      "outputs": [
+        "dialectText",
+        "speechText",
+        "confidence"
+      ],
+      "hardRules": [
+        "知识库无可靠匹配时必须请求人工修正，不得臆造方言"
+      ]
+    },
+    {
+      "id": "22-voice-generation",
+      "agent": "EditingAgent",
+      "version": "1.0.0",
+      "goal": "用 speechText 和声音档案生成对白音频",
+      "inputs": [
+        "speechText",
+        "voiceProfile"
+      ],
+      "outputs": [
+        "audioClip"
+      ],
+      "hardRules": [
+        "字幕始终使用 displayText"
+      ]
+    },
+    {
+      "id": "23-lipsync",
+      "agent": "EditingAgent",
+      "version": "1.0.0",
+      "goal": "使用已采用视频和音频生成口型同步 Take",
+      "inputs": [
+        "videoTake",
+        "audioClip"
+      ],
+      "outputs": [
+        "videoTake"
+      ],
+      "hardRules": [
+        "不得改变人物身份、服装、场景、动作或台词内容"
+      ]
+    },
+    {
+      "id": "24-subtitle-generation",
+      "agent": "EditingAgent",
+      "version": "1.0.0",
+      "goal": "按音频时长生成普通话字幕",
+      "inputs": [
+        "dialogues"
+      ],
+      "outputs": [
+        "srt",
+        "cues"
+      ],
+      "hardRules": [
+        "字幕文本只读取 displayText"
+      ]
+    },
+    {
+      "id": "25-sound-design",
+      "agent": "EditingAgent",
+      "version": "1.0.0",
+      "goal": "规划环境声、音效和背景音乐",
+      "inputs": [
+        "timeline",
+        "scenes"
+      ],
+      "outputs": [
+        "soundDesign"
+      ],
+      "hardRules": [
+        "对白清晰度优先且音效不得替代叙事信息"
+      ]
+    },
+    {
+      "id": "26-timeline-planning",
+      "agent": "EditingAgent",
+      "version": "1.0.0",
+      "goal": "组装连续视频、对白、音效和字幕轨",
+      "inputs": [
+        "episode",
+        "lockedAssets"
+      ],
+      "outputs": [
+        "timeline",
+        "items"
+      ],
+      "hardRules": [
+        "只允许已质检、已锁定、已归档素材进入时间线"
+      ]
+    },
+    {
+      "id": "27-video-render",
+      "agent": "EditingAgent",
+      "version": "1.0.0",
+      "goal": "生成可审阅预览和最终成片",
+      "inputs": [
+        "timeline"
+      ],
+      "outputs": [
+        "render",
+        "subtitle"
+      ],
+      "hardRules": [
+        "FFmpeg 只读取安全的本地归档路径"
+      ]
+    }
+  ]
+}

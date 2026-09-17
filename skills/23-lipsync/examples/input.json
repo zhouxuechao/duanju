@@ -1,0 +1,15 @@
+{
+  "projectId": "project-example",
+  "projectVersion": 1,
+  "payload": {
+    "videoTake": {
+      "example": true
+    },
+    "audioClip": {
+      "example": true
+    }
+  },
+  "trace": {
+    "requestKey": "example-23-lipsync"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "projectId": "project-example",
+  "projectVersion": 1,
+  "payload": {
+    "shot": {
+      "example": true
+    },
+    "strategy": {
+      "example": true
+    },
+    "continuity": {
+      "example": true
+    }
+  },
+  "trace": {
+    "requestKey": "example-17-video-prompt-compile"
+  }
+}

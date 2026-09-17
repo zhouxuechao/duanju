@@ -1,0 +1,15 @@
+{
+  "projectId": "project-example",
+  "projectVersion": 1,
+  "payload": {
+    "shot": {
+      "example": true
+    },
+    "continuity": {
+      "example": true
+    }
+  },
+  "trace": {
+    "requestKey": "example-12-storyboard-generation"
+  }
+}

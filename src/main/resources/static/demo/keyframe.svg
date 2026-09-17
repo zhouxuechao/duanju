@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="1280" viewBox="0 0 720 1280">
+ <defs><linearGradient id="g" x2="0" y2="1"><stop stop-color="#172a2d"/><stop offset="1" stop-color="#0d1719"/></linearGradient></defs>
+ <rect width="720" height="1280" fill="url(#g)"/><rect x="42" y="42" width="636" height="1196" rx="6" fill="none" stroke="#475953"/>
+ <path d="M42 900 270 700 420 800 678 600V1238H42Z" fill="#233b35"/>
+ <circle cx="530" cy="420" r="80" fill="#ddc7a0" opacity=".6"/>
+ <text x="85" y="140" font-family="sans-serif" font-size="18" letter-spacing="5" fill="#b8c5bf">SHIGUANG / LOCAL DEMO</text>
+ <text x="85" y="545" font-family="sans-serif" font-size="45" fill="#eae2d3">本地流程演示</text>
+ <text x="85" y="600" font-family="sans-serif" font-size="22" fill="#a8b5b0">用于验证关键帧 → 视频任务链路</text>
+ <text x="85" y="1160" font-family="sans-serif" font-size="18" fill="#c9d2cb">此图不是模型生成结果 · 真实模式需连接火山</text>
+</svg>

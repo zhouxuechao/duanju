@@ -1,0 +1,12 @@
+{
+  "projectId": "project-example",
+  "projectVersion": 1,
+  "payload": {
+    "script": {
+      "example": true
+    }
+  },
+  "trace": {
+    "requestKey": "example-05-scene-extraction"
+  }
+}

@@ -1,0 +1,110 @@
+<script setup>
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import RecursiveFields from './RecursiveFields.vue'
+
+const props = defineProps({ project: Object, workspace: Object, busy: Boolean })
+const emit = defineEmits(['refresh', 'message', 'editing'])
+onBeforeUnmount(() => emit('editing', false))
+const stage = ref('CORE')
+const selectedId = ref('')
+const draft = ref(null)
+const saving = ref(false)
+const batchSize = ref(5)
+const dirty = ref(false)
+const syncing = ref(false)
+const draftRevision = ref(null)
+const draftDocumentId = ref(null)
+const showHistory = ref(false)
+watch([dirty, saving], ([isDirty, isSaving]) => emit('editing', Boolean(isDirty || isSaving)), { immediate: true })
+
+const docs = computed(() => props.workspace?.['story-documents'] || [])
+const jobs = computed(() => props.workspace?.jobs || [])
+const core = computed(() => {
+  const active = props.workspace?.project?.activeStoryDocumentId
+  return docs.value.find(d => d.id === active) || docs.value.find(d => d.documentType === 'CORE') || null
+})
+const coreDocuments = computed(() => docs.value.filter(d => d.documentType === 'CORE').sort((a, b) => (a.version || 0) - (b.version || 0)))
+const activeCoreId = computed(() => core.value?.id || props.workspace?.project?.activeStoryDocumentId || '')
+const outlineDocuments = computed(() => docs.value.filter(d => d.documentType === 'OUTLINE_BATCH' && (!activeCoreId.value || d.coreId === activeCoreId.value)).sort((a, b) => (a.batchNo || 0) - (b.batchNo || 0)))
+const scriptDocuments = computed(() => docs.value.filter(d => d.documentType === 'EPISODE_SCRIPT' && (!activeCoreId.value || d.coreId === activeCoreId.value)).sort((a, b) => (a.episodeNo || 0) - (b.episodeNo || 0)))
+const outlines = computed(() => showHistory.value ? outlineDocuments.value : outlineDocuments.value.filter(d => !d.stale))
+const scripts = computed(() => showHistory.value ? scriptDocuments.value : scriptDocuments.value.filter(d => !d.stale))
+const currentList = computed(() => stage.value === 'CORE' ? (showHistory.value ? coreDocuments.value : coreDocuments.value.filter(d => !d.stale && (!core.value || d.id === core.value.id))) : stage.value === 'OUTLINE_BATCH' ? outlines.value : scripts.value)
+const selected = computed(() => currentList.value.find(d => d.id === selectedId.value) || currentList.value[0] || null)
+const selectedJob = computed(() => selected.value?.generationJobId ? jobs.value.find(j => j.id === selected.value.generationJobId) : null)
+const statusText = s => ({ GENERATING: '生成中', REVIEW: '待确认', CONFIRMED: '已确认', FAILED: '失败', STALE: '需要更新', WAITING: '等待生成' }[s] || s || '未知')
+const statusClass = s => ({ GENERATING: 'busy', REVIEW: 'review', CONFIRMED: 'good', FAILED: 'failed', STALE: 'stale', WAITING: 'waiting' }[s] || 'waiting')
+const documentStatusText = doc => { if (doc.stale) return '需要更新'; if (doc.reviewStatus !== 'GENERATING') return statusText(doc.reviewStatus); const job = doc.generationJobId ? jobs.value.find(j => j.id === doc.generationJobId) : null; return job?.status === 'QUEUED' ? '排队中' : job?.status === 'SUCCESS' ? '待确认' : '生成中' }
+const documentStatusClass = doc => doc.stale ? 'stale' : documentStatusText(doc) === '待确认' ? 'review' : statusClass(doc.reviewStatus)
+const jobTiming = job => { if (job?.status === 'SUCCESS') return '生成已完成'; if (['FAILED', 'CANCELLED'].includes(job?.status)) return '已停止'; const stamp = job?.startedAt || job?.createdAt; if (!stamp) return ''; const minutes = Math.max(0, Math.floor((Date.now() - new Date(stamp).getTime()) / 60000)); return minutes ? `${job?.status === 'QUEUED' ? '已排队' : '已执行'} ${minutes} 分钟` : '刚刚开始' }
+const jobStatusText = s => ({ QUEUED: '排队中', RUNNING: '处理中', SUCCESS: '已完成', FAILED: '失败', CANCELLED: '已取消', RETRY_WAIT: '等待重试' }[s] || s || '未知')
+const clone = value => value == null ? {} : JSON.parse(JSON.stringify(value))
+const syncDraft = async () => { syncing.value = true; draft.value = selected.value ? clone(selected.value.content) : null; draftRevision.value = selected.value?.revision ?? null; draftDocumentId.value = selected.value?.id || null; dirty.value = false; await nextTick(); syncing.value = false }
+watch(draft, () => { if (!syncing.value) dirty.value = true }, { deep: true })
+watch([() => selected.value?.id, stage], () => { if (!dirty.value) syncDraft() }, { immediate: true })
+watch(currentList, () => { if (dirty.value) return; if (!currentList.value.some(d => d.id === selectedId.value)) selectedId.value = currentList.value[0]?.id || ''; syncDraft() })
+watch(() => props.project?.id, () => { if (dirty.value || saving.value) return; dirty.value = false; selectedId.value = ''; draft.value = null; draftDocumentId.value = null })
+
+const textFields = {
+  title: '标题', logline: '一句话梗概', worldRules: '世界规则', seasonArc: '整季主线', characterArcs: '人物弧光', foreshadowingRules: '伏笔规则', continuityRules: '连续性规则',
+  summary: '内容摘要', script: '剧本正文', startState: '开场状态', endState: '结尾状态'
+}
+const editableTextFields = computed(() => Object.fromEntries(Object.entries(textFields).filter(([key]) => draft.value && key in draft.value)))
+const coreNestedLabels = { identityTraits: '身份特征', locationBible: '场景设定', propBible: '道具设定' }
+const updateArrayItem = (key, index, patch) => { const next = clone(draft.value); next[key] = [...(next[key] || [])]; next[key][index] = { ...next[key][index], ...patch }; draft.value = next }
+const addItem = key => { const next = clone(draft.value); next[key] = [...(next[key] || []), key === 'characters' ? { characterKey: `character-${Date.now()}`, name: '', description: '', identityTraits: { age: '', face: '', hair: '', body: '', voiceDialect: '' }, looks: [{ lookKey: `look-${Date.now()}`, name: '', description: '' }] } : key === 'locations' ? { locationKey: `location-${Date.now()}`, name: '', description: '', locationBible: { layout: '', spatialAnchors: '', lighting: '' } } : { propKey: `prop-${Date.now()}`, name: '', description: '', state: '', propBible: { appearance: '', scale: '', ownership: '' } }]; draft.value = next }
+const removeItem = (key, index) => { const next = clone(draft.value); next[key].splice(index, 1); draft.value = next }
+const updateEpisode = (index, patch) => { const next = clone(draft.value); next.episodes[index] = { ...next.episodes[index], ...patch }; draft.value = next }
+const referenceOptions = computed(() => ({ characters: core.value?.content?.characters || [], locations: core.value?.content?.locations || [], props: core.value?.content?.props || [] }))
+const toggleEpisodeReference = (index, key, value, event) => { const current = draft.value?.episodes?.[index]?.[key] || []; updateEpisode(index, { [key]: event.target.checked ? [...current, value] : current.filter(item => item !== value) }) }
+const toggleScriptReference = (key, value, event) => { const current = draft.value?.[key] || []; updateScript(key, event.target.checked ? [...current, value] : current.filter(item => item !== value)) }
+const addEpisode = () => { const next = clone(draft.value); next.episodes = [...(next.episodes || []), { episodeNo: (next.episodes?.length || 0) + 1, title: '', summary: '', startState: '', endState: '', characterKeys: [], locationKeys: [], propKeys: [], scenePlan: [{ name: '', description: '', duration: 0 }] }]; draft.value = next }
+const removeEpisode = index => { const next = clone(draft.value); next.episodes.splice(index, 1); draft.value = next }
+const discard = () => syncDraft()
+const updateScript = (key, value) => { draft.value = { ...draft.value, [key]: value } }
+const updateScriptReferences = value => { draft.value = { ...draft.value, characterKeys: value.characterKeys || [], locationKeys: value.locationKeys || [], propKeys: value.propKeys || [] } }
+const createCore = async () => { if (!props.project?.id) return; await request(`/projects/${props.project.id}/core`, 'POST', {}) }
+const request = async (path, method, body) => { saving.value = true; try { const response = await fetch(`/api/story-development${path}`, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.message || '操作失败'); dirty.value = false; emit('message', method === 'PUT' ? '草稿已保存' : '操作已提交'); emit('refresh'); return data } catch (error) { emit('message', error.message, true); return null } finally { saving.value = false } }
+const save = async () => { if (!selected.value || selected.value.stale || !dirty.value || !draftDocumentId.value) return; const data = await request(`/documents/${draftDocumentId.value}`, 'PUT', { revision: draftRevision.value, content: draft.value }); const newId = data?.id || data?.document?.id; if (newId) { selectedId.value = newId; draftDocumentId.value = newId } }
+const confirm = () => { if (!selected.value || selected.value.stale || dirty.value) { emit('message', dirty.value ? '请先保存草稿，再确认继续' : '旧版内容请先切换到当前版本', true); return } return request(`/documents/${selected.value.id}/confirm`, 'POST', { revision: draftRevision.value, ...(stage.value === 'CORE' ? { batchSize: Number(batchSize.value) } : {}) }) }
+const retry = () => { if (!selected.value || selected.value.reviewStatus !== 'FAILED' || selectedJob.value?.submissionUncertain) return; return request(`/documents/${selected.value.id}/retry`, 'POST', {}) }
+const selectDocument = id => { if (dirty.value) { emit('message', '请先保存当前草稿，再切换文档', true); return }; selectedId.value = id }
+const selectStage = value => { if (dirty.value) { emit('message', '请先保存当前草稿，再切换阶段', true); return }; stage.value = value; selectedId.value = '' }
+const confirmedCount = list => list.filter(d => d.reviewStatus === 'CONFIRMED').length
+const totalBatches = computed(() => { const count = core.value?.projectSnapshot?.episodeCount || core.value?.content?.projectSnapshot?.episodeCount || props.project?.episodeCount || 0; const size = core.value?.batchSize || batchSize.value || 5; return count ? Math.ceil(count / size) : outlines.value.length })
+const totalEpisodes = computed(() => core.value?.projectSnapshot?.episodeCount || core.value?.content?.projectSnapshot?.episodeCount || props.project?.episodeCount || scripts.value.length)
+</script>
+
+<template>
+  <main class="story-review workspace">
+    <section class="sr-head">
+      <div><span class="eyebrow">故事开发</span><h2>创作审查台</h2><p>核心、分批集纲、单集剧本分阶段确认；已确认内容的修改会创建新版本，未确认内容只更新草稿修订。</p></div>
+      <div class="sr-legend"><span class="sr-state review">待确认</span><span class="sr-state good">已确认</span><span class="sr-state failed">失败</span><span class="sr-state stale">需要更新</span></div>
+    </section>
+    <section class="sr-steps">
+      <button :class="{ active: stage === 'CORE' }" @click="selectStage('CORE')"><b>01</b><span>整季核心</span><small>{{ core ? documentStatusText(core) : '尚未创建' }}</small></button>
+      <button :class="{ active: stage === 'OUTLINE_BATCH' }" @click="selectStage('OUTLINE_BATCH')"><b>02</b><span>分批集纲</span><small>{{ outlines.length || totalBatches ? `${confirmedCount(outlines)}/${totalBatches} 批已确认` : '等待核心确认' }}</small></button>
+      <button :class="{ active: stage === 'EPISODE_SCRIPT' }" @click="selectStage('EPISODE_SCRIPT')"><b>03</b><span>单集剧本</span><small>{{ scripts.length ? `${confirmedCount(scripts)}/${totalEpisodes} 集已确认` : '等待集纲确认' }}</small></button>
+    </section>
+    <section v-if="stage === 'CORE' && !core" class="sr-empty panel"><h3>创建故事核心</h3><p>系统会根据当前作品的名称、想法和集数生成整季核心，生成后可逐字段修改。</p><button class="primary" :disabled="saving || !project?.id" @click="createCore">根据作品设定生成核心</button></section>
+    <section v-else class="sr-layout">
+      <aside class="sr-list panel"><div class="sr-list-title"><h3>{{ stage === 'CORE' ? '核心版本' : stage === 'OUTLINE_BATCH' ? '集纲批次' : '剧本集数' }}</h3><span>{{ currentList.length }}</span></div><label class="sr-history"><input type="checkbox" v-model="showHistory" /> 查看旧版</label><button v-for="doc in currentList" :key="doc.id" class="sr-doc" :class="{ selected: selected?.id === doc.id }" @click="selectDocument(doc.id)"><div><b v-if="stage === 'CORE'">核心 v{{ doc.version || 1 }}</b><b v-else-if="stage === 'OUTLINE_BATCH'">第 {{ doc.batchNo }} 批 · {{ doc.startEpisode }}—{{ doc.endEpisode }} 集</b><b v-else>第 {{ doc.episodeNo }} 集 · {{ doc.content?.title || '未命名' }}</b><span class="sr-state" :class="documentStatusClass(doc)">{{ documentStatusText(doc) }}</span></div><small>修订 {{ doc.revision || 0 }} · {{ doc.stale ? '旧版请回当前版本' : '当前版本' }}<template v-if="doc.generationJobId"> · {{ documentStatusText(doc) }}</template></small></button><div v-if="!currentList.length" class="sr-muted">暂时没有可审查文档</div></aside>
+      <section v-if="selected" class="sr-editor panel">
+        <header class="sr-editor-head"><div><span class="eyebrow">{{ stage === 'CORE' ? '整季核心' : stage === 'OUTLINE_BATCH' ? `第 ${selected.batchNo} 批` : `第 ${selected.episodeNo} 集` }}</span><h3>{{ stage === 'CORE' ? (draft?.title || '故事核心') : stage === 'OUTLINE_BATCH' ? `第 ${selected.batchNo} 批集纲` : (draft?.title || `第 ${selected.episodeNo} 集剧本`) }}</h3><details class="sr-meta"><summary>查看追踪信息</summary><span>文档 ID：{{ selected.id }} · 核心 ID：{{ selected.coreId || selected.id }} · 生成任务：{{ selected.generationJobId || '—' }} · 版本 v{{ selected.version || 1 }} · 修订 {{ selected.revision || 0 }}</span></details></div><span class="sr-state large" :class="documentStatusClass(selected)">{{ documentStatusText(selected) }}</span></header>
+        <fieldset :disabled="selected.stale || selected.reviewStatus === 'GENERATING'" class="sr-fieldset"><div v-if="selected.stale" class="sr-alert">这是旧版内容，请回当前版本查看；旧版不可保存或确认。</div><div v-if="selectedJob?.failureReason" class="sr-alert danger">{{ selectedJob.failureReason }}<span v-if="selectedJob.submissionUncertain"> · 提交状态不确定，请先核对服务商记录。</span></div><div v-if="selectedJob" class="sr-trace">任务状态：{{ jobStatusText(selectedJob.status) }} · {{ jobTiming(selectedJob) }}<template v-if="selectedJob.providerRequestId || selectedJob.providerTaskId"> · 服务商记录：{{ selectedJob.providerRequestId || '—' }} · {{ selectedJob.providerTaskId || '—' }}</template></div><div v-if="selected.validation" class="sr-validation">校验：{{ selected.validation.message || selected.validation.summary || '已执行' }} · {{ selected.validation.passed === true ? '通过' : selected.validation.passed === false ? '未通过' : (selected.validation.status || '待查看') }}</div>
+        <div v-if="stage === 'CORE' && draft" class="sr-fields"><label v-for="(label, key) in editableTextFields" :key="key">{{ label }}<textarea v-model="draft[key]" rows="3" /></label><div class="sr-array"><div class="sr-array-head"><h4>人物</h4><button class="tiny" @click="addItem('characters')">添加人物</button></div><article v-for="(item, index) in draft.characters || []" :key="index" class="sr-card"><div class="sr-grid-3"><label>人物标识<input :value="item.characterKey" readonly @input="updateArrayItem('characters', index, { characterKey: $event.target.value })" /></label><label>姓名<input :value="item.name" @input="updateArrayItem('characters', index, { name: $event.target.value })" /></label><label>简介<input :value="item.description" @input="updateArrayItem('characters', index, { description: $event.target.value })" /></label></div><label>身份特征<RecursiveFields :model-value="item.identityTraits || {}" :label-map="coreNestedLabels" @update:model-value="updateArrayItem('characters', index, { identityTraits: $event })" /></label><label>定妆<RecursiveFields :model-value="{ looks: item.looks || [] }" @update:model-value="updateArrayItem('characters', index, { looks: $event.looks || [] })" /></label><button class="tiny danger-btn" @click="removeItem('characters', index)">删除人物</button></article></div><div v-for="key in ['locations', 'props']" :key="key" class="sr-array"><div class="sr-array-head"><h4>{{ key === 'locations' ? '场景' : '道具' }}</h4><button class="tiny" @click="addItem(key)">添加{{ key === 'locations' ? '场景' : '道具' }}</button></div><article v-for="(item, index) in draft[key] || []" :key="index" class="sr-card"><div class="sr-grid-3"><label>标识<input :value="item[`${key === 'locations' ? 'location' : 'prop'}Key`]" readonly @input="updateArrayItem(key, index, { [key === 'locations' ? 'locationKey' : 'propKey']: $event.target.value })" /></label><label>名称<input :value="item.name" @input="updateArrayItem(key, index, { name: $event.target.value })" /></label><label v-if="key === 'props'">状态<input :value="item.state" @input="updateArrayItem(key, index, { state: $event.target.value })" /></label></div><label>描述<textarea :value="item.description" rows="2" @input="updateArrayItem(key, index, { description: $event.target.value })" /></label><label>{{ key === 'locations' ? '场景设定' : '道具设定' }}<RecursiveFields :model-value="item[key === 'locations' ? 'locationBible' : 'propBible'] || {}" @update:model-value="updateArrayItem(key, index, { [key === 'locations' ? 'locationBible' : 'propBible']: $event })" /></label><button class="tiny danger-btn" @click="removeItem(key, index)">删除{{ key === 'locations' ? '场景' : '道具' }}</button></article></div></div>
+        <div v-else-if="stage === 'OUTLINE_BATCH'" class="sr-fields"><label v-for="(label, key) in editableTextFields" :key="key">{{ label }}<textarea v-model="draft[key]" rows="3" /></label><div class="sr-array"><div class="sr-array-head"><h4>本批集纲（{{ draft.episodes?.length || 0 }} 集）</h4><button class="tiny" @click="addEpisode">添加一集</button></div><article v-for="(episode, index) in draft.episodes || []" :key="index" class="sr-card"><div class="sr-grid-3"><label>集数<input type="number" :value="episode.episodeNo" @input="updateEpisode(index, { episodeNo: Number($event.target.value) })" /></label><label>标题<input :value="episode.title" @input="updateEpisode(index, { title: $event.target.value })" /></label><label>摘要<input :value="episode.summary" @input="updateEpisode(index, { summary: $event.target.value })" /></label></div><div class="sr-grid-2"><label>开场状态<textarea :value="episode.startState" rows="2" @input="updateEpisode(index, { startState: $event.target.value })" /></label><label>结尾状态<textarea :value="episode.endState" rows="2" @input="updateEpisode(index, { endState: $event.target.value })" /></label></div><div class="sr-reference-groups"><div v-for="(group, groupKey) in referenceOptions" :key="groupKey"><b>{{ groupKey === 'characters' ? '人物' : groupKey === 'locations' ? '场景' : '道具' }}</b><label v-for="option in group" :key="option[`${groupKey === 'characters' ? 'character' : groupKey === 'locations' ? 'location' : 'prop'}Key`]" class="sr-check"><input type="checkbox" :checked="(episode[groupKey === 'characters' ? 'characterKeys' : groupKey === 'locations' ? 'locationKeys' : 'propKeys'] || []).includes(option[`${groupKey === 'characters' ? 'character' : groupKey === 'locations' ? 'location' : 'prop'}Key`])" @change="toggleEpisodeReference(index, groupKey === 'characters' ? 'characterKeys' : groupKey === 'locations' ? 'locationKeys' : 'propKeys', option[`${groupKey === 'characters' ? 'character' : groupKey === 'locations' ? 'location' : 'prop'}Key`], $event)" />{{ option.name }}</label></div></div><label>场景计划<RecursiveFields :model-value="{ scenePlan: episode.scenePlan || [] }" @update:model-value="updateEpisode(index, { scenePlan: $event.scenePlan || [] })" /></label><button class="tiny danger-btn" @click="removeEpisode(index)">删除本集</button></article></div></div>
+        <div v-else-if="stage === 'EPISODE_SCRIPT'" class="sr-fields"><label v-for="(label, key) in editableTextFields" :key="key">{{ label }}<textarea v-model="draft[key]" :rows="key === 'script' ? 12 : 3" /></label><div class="sr-reference-groups"><div v-for="(group, groupKey) in referenceOptions" :key="groupKey"><b>{{ groupKey === 'characters' ? '人物' : groupKey === 'locations' ? '场景' : '道具' }}</b><label v-for="option in group" :key="option[`${groupKey === 'characters' ? 'character' : groupKey === 'locations' ? 'location' : 'prop'}Key`]" class="sr-check"><input type="checkbox" :checked="(draft[groupKey === 'characters' ? 'characterKeys' : groupKey === 'locations' ? 'locationKeys' : 'propKeys'] || []).includes(option[`${groupKey === 'characters' ? 'character' : groupKey === 'locations' ? 'location' : 'prop'}Key`])" @change="toggleScriptReference(groupKey === 'characters' ? 'characterKeys' : groupKey === 'locations' ? 'locationKeys' : 'propKeys', option[`${groupKey === 'characters' ? 'character' : groupKey === 'locations' ? 'location' : 'prop'}Key`], $event)" />{{ option.name }}</label></div></div><label v-if="draft.scenes">场景列表<RecursiveFields :model-value="{ scenes: draft.scenes }" @update:model-value="updateScript('scenes', $event.scenes || [])" /></label></div>
+        </fieldset><footer class="sr-actions"><button v-if="dirty" :disabled="saving" @click="discard">放弃修改</button><button :disabled="saving || selected.stale || selected.reviewStatus === 'GENERATING'" @click="save">保存草稿</button><select v-if="stage === 'CORE'" v-model="batchSize" title="批次大小"><option :value="5">下一批 5 集</option><option :value="10">下一批 10 集</option></select><button class="primary" :disabled="saving || selected.reviewStatus !== 'REVIEW' || selected.stale || dirty" @click="confirm">确认并继续</button><button v-if="selected.reviewStatus === 'FAILED'" class="retry" :disabled="saving || selectedJob?.submissionUncertain || selected.stale" @click="retry">局部重试</button></footer>
+      </section><section v-else class="sr-empty panel"><h3>选择一份文档</h3><p>左侧列表会显示当前阶段的文档。</p></section>
+    </section>
+  </main>
+</template>
+
+
+
+
+
+
+
+

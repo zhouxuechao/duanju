@@ -1,0 +1,15 @@
+{
+  "projectId": "project-example",
+  "projectVersion": 1,
+  "payload": {
+    "shot": {
+      "example": true
+    },
+    "keyframe": {
+      "example": true
+    }
+  },
+  "trace": {
+    "requestKey": "example-16-video-strategy"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "projectId": "project-example",
+  "projectVersion": 1,
+  "payload": {
+    "repairPlan": {
+      "version": 1
+    },
+    "revisedShot": {
+      "version": 1
+    }
+  },
+  "status": "READY",
+  "warnings": [],
+  "trace": {
+    "skill": "20-video-repair",
+    "skillVersion": "1.0.0"
+  }
+}

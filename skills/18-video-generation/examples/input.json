@@ -1,0 +1,15 @@
+{
+  "projectId": "project-example",
+  "projectVersion": 1,
+  "payload": {
+    "keyframe": {
+      "example": true
+    },
+    "prompt": {
+      "example": true
+    }
+  },
+  "trace": {
+    "requestKey": "example-18-video-generation"
+  }
+}

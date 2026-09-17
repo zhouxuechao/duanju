@@ -1,0 +1,15 @@
+{
+  "projectId": "project-example",
+  "projectVersion": 1,
+  "payload": {
+    "shot": {
+      "example": true
+    },
+    "sceneState": {
+      "example": true
+    }
+  },
+  "trace": {
+    "requestKey": "example-08-continuity-planning"
+  }
+}

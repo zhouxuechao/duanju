@@ -1,0 +1,15 @@
+{
+  "projectId": "project-example",
+  "projectVersion": 1,
+  "payload": {
+    "videoTake": {
+      "example": true
+    },
+    "expectedState": {
+      "example": true
+    }
+  },
+  "trace": {
+    "requestKey": "example-19-video-qc"
+  }
+}

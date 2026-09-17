@@ -1,0 +1,18 @@
+{
+  "projectId": "project-example",
+  "projectVersion": 1,
+  "payload": {
+    "strategy": {
+      "version": 1
+    },
+    "reasons": {
+      "version": 1
+    }
+  },
+  "status": "READY",
+  "warnings": [],
+  "trace": {
+    "skill": "16-video-strategy",
+    "skillVersion": "1.0.0"
+  }
+}

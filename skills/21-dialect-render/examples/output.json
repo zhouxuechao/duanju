@@ -1,0 +1,21 @@
+{
+  "projectId": "project-example",
+  "projectVersion": 1,
+  "payload": {
+    "dialectText": {
+      "version": 1
+    },
+    "speechText": {
+      "version": 1
+    },
+    "confidence": {
+      "version": 1
+    }
+  },
+  "status": "READY",
+  "warnings": [],
+  "trace": {
+    "skill": "21-dialect-render",
+    "skillVersion": "1.0.0"
+  }
+}
