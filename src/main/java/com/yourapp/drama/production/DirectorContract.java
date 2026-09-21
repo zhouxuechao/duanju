@@ -207,12 +207,12 @@ public final class DirectorContract {
             List<String> lookIds=new ArrayList<>();for(JsonNode look:assets.path("looks"))if(actorId.equals(text(look,"characterId")))lookIds.add(id(look));
             if(lookIds.isEmpty())invalid("input.assets.characters."+actorId+".lookId","拆镜前需要属于该人物的定妆版本");
             cp.set("lookId",values(lookIds));for(String field:List.of("position","lookDirection","pose","actionState"))cp.set(field,string());
-            cp.set("holding",values(withEmpty(keys(assets,"props"))));requireAll(character);charProperties.set(actorId,character);
+            cp.set("holding",values(withEmpty(keys(assets,"props"))).put("description","仅填写人物手中直接拿着的一个道具 ID；装在袋、盒、口袋等容器内的道具不算直接持有"));requireAll(character);charProperties.set(actorId,character);
         }
         p.set("characters",characters);
         ObjectNode props=object();ObjectNode pp=props.withObject("properties");
         for(String propId:keys(assets,"props")) {
-            ObjectNode prop=object();prop.withObject("properties").set("holder",values(withEmpty(keys(assets,"characters"))));
+            ObjectNode prop=object();prop.withObject("properties").set("holder",values(withEmpty(keys(assets,"characters"))).put("description","仅填写直接用手持有该道具的人物 ID；道具位于另一道具内部时必须为空，并在 position 写明容器"));
             prop.withObject("properties").set("position",string());prop.withObject("properties").set("state",string());requireAll(prop);pp.set(propId,prop);
         }
         p.set("props",props);requireAll(state);return state;
@@ -250,7 +250,52 @@ public final class DirectorContract {
                 ((ObjectNode)beat).put("emotionBefore",text(previousBeat,"emotionAfter"));
             previousBeat=beat;
         }
+        normalizePlanDurations(canonical.path("shotSkeletons"),duration(input));
+        normalizeUnplannedAxisCrossings(canonical.path("shotSkeletons"));
+        normalizeDirectHolding(canonical.path("sceneInitialState"));
         return canonical;
+    }
+
+    private void normalizePlanDurations(JsonNode shots,double targetSeconds){
+        if(!shots.isArray()||shots.isEmpty())return;
+        int count=shots.size(),target=(int)Math.round(targetSeconds*100),minimum=count*200,maximum=count*500;
+        if(target<minimum||target>maximum)return;
+        int[] allocated=new int[count];double[] weights=new double[count];Arrays.fill(allocated,200);
+        for(int i=0;i<count;i++)weights[i]=Math.max(.25,shots.path(i).path("duration").asDouble(3)-2);
+        int remaining=target-minimum;
+        while(remaining>0){
+            double totalWeight=0;for(int i=0;i<count;i++)if(allocated[i]<500)totalWeight+=weights[i];
+            if(totalWeight<=0)break;
+            int before=remaining;
+            for(int i=0;i<count&&remaining>0;i++)if(allocated[i]<500){
+                int grant=Math.min(500-allocated[i],(int)Math.floor(before*weights[i]/totalWeight));
+                grant=Math.min(grant,remaining);allocated[i]+=grant;remaining-=grant;
+            }
+            if(remaining==before){
+                int selected=-1;double best=-1;for(int i=0;i<count;i++)if(allocated[i]<500&&weights[i]>best){selected=i;best=weights[i];}
+                if(selected<0)break;allocated[selected]++;remaining--;
+            }
+        }
+        for(int i=0;i<count;i++)if(shots.path(i).isObject())((ObjectNode)shots.path(i)).put("duration",allocated[i]/100d);
+    }
+
+    private void normalizeUnplannedAxisCrossings(JsonNode shots){
+        JsonNode previous=null;
+        for(JsonNode shot:shots){
+            JsonNode blocking=shot.path("basicBlocking");
+            if(previous!=null&&blocking.isObject()){
+                String before=text(previous,"axisSide"),after=text(blocking,"axisSide");
+                boolean directCross=!before.equals(after)&&Set.of("A_SIDE","B_SIDE").contains(before)&&Set.of("A_SIDE","B_SIDE").contains(after);
+                if(directCross&&text(blocking,"axisChangeReason").isBlank())((ObjectNode)blocking).put("axisSide",before);
+            }
+            previous=blocking;
+        }
+    }
+
+    private void normalizeDirectHolding(JsonNode state){
+        if(!state.isObject()||!state.path("characters").isObject()||!state.path("props").isObject())return;
+        ObjectNode props=(ObjectNode)state.path("props");props.elements().forEachRemaining(prop->{if(prop.isObject())((ObjectNode)prop).put("holder","");});
+        state.path("characters").fields().forEachRemaining(character->{String propId=text(character.getValue(),"holding");JsonNode prop=props.path(propId);if(!propId.isBlank()&&prop.isObject())((ObjectNode)prop).put("holder",character.getKey());});
     }
 
     public void validatePlan(JsonNode output,JsonNode input,String requestId){
@@ -556,7 +601,10 @@ public final class DirectorContract {
         int target=Math.max(1,(int)Math.round(duration/average));
         int physicalMin=Math.max(1,(int)Math.ceil(duration/5d)),physicalMax=Math.max(physicalMin,(int)Math.floor(duration/2d));
         int min=Math.min(physicalMax,Math.max(physicalMin,(int)Math.ceil(target*.8)));
-        int max=Math.max(min,Math.min(physicalMax,(int)Math.ceil(target*1.25)));
+        // Average shot length is a pacing preference, not a hard coverage cap.
+        // Dense dialogue/reveal scenes may need extra reaction or insert shots;
+        // the exact-duration validator still prevents padding or overrun.
+        int max=Math.max(min,Math.min(physicalMax,Math.max((int)Math.ceil(target*1.25),target+4)));
         return new int[]{min,max};
     }
     private static double duration(JsonNode input){return input.path("sceneTargetDurationSeconds").asDouble(input.path("scene").path("duration").asDouble(1));}

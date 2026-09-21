@@ -1,0 +1,12 @@
+{
+  "provider": "VOLCENGINE_SEEDANCE",
+  "capturedContract": "2026-09",
+  "taskId": "cgt-replay-task-001",
+  "responseHeaders": { "x-request-id": "video-poll-request-001" },
+  "response": {
+    "id": "cgt-replay-task-001",
+    "status": "succeeded",
+    "updated_at": 1789977600,
+    "content": { "video_url": "https://media.example.invalid/replay/take.mp4" }
+  }
+}

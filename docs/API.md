@@ -33,6 +33,16 @@ GET /api/events?projectId={projectId}
 
 工作区中的人物、定妆、场景和道具由故事核心确认后自动建立。生产页面不要求填写服务商人物 ID、图片路径或手工素材绑定。
 
+作品的故事制式由三个独立对象决定：`storyProfile` 描述题材、故事发动机、受众与情绪；`episodeFormat` 描述每集时长、节拍模式与场景上限；`distributionProfile` 描述发行平台约束。它们会进入故事规则包指纹，不能靠 Java 题材分支临时改写。
+
+```json
+{
+  "storyProfile": {"settingGenre":"RURAL","storyType":"SUSPENSE_MYSTERY","audience":"GENERAL","tones":["悬疑"],"intensity":"HIGH"},
+  "episodeFormat": {"profileId":"MICRO_24S","family":"MICRO","targetDurationSec":24,"beatMode":"SINGLE_ROUND"},
+  "distributionProfile":"GENERAL"
+}
+```
+
 ## 分阶段故事开发
 
 所有故事生成都从新的故事核心开始：
@@ -42,6 +52,14 @@ POST /api/story-development/projects/{projectId}/core
 ```
 
 返回一个 `STORY_DOCUMENT` 草稿和对应任务。草稿生成成功只表示模型输出已保存，仍需人工审查。
+
+系统先保存 Premise Review。不可行时文档停在 `PREMISE_REVIEW_REQUIRED`，不会创建 CORE 生成任务。处理入口：
+
+```http
+POST /api/story-development/documents/{documentId}/premise
+```
+
+`action` 为 `EDIT_IDEA`、`ACCEPT_RECOMMENDATIONS` 或 `FORCE_CONTINUE`。强制继续必须提供 `overrideBy` 与非空 `overrideReason`，并永久写入审计字段。
 
 编辑草稿时必须带当前版本号，并提交完整的 `content`：
 
@@ -186,3 +204,34 @@ POST /api/jobs/{jobId}/cancel
 ```
 
 服务商已接单或提交状态不确定时，系统不会自动重复请求。生产接口不会接受密钥、服务商素材 ID 或任意模型覆盖参数。
+
+提交状态不确定时使用人工对账，不能直接重试：
+
+```http
+POST /api/jobs/{jobId}/reconcile
+```
+
+`decision` 支持 `CONFIRMED_SUBMITTED`、`CONFIRMED_NOT_SUBMITTED`、`UNRESOLVED`；已提交时还需提供服务商任务 ID 和核对证据。
+
+## 全链路运行、预览与终片
+
+```http
+GET  /api/projects/{projectId}/preflight?mode=MOCK
+POST /api/projects/{projectId}/pipeline-runs
+GET  /api/pipeline-runs/{runId}
+POST /api/pipeline-runs/{runId}/resume
+```
+
+PipelineRun 按阶段保存 checkpoint、输入/输出指纹、成本和失败类别。`resume` 从首个未完成阶段继续，已经成功并锁定的生成物不会重新提交。
+
+时间线必须先生成 PREVIEW、完成当前 `contentRevision` 的时间线质检并锁定，之后才能生成 FINAL。最终文件通过技术质检后，还必须人工提交：
+
+```http
+POST /api/timelines/{timelineId}/final-review
+```
+
+`decision` 支持 `PASS`、`REGENERATE`、`MANUAL_FIX`，并记录故事准确、视觉、动作、声音、音画同步、字幕与节奏评分。
+
+## Accepted Deviation
+
+视频审查发现实拍末态与计划末态不一致时，请在审查请求中提交真实 `observedState`。选择重生成时使用 `deviationDecision=REGENERATE` 且 `passed=false`；人工确认将偏差升级为后续连续性事实时使用 `deviationDecision=ACCEPT_CANONICAL`。自动质检无权接受偏差。未处理偏差会阻止视频锁定和时间线质检。

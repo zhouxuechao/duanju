@@ -44,7 +44,9 @@
 - [当前验收记录](docs/ACCEPTANCE.md)
 - [原始开发清单](docs/spec/09_MILESTONES.md)
 
-生产技能包位于 `skills/`。运行 `python scripts/generate_skill_pack.py` 可按清单确定性重建，运行 `python scripts/validate_skill_pack.py` 校验四个 Agent、27 个 Skill 及其说明、提示词、契约、示例和用例。
+生产技能包位于 `skills/`。`skills/manifest.json` 是技能清单，运行 `python scripts/generate_skill_pack.py` 只校验正式 Prompt/Schema 并生成 Catalog，不会覆盖人工维护的 Prompt；运行 `python scripts/validate_skill_pack.py` 校验技能资产。Premise、Story Quality 和生产阶段运行时 Prompt 会打包进最终 JAR。
+
+本地分层验收入口：`./scripts/e2e.ps1 -Mode Mock` 运行免费 Golden Flow，`-Mode Media` 验证真实 PNG/MP4/WAV 与 FFmpeg，`-Mode Canary -EnvFile <本地配置>` 才会产生真实服务商调用。前端使用 `npm test` 验证生产操作门禁，并使用 `npm run build` 验证发布包。
 
 包结构：`domain` 领域契约，`persistence` 存储，`workflow` 工作流，`job` 持久任务与恢复，`production` 导演/连续性/方言/时间线规则，`model` 模型接口，`provider.volcengine` 火山适配器，`storage` 归档，`api` HTTP 与 SSE。
 

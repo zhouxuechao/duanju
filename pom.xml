@@ -24,7 +24,7 @@
     <resources>
       <resource><directory>src/main/resources</directory></resource>
       <resource><directory>frontend/dist</directory><targetPath>static</targetPath><filtering>false</filtering></resource>
-      <resource><directory>skills</directory><targetPath>development-skills</targetPath><includes><include>00-premise-analysis/prompt.md</include><include>01-story-planning/prompt.md</include><include>03-episode-planning/prompt.md</include><include>04-script-writing/prompt.md</include><include>05-story-quality/prompt.md</include><include>06-shot-planning/prompt.md</include><include>09-character-design/prompt.md</include><include>10-location-design/prompt.md</include><include>11-prop-design/prompt.md</include></includes></resource>
+      <resource><directory>skills</directory><targetPath>development-skills</targetPath><includes><include>00-premise-analysis/prompt.md</include><include>01-story-planning/prompt.md</include><include>03-episode-planning/prompt.md</include><include>04-script-writing/prompt.md</include><include>05-story-quality/prompt.md</include><include>06-shot-planning/prompt.md</include><include>09-character-design/prompt.md</include><include>10-location-design/prompt.md</include><include>11-prop-design/prompt.md</include><include>vendor/short-drama-factory/UPSTREAM.md</include></includes></resource>
     </resources>
     <plugins>
     <plugin><groupId>org.springframework.boot</groupId><artifactId>spring-boot-maven-plugin</artifactId></plugin>

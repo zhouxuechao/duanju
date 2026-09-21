@@ -1,0 +1,15 @@
+{
+  "provider": "VOLCENGINE_SEEDREAM",
+  "capturedContract": "2026-09",
+  "expectedRequest": {
+    "model": "seedream-replay",
+    "response_format": "url",
+    "stream": false,
+    "watermark": false
+  },
+  "responseHeaders": { "x-request-id": "img-replay-request-001" },
+  "response": {
+    "created": 1789977600,
+    "data": [{ "url": "https://media.example.invalid/replay/keyframe.png" }]
+  }
+}

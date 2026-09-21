@@ -30,12 +30,12 @@ drama:
       api-key: ${ARK_API_KEY:}
       base-url: ${ARK_BASE_URL:https://ark.cn-beijing.volces.com/api/v3}
       text-model: ${ARK_TEXT_MODEL:}
-      director-model: ${ARK_DIRECTOR_MODEL:${ARK_VLM_MODEL:}}
+      director-model: ${ARK_DIRECTOR_MODEL:${ARK_TEXT_MODEL:}}
       image-model: ${ARK_IMAGE_MODEL:}
       video-model: ${ARK_VIDEO_MODEL:}
       vlm-model: ${ARK_VLM_MODEL:}
       text-api-style: ${ARK_TEXT_API_STYLE:responses}
-      director-api-style: ${ARK_DIRECTOR_API_STYLE:responses}
+      director-api-style: ${ARK_DIRECTOR_API_STYLE:${ARK_TEXT_API_STYLE:responses}}
       request-timeout: ${ARK_REQUEST_TIMEOUT:10m}
       max-output-tokens: ${ARK_MAX_OUTPUT_TOKENS:16384}
       video-supported-durations: ${ARK_VIDEO_SUPPORTED_DURATIONS:4,8,12}

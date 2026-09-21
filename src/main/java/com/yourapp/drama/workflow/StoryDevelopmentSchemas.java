@@ -41,9 +41,11 @@ public final class StoryDevelopmentSchemas {
     public static ObjectNode premise() {
         ObjectNode potential = object("conflictDepth", text(), "characterDepth", text(), "relationshipDepth", text(),
                 "reversalPotential", text(), "informationDepth", text());
-        return object("viable", bool(), "coreConflict", text(), "protagonistGoal", text(), "opposition", text(),
-                "audiencePromise", text(), "whyNotResolveImmediately", text(), "expansionPotential", potential,
-                "risks", strings(0, 12), "questionsForCore", strings(1, 12));
+        Map<String, JsonNode> required = new LinkedHashMap<>();
+        required.put("viable", bool()); required.put("coreConflict", text()); required.put("protagonistGoal", text());
+        required.put("opposition", text()); required.put("audiencePromise", text()); required.put("whyNotResolveImmediately", text());
+        required.put("expansionPotential", potential); required.put("risks", strings(0, 12)); required.put("questionsForCore", strings(1, 12));
+        return object(required, Map.of("capacityRisk", text(), "weaknesses", strings(0, 12), "recommendedAdjustments", strings(0, 12)));
     }
 
     private static ObjectNode unitArc() {

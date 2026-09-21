@@ -29,7 +29,7 @@ if($Mode -in @('Media','Canary')){
   $env:FFMPEG_PATH=$projectFfmpeg
   $env:FFPROBE_PATH=$projectFfprobe
 }
-$tests=if($Mode -eq 'Mock'){'BenchmarkOneIntegrationTest,ProductionAcceptanceTest,LongStoryHistoryTest,PipelinePreflightIntegrationTest'}elseif($Mode -eq 'Media'){'PostProductionIntegrationTest,MediaProbeServiceTest,ProductionRulesTest,FinalQualityServiceTest'}else{'LiveProviderCanaryIT'}
+$tests=if($Mode -eq 'Mock'){'BenchmarkOneIntegrationTest,ProductionAcceptanceTest,LongStoryHistoryTest,PipelinePreflightIntegrationTest,EngineeringGovernanceIntegrationTest,ProviderReconciliationIntegrationTest,ProviderReplayContractTest'}elseif($Mode -eq 'Media'){'PostProductionIntegrationTest,MediaProbeServiceTest,ProductionRulesTest,FinalQualityServiceTest'}else{'LiveProviderCanaryIT'}
 Write-Host "E2E $Mode / $Scenario" -ForegroundColor Cyan
 Push-Location $projectRoot
 try { & $maven -q "-Dtest=$tests" test; if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}; Push-Location frontend; try { npm run build; if($LASTEXITCODE -ne 0){exit $LASTEXITCODE} } finally { Pop-Location } }

@@ -1,0 +1,12 @@
+{
+  "provider": "VOLCENGINE_SEEDANCE",
+  "capturedContract": "2026-09",
+  "expectedRequest": {
+    "model": "seedance-replay",
+    "duration": 4,
+    "ratio": "9:16"
+  },
+  "expectedContentRoles": ["text", "reference_image"],
+  "responseHeaders": { "x-request-id": "video-submit-request-001" },
+  "response": { "id": "cgt-replay-task-001", "status": "queued" }
+}

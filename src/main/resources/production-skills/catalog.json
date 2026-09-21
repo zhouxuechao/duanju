@@ -1,5 +1,5 @@
 {
-  "version": "1.0.0",
+  "version": "2.0.0",
   "agents": [
     "StoryAgent",
     "DirectorAgent",
@@ -8,9 +8,36 @@
   ],
   "skills": [
     {
-      "id": "01-story-planning",
-      "agent": "StoryAgent",
+      "skillId": "00-premise-analysis",
       "version": "1.0.0",
+      "phase": "PREMISE",
+      "runtime": true,
+      "promptPath": "skills/00-premise-analysis/prompt.md",
+      "schemaPath": "",
+      "rulePackDependencies": [
+        "skills/vendor/short-drama-factory"
+      ],
+      "source": "HUMAN_MAINTAINED",
+      "fingerprint": "371b9dcccfb170e9f5594663fbbe358037996eb4e1d50d3c9ccfb909a4588473",
+      "agent": "StoryAgent",
+      "goal": "在高成本故事生成前验证创意容量与风险",
+      "inputs": [],
+      "outputs": [],
+      "hardRules": []
+    },
+    {
+      "skillId": "01-story-planning",
+      "version": "1.0.0",
+      "phase": "CORE",
+      "runtime": true,
+      "promptPath": "skills/01-story-planning/prompt.md",
+      "schemaPath": "skills/01-story-planning/output-schema.json",
+      "rulePackDependencies": [
+        "skills/vendor/short-drama-factory"
+      ],
+      "source": "HUMAN_MAINTAINED",
+      "fingerprint": "3199546e60dd6c92716d185a42aefefc0d01a57ce795021607cf908cb45339e8",
+      "agent": "StoryAgent",
       "goal": "把创意整理为可版本化的故事圣经",
       "inputs": [
         "idea"
@@ -23,9 +50,16 @@
       ]
     },
     {
-      "id": "02-character-planning",
-      "agent": "StoryAgent",
+      "skillId": "02-character-planning",
       "version": "1.0.0",
+      "phase": "CORE",
+      "runtime": false,
+      "promptPath": "skills/02-character-planning/prompt.md",
+      "schemaPath": "skills/02-character-planning/output-schema.json",
+      "rulePackDependencies": [],
+      "source": "HUMAN_MAINTAINED",
+      "fingerprint": "122d872351e52276de6b8c0a2fcdcbd219e08929b59e2f73b8ffab8c74aa354e",
+      "agent": "StoryAgent",
       "goal": "建立角色身份、关系和长期状态",
       "inputs": [
         "storyBible"
@@ -38,9 +72,18 @@
       ]
     },
     {
-      "id": "03-episode-planning",
-      "agent": "StoryAgent",
+      "skillId": "03-episode-planning",
       "version": "1.0.0",
+      "phase": "OUTLINE",
+      "runtime": true,
+      "promptPath": "skills/03-episode-planning/prompt.md",
+      "schemaPath": "skills/03-episode-planning/output-schema.json",
+      "rulePackDependencies": [
+        "skills/vendor/short-drama-factory"
+      ],
+      "source": "HUMAN_MAINTAINED",
+      "fingerprint": "792ec960fda201bf4c4079b1edd06bf5f054e9b869c36e5c1b4f0b20dd2a3e7d",
+      "agent": "StoryAgent",
       "goal": "把故事拆为有钩子和承接的集纲",
       "inputs": [
         "storyBible",
@@ -54,9 +97,18 @@
       ]
     },
     {
-      "id": "04-script-writing",
-      "agent": "StoryAgent",
+      "skillId": "04-script-writing",
       "version": "1.0.0",
+      "phase": "SCRIPT",
+      "runtime": true,
+      "promptPath": "skills/04-script-writing/prompt.md",
+      "schemaPath": "skills/04-script-writing/output-schema.json",
+      "rulePackDependencies": [
+        "skills/vendor/short-drama-factory"
+      ],
+      "source": "HUMAN_MAINTAINED",
+      "fingerprint": "5fd3db36856e607147b073f86005cd0aec5c53fc6058e2ad3e99883b04e195e3",
+      "agent": "StoryAgent",
       "goal": "生成场景化剧本和三轨对白底稿",
       "inputs": [
         "episodePlan"
@@ -70,9 +122,16 @@
       ]
     },
     {
-      "id": "05-scene-extraction",
-      "agent": "DirectorAgent",
+      "skillId": "05-scene-extraction",
       "version": "1.0.0",
+      "phase": "DIRECTOR",
+      "runtime": false,
+      "promptPath": "skills/05-scene-extraction/prompt.md",
+      "schemaPath": "skills/05-scene-extraction/output-schema.json",
+      "rulePackDependencies": [],
+      "source": "HUMAN_MAINTAINED",
+      "fingerprint": "a5c15d0dda59eb8bfc9aa1b01a7e5b68bec6573f08c70b8f671b766bcbd6e4f4",
+      "agent": "DirectorAgent",
       "goal": "从剧本提取场景和初始连续性状态",
       "inputs": [
         "script"
@@ -85,9 +144,34 @@
       ]
     },
     {
-      "id": "06-shot-planning",
-      "agent": "DirectorAgent",
+      "skillId": "05-story-quality",
+      "version": "1.0.0",
+      "phase": "SCRIPT",
+      "runtime": true,
+      "promptPath": "skills/05-story-quality/prompt.md",
+      "schemaPath": "",
+      "rulePackDependencies": [
+        "skills/vendor/short-drama-factory"
+      ],
+      "source": "HUMAN_MAINTAINED",
+      "fingerprint": "215c3c8130951241fa6fb8e9d9cb89f41f77889f805d4322230cd887147053a2",
+      "agent": "StoryAgent",
+      "goal": "校验单集剧情增量、连续性、兑现与改写要求",
+      "inputs": [],
+      "outputs": [],
+      "hardRules": []
+    },
+    {
+      "skillId": "06-shot-planning",
       "version": "2.0.0",
+      "phase": "DIRECTOR",
+      "runtime": true,
+      "promptPath": "skills/06-shot-planning/prompt.md",
+      "schemaPath": "",
+      "rulePackDependencies": [],
+      "source": "HUMAN_MAINTAINED",
+      "fingerprint": "b801d3575eb60b6a492d781f82f52daa266277e097135b264da9bbb6bd2f7943",
+      "agent": "DirectorAgent",
       "goal": "把场景拆成原子镜头",
       "inputs": [
         "scene",
@@ -104,9 +188,16 @@
       "contract": "DirectorContract"
     },
     {
-      "id": "07-shot-difficulty",
-      "agent": "DirectorAgent",
+      "skillId": "07-shot-difficulty",
       "version": "1.0.0",
+      "phase": "DIRECTOR",
+      "runtime": false,
+      "promptPath": "skills/07-shot-difficulty/prompt.md",
+      "schemaPath": "skills/07-shot-difficulty/output-schema.json",
+      "rulePackDependencies": [],
+      "source": "HUMAN_MAINTAINED",
+      "fingerprint": "9680f5f826d6ecec44539bd58c65d91d129f390c6872a5c6311ee3707634aa0c",
+      "agent": "DirectorAgent",
       "goal": "评估镜头生成难度并给出拆分建议",
       "inputs": [
         "shot"
@@ -120,9 +211,16 @@
       ]
     },
     {
-      "id": "08-continuity-planning",
-      "agent": "ContinuityQcAgent",
+      "skillId": "08-continuity-planning",
       "version": "1.0.0",
+      "phase": "DIRECTOR",
+      "runtime": false,
+      "promptPath": "skills/08-continuity-planning/prompt.md",
+      "schemaPath": "skills/08-continuity-planning/output-schema.json",
+      "rulePackDependencies": [],
+      "source": "HUMAN_MAINTAINED",
+      "fingerprint": "94d5e75ca1b0f5e9d0290fc7cd09f77420a88059822bddf70bccc8350e363df5",
+      "agent": "ContinuityQcAgent",
       "goal": "继承并验证镜头起止状态",
       "inputs": [
         "shot",
@@ -138,9 +236,16 @@
       ]
     },
     {
-      "id": "09-character-design",
-      "agent": "StoryAgent",
+      "skillId": "09-character-design",
       "version": "2.0.0",
+      "phase": "ASSET_REFERENCE",
+      "runtime": true,
+      "promptPath": "skills/09-character-design/prompt.md",
+      "schemaPath": "",
+      "rulePackDependencies": [],
+      "source": "HUMAN_MAINTAINED",
+      "fingerprint": "6faa74bf6717d288271321b759d0ada6d2fc3d12d293ae21720230e1b205a5c6",
+      "agent": "StoryAgent",
       "goal": "设计人物身份锚点和基础定妆",
       "inputs": [
         "asset",
@@ -158,9 +263,16 @@
       "contract": "AssetViewService"
     },
     {
-      "id": "10-location-design",
-      "agent": "StoryAgent",
+      "skillId": "10-location-design",
       "version": "2.0.0",
+      "phase": "ASSET_REFERENCE",
+      "runtime": true,
+      "promptPath": "skills/10-location-design/prompt.md",
+      "schemaPath": "",
+      "rulePackDependencies": [],
+      "source": "HUMAN_MAINTAINED",
+      "fingerprint": "8304ec2c1dd9a8afd914fa7c53d59cb785f39c2291e3d5bf81a4c1eb718c8703",
+      "agent": "StoryAgent",
       "goal": "设计地点圣经和可复用视觉锚点",
       "inputs": [
         "asset",
@@ -177,9 +289,16 @@
       "contract": "AssetViewService"
     },
     {
-      "id": "11-prop-design",
-      "agent": "StoryAgent",
+      "skillId": "11-prop-design",
       "version": "2.0.0",
+      "phase": "ASSET_REFERENCE",
+      "runtime": true,
+      "promptPath": "skills/11-prop-design/prompt.md",
+      "schemaPath": "",
+      "rulePackDependencies": [],
+      "source": "HUMAN_MAINTAINED",
+      "fingerprint": "847be7f01d1cfb506123759c899a41601fc7c771f0edb838a55a842d9dc5dedb",
+      "agent": "StoryAgent",
       "goal": "设计关键道具及其状态变化",
       "inputs": [
         "asset",
@@ -197,9 +316,16 @@
       "contract": "AssetViewService"
     },
     {
-      "id": "12-storyboard-generation",
-      "agent": "DirectorAgent",
+      "skillId": "12-storyboard-generation",
       "version": "1.0.0",
+      "phase": "KEYFRAME",
+      "runtime": false,
+      "promptPath": "skills/12-storyboard-generation/prompt.md",
+      "schemaPath": "skills/12-storyboard-generation/output-schema.json",
+      "rulePackDependencies": [],
+      "source": "HUMAN_MAINTAINED",
+      "fingerprint": "9bc483fdd112b4968faa405607f76c5226bee103090fc3a5ac50b651161ab9b4",
+      "agent": "DirectorAgent",
       "goal": "生成低成本分镜候选",
       "inputs": [
         "shot",
@@ -213,9 +339,16 @@
       ]
     },
     {
-      "id": "13-image-prompt-compile",
-      "agent": "DirectorAgent",
+      "skillId": "13-image-prompt-compile",
       "version": "1.0.0",
+      "phase": "KEYFRAME",
+      "runtime": false,
+      "promptPath": "skills/13-image-prompt-compile/prompt.md",
+      "schemaPath": "skills/13-image-prompt-compile/output-schema.json",
+      "rulePackDependencies": [],
+      "source": "HUMAN_MAINTAINED",
+      "fingerprint": "4a7607d63b01cd260305e8afb7da262a0cd659bc0bc81ef68cce913ab6bd64fd",
+      "agent": "DirectorAgent",
       "goal": "把结构化镜头编译为图片模型提示词",
       "inputs": [
         "shot",
@@ -230,9 +363,16 @@
       ]
     },
     {
-      "id": "14-keyframe-generation",
-      "agent": "DirectorAgent",
+      "skillId": "14-keyframe-generation",
       "version": "1.0.0",
+      "phase": "KEYFRAME",
+      "runtime": false,
+      "promptPath": "skills/14-keyframe-generation/prompt.md",
+      "schemaPath": "skills/14-keyframe-generation/output-schema.json",
+      "rulePackDependencies": [],
+      "source": "HUMAN_MAINTAINED",
+      "fingerprint": "c012d1e6d9a8558e5312f2454cbe5da7dd7da6e944999a11814553756e635a69",
+      "agent": "DirectorAgent",
       "goal": "提交并记录正式关键帧",
       "inputs": [
         "prompt",
@@ -246,9 +386,16 @@
       ]
     },
     {
-      "id": "15-keyframe-qc",
-      "agent": "ContinuityQcAgent",
+      "skillId": "15-keyframe-qc",
       "version": "1.0.0",
+      "phase": "KEYFRAME",
+      "runtime": false,
+      "promptPath": "skills/15-keyframe-qc/prompt.md",
+      "schemaPath": "skills/15-keyframe-qc/output-schema.json",
+      "rulePackDependencies": [],
+      "source": "HUMAN_MAINTAINED",
+      "fingerprint": "7ac67f2caf20934d63a20f1af8aecb8dae8d1bb9e6b74d39c1c0539411543c94",
+      "agent": "ContinuityQcAgent",
       "goal": "检查关键帧身份、服装、场景、道具和构图",
       "inputs": [
         "keyframe",
@@ -265,9 +412,16 @@
       ]
     },
     {
-      "id": "16-video-strategy",
-      "agent": "DirectorAgent",
+      "skillId": "16-video-strategy",
       "version": "1.0.0",
+      "phase": "VIDEO",
+      "runtime": false,
+      "promptPath": "skills/16-video-strategy/prompt.md",
+      "schemaPath": "skills/16-video-strategy/output-schema.json",
+      "rulePackDependencies": [],
+      "source": "HUMAN_MAINTAINED",
+      "fingerprint": "c494dd9340b0644d0f7efa1a4b644e7de19252298004e9595e28016d44458246",
+      "agent": "DirectorAgent",
       "goal": "选择首帧、参考视频或多模态生成策略",
       "inputs": [
         "shot",
@@ -282,9 +436,16 @@
       ]
     },
     {
-      "id": "17-video-prompt-compile",
-      "agent": "DirectorAgent",
+      "skillId": "17-video-prompt-compile",
       "version": "1.0.0",
+      "phase": "VIDEO",
+      "runtime": false,
+      "promptPath": "skills/17-video-prompt-compile/prompt.md",
+      "schemaPath": "skills/17-video-prompt-compile/output-schema.json",
+      "rulePackDependencies": [],
+      "source": "HUMAN_MAINTAINED",
+      "fingerprint": "ace10a07f84d2cb1a86dc37cf4b8b9b6529aad5fc56590abdc78216ff34e72c3",
+      "agent": "DirectorAgent",
       "goal": "把原子动作编译为视频模型提示词",
       "inputs": [
         "shot",
@@ -300,9 +461,16 @@
       ]
     },
     {
-      "id": "18-video-generation",
-      "agent": "DirectorAgent",
+      "skillId": "18-video-generation",
       "version": "1.0.0",
+      "phase": "VIDEO",
+      "runtime": false,
+      "promptPath": "skills/18-video-generation/prompt.md",
+      "schemaPath": "skills/18-video-generation/output-schema.json",
+      "rulePackDependencies": [],
+      "source": "HUMAN_MAINTAINED",
+      "fingerprint": "b39c17d7797cc8b36403bbffbd02aa4a575392171aa00c8dd9638c0c93a0cae0",
+      "agent": "DirectorAgent",
       "goal": "提交 Seedance 任务并跟踪多 Take",
       "inputs": [
         "keyframe",
@@ -316,9 +484,16 @@
       ]
     },
     {
-      "id": "19-video-qc",
-      "agent": "ContinuityQcAgent",
+      "skillId": "19-video-qc",
       "version": "1.0.0",
+      "phase": "VIDEO",
+      "runtime": false,
+      "promptPath": "skills/19-video-qc/prompt.md",
+      "schemaPath": "skills/19-video-qc/output-schema.json",
+      "rulePackDependencies": [],
+      "source": "HUMAN_MAINTAINED",
+      "fingerprint": "2cc327a3fc27595f2d73c554da3c6536816670a1cdad51dca7ea2e036230c799",
+      "agent": "ContinuityQcAgent",
       "goal": "检查动作、身份和起止状态",
       "inputs": [
         "videoTake",
@@ -335,9 +510,16 @@
       ]
     },
     {
-      "id": "20-video-repair",
-      "agent": "ContinuityQcAgent",
+      "skillId": "20-video-repair",
       "version": "1.0.0",
+      "phase": "VIDEO",
+      "runtime": false,
+      "promptPath": "skills/20-video-repair/prompt.md",
+      "schemaPath": "skills/20-video-repair/output-schema.json",
+      "rulePackDependencies": [],
+      "source": "HUMAN_MAINTAINED",
+      "fingerprint": "6fb87f0f9bbe0d0ad6da8b4cecc535d525820385a4d9724ed5814bfd674c68e8",
+      "agent": "ContinuityQcAgent",
       "goal": "把失败诊断转为局部重拍方案",
       "inputs": [
         "videoTake",
@@ -352,9 +534,16 @@
       ]
     },
     {
-      "id": "21-dialect-render",
-      "agent": "EditingAgent",
+      "skillId": "21-dialect-render",
       "version": "1.0.0",
+      "phase": "AUDIO",
+      "runtime": false,
+      "promptPath": "skills/21-dialect-render/prompt.md",
+      "schemaPath": "skills/21-dialect-render/output-schema.json",
+      "rulePackDependencies": [],
+      "source": "HUMAN_MAINTAINED",
+      "fingerprint": "e83b14d1056cc15791e9b1eaae7282782ea3a024bb601bba00c42e1cbf6a4ee3",
+      "agent": "EditingAgent",
       "goal": "基于知识库生成人工可修正的方言文本",
       "inputs": [
         "displayText",
@@ -370,9 +559,16 @@
       ]
     },
     {
-      "id": "22-voice-generation",
-      "agent": "EditingAgent",
+      "skillId": "22-voice-generation",
       "version": "1.0.0",
+      "phase": "AUDIO",
+      "runtime": false,
+      "promptPath": "skills/22-voice-generation/prompt.md",
+      "schemaPath": "skills/22-voice-generation/output-schema.json",
+      "rulePackDependencies": [],
+      "source": "HUMAN_MAINTAINED",
+      "fingerprint": "99ca3e015c347d1637ac827726509ed40374093208d453e0423a5d411d9e6add",
+      "agent": "EditingAgent",
       "goal": "用 speechText 和声音档案生成对白音频",
       "inputs": [
         "speechText",
@@ -386,9 +582,16 @@
       ]
     },
     {
-      "id": "23-lipsync",
-      "agent": "EditingAgent",
+      "skillId": "23-lipsync",
       "version": "1.0.0",
+      "phase": "AUDIO",
+      "runtime": false,
+      "promptPath": "skills/23-lipsync/prompt.md",
+      "schemaPath": "skills/23-lipsync/output-schema.json",
+      "rulePackDependencies": [],
+      "source": "HUMAN_MAINTAINED",
+      "fingerprint": "fd21fb21591cc9cd1017bcae19d5bb969a132537eda992f0bd4df0e275191dee",
+      "agent": "EditingAgent",
       "goal": "使用已采用视频和音频生成口型同步 Take",
       "inputs": [
         "videoTake",
@@ -402,9 +605,16 @@
       ]
     },
     {
-      "id": "24-subtitle-generation",
-      "agent": "EditingAgent",
+      "skillId": "24-subtitle-generation",
       "version": "1.0.0",
+      "phase": "POST_PRODUCTION",
+      "runtime": false,
+      "promptPath": "skills/24-subtitle-generation/prompt.md",
+      "schemaPath": "skills/24-subtitle-generation/output-schema.json",
+      "rulePackDependencies": [],
+      "source": "HUMAN_MAINTAINED",
+      "fingerprint": "4c6d2e8a754970e6e6f10bb2feffc493a81886deb37f7fb3b4447d24c55adbba",
+      "agent": "EditingAgent",
       "goal": "按音频时长生成普通话字幕",
       "inputs": [
         "dialogues"
@@ -418,9 +628,16 @@
       ]
     },
     {
-      "id": "25-sound-design",
-      "agent": "EditingAgent",
+      "skillId": "25-sound-design",
       "version": "1.0.0",
+      "phase": "POST_PRODUCTION",
+      "runtime": false,
+      "promptPath": "skills/25-sound-design/prompt.md",
+      "schemaPath": "skills/25-sound-design/output-schema.json",
+      "rulePackDependencies": [],
+      "source": "HUMAN_MAINTAINED",
+      "fingerprint": "cf43ade4a824f5e219d67f5a7f72957c10a006d6dfe8ae2c7737c46e389b00cb",
+      "agent": "EditingAgent",
       "goal": "规划环境声、音效和背景音乐",
       "inputs": [
         "timeline",
@@ -434,9 +651,16 @@
       ]
     },
     {
-      "id": "26-timeline-planning",
-      "agent": "EditingAgent",
+      "skillId": "26-timeline-planning",
       "version": "1.0.0",
+      "phase": "POST_PRODUCTION",
+      "runtime": false,
+      "promptPath": "skills/26-timeline-planning/prompt.md",
+      "schemaPath": "skills/26-timeline-planning/output-schema.json",
+      "rulePackDependencies": [],
+      "source": "HUMAN_MAINTAINED",
+      "fingerprint": "a19232bd548c3ece02fdf28da6d8a384acbcd750bd4542fc271de06ecaf2f4c9",
+      "agent": "EditingAgent",
       "goal": "组装连续视频、对白、音效和字幕轨",
       "inputs": [
         "episode",
@@ -451,9 +675,16 @@
       ]
     },
     {
-      "id": "27-video-render",
-      "agent": "EditingAgent",
+      "skillId": "27-video-render",
       "version": "1.0.0",
+      "phase": "POST_PRODUCTION",
+      "runtime": false,
+      "promptPath": "skills/27-video-render/prompt.md",
+      "schemaPath": "skills/27-video-render/output-schema.json",
+      "rulePackDependencies": [],
+      "source": "HUMAN_MAINTAINED",
+      "fingerprint": "7fa4ea806fea2161ee026cb0aa489f21bec898b1fe5369415932c0244e486e5c",
+      "agent": "EditingAgent",
       "goal": "生成可审阅预览和最终成片",
       "inputs": [
         "timeline"

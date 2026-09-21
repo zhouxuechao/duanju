@@ -93,12 +93,12 @@ public class PromptCompiler {
             if(!previous.path("observedState").isObject()||previous.path("observedState").isEmpty())throw new IllegalArgumentException("连续镜头缺少上一已批准视频的实际结束状态");
             int depth=previous.path("continuationDepth").asInt(),max=request.path("sceneContinuityPolicy").path("maxContinuationDepth").asInt(2);
             strategy=depth>=max&&request.path("reanchorPlan").isObject()?Strategy.REANCHOR_AFTER_DRIFT:Strategy.CONTINUATION;
-            if(previous.hasNonNull("videoUrl"))refs.add(referenceBinding("PREVIOUS_TAKE_REFERENCE",text(previous,"id"),text(previous,"videoUrl"),text(previous,"id"),previous.path("takeNo").asInt(1),"上一条已接受视频只控制瞬时姿态、位置和运动相位，不控制长期身份",List.of("openingPose","position","motionPhase"),List.of("characterIdentity","wardrobe","locationIdentity","propIdentity"),85));
+            if(previous.hasNonNull("videoUrl"))refs.add(referenceBinding(ReferenceBinding.Role.PREVIOUS_TAKE.name(),text(previous,"id"),text(previous,"videoUrl"),text(previous,"id"),previous.path("takeNo").asInt(1),"上一条已接受视频只控制瞬时姿态、位置和运动相位，不控制长期身份",List.of("openingPose","position","motionPhase"),List.of("characterIdentity","wardrobe","locationIdentity","propIdentity"),85));
         }else strategy=Strategy.INDEPENDENT_CUT;
         JsonNode keyframe=request.path("keyframe");if(!keyframe.path("locked").asBoolean())throw new IllegalArgumentException("视频需要已锁定的正式 Keyframe");
         String url=text(keyframe,"providerUrl");if(url.isBlank())throw new IllegalArgumentException("缺少 Seedream 原始 provider_url；archive_url 不能替代");
         String expiry=text(keyframe,"providerUrlExpiresAt");if("EXPIRED".equals(text(keyframe,"handoffStatus"))||(!expiry.isBlank()&&!Instant.parse(expiry).isAfter(Instant.now())))throw new IllegalArgumentException("PROVIDER_URL_EXPIRED：使用同一 Prompt/引用/参数重新生成 Keyframe 并复核，不得替换为归档 URL");
-        refs.add(referenceBinding("KEYFRAME_PROVIDER",text(keyframe,"id"),validUrl(url),text(keyframe,"id"),keyframe.path("version").asInt(1),"正式首帧控制本镜起始构图、姿态和画面空间",List.of("openingComposition","openingPose"),List.of("futureAction","futureState"),95));
+        refs.add(referenceBinding(ReferenceBinding.Role.KEYFRAME_PROVIDER.name(),text(keyframe,"id"),validUrl(url),text(keyframe,"id"),keyframe.path("version").asInt(1),"正式首帧控制本镜起始构图、姿态和画面空间",List.of("openingComposition","openingPose"),List.of("futureAction","futureState"),95));
         return result.put("strategy",strategy.name()).put("recommendedTakes",takes(shot.difficulty()));
     }
 

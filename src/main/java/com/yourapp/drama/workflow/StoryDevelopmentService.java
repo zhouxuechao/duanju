@@ -148,6 +148,49 @@ public class StoryDevelopmentService {
       return this.needsStoryQa(saved) ? this.scheduleStoryQa(saved) : saved;
    }
 
+   public ObjectNode reviewPremise(String documentId, ObjectNode request) {
+      String action = request.path("action").asText("").trim();
+      if (!Set.of("EDIT_IDEA", "ACCEPT_RECOMMENDATIONS", "FORCE_CONTINUE").contains(action)) {
+         throw new IllegalArgumentException("前提门禁操作无效");
+      }
+      ObjectNode saved = this.store.transaction(() -> {
+         ObjectNode doc = this.store.getForUpdate(ResourceKind.STORY_DOCUMENT, documentId);
+         this.requireCurrent(doc);
+         if (!"PREMISE_REVIEW_REQUIRED".equals(Documents.text(doc, "reviewStatus"))) {
+            throw new WorkflowException("PREMISE_REVIEW_NOT_REQUIRED", "当前创意不在前提人工处理状态");
+         }
+         ObjectNode next = doc.deepCopy();
+         String actor = request.path("overrideBy").asText(request.path("reviewer").asText("USER")).trim();
+         if ("EDIT_IDEA".equals(action)) {
+            String idea = request.path("idea").asText("").trim();
+            if (idea.isBlank()) throw new IllegalArgumentException("修改创意时必须提供新的 idea");
+            ObjectNode project = this.store.getForUpdate(ResourceKind.PROJECT, Documents.project(doc));
+            ObjectNode updatedProject = this.store.update(ResourceKind.PROJECT, Documents.id(project), Documents.revision(project), project.deepCopy().put("idea", idea));
+            ArrayNode history = next.withArray("premiseHistory");
+            history.add(Documents.obj().put("recordedAt", Instant.now().toString()).set("analysis", next.path("premiseAnalysis").deepCopy()));
+            ObjectNode snapshot = updatedProject.deepCopy();
+            snapshot.set("episodeFormat", this.episodeFormats.resolve(snapshot));
+            next.set("projectSnapshot", snapshot);
+            next.remove(List.of("premiseAnalysis", "premiseValidation", "premiseOverride", "premiseAcceptance"));
+            next.put("reviewStatus", "WAITING");
+            return this.store.update(ResourceKind.STORY_DOCUMENT, documentId, Documents.revision(doc), next);
+         }
+         if ("FORCE_CONTINUE".equals(action)) {
+            String reason = request.path("overrideReason").asText("").trim();
+            if (reason.isBlank()) throw new IllegalArgumentException("强制继续必须填写原因");
+            next.set("premiseOverride", Documents.obj().put("overrideAt", Instant.now().toString())
+                    .put("overrideBy", actor.isBlank() ? "USER" : actor).put("overrideReason", reason));
+         } else {
+            ObjectNode acceptance = Documents.obj().put("acceptedAt", Instant.now().toString()).put("acceptedBy", actor.isBlank() ? "USER" : actor);
+            acceptance.set("recommendedAdjustments", next.path("premiseAnalysis").path("recommendedAdjustments").deepCopy());
+            next.set("premiseAcceptance", acceptance);
+         }
+         next.put("reviewStatus", "PREMISE_PASSED");
+         return this.store.update(ResourceKind.STORY_DOCUMENT, documentId, Documents.revision(doc), next);
+      });
+      return "EDIT_IDEA".equals(action) ? this.schedulePremise(saved) : this.schedule(saved);
+   }
+
    private void recordHumanEdit(ObjectNode before, ObjectNode after, ObjectNode request) {
       if (before.path("content").equals(after.path("content"))) return;
       ObjectNode context = Documents.obj()
@@ -436,15 +479,21 @@ public class StoryDevelopmentService {
       LlmGateway.StructuredResult<JsonNode> result = this.llm.generate(request, JsonNode.class);
       JsonNode premise = this.structured.parse(result.value().toString(), StoryDevelopmentSchemas.premise(), JsonNode.class, result.requestId());
       this.jobs.mutate(Documents.id(job), j -> j.put("providerRequestId", result.requestId()).put("model", result.model()).put("simulated", result.simulated()));
+      boolean viable = premise.path("viable").asBoolean(false);
+      ObjectNode normalized = premise.deepCopy();
+      if (!normalized.hasNonNull("capacityRisk")) normalized.put("capacityRisk", premise.path("risks").isEmpty() ? "未发现超出目标篇幅的容量风险" : premise.path("risks").get(0).asText());
+      if (!normalized.path("weaknesses").isArray()) normalized.set("weaknesses", premise.path("risks").deepCopy());
+      if (!normalized.path("recommendedAdjustments").isArray()) normalized.set("recommendedAdjustments", premise.path("questionsForCore").deepCopy());
       ObjectNode saved = this.store.transaction(() -> {
          ObjectNode latest = this.store.getForUpdate(ResourceKind.STORY_DOCUMENT, Documents.id(doc));
-         ObjectNode next = latest.deepCopy().put("premiseProviderRequestId", result.requestId()).put("premiseModel", result.model()).put("reviewStatus", "PREMISE_READY");
-         next.set("premiseAnalysis", premise.deepCopy());
-         next.set("premiseValidation", Documents.obj().put("passed", true).put("checkedAt", Instant.now().toString()));
+         ObjectNode next = latest.deepCopy().put("premiseProviderRequestId", result.requestId()).put("premiseModel", result.model()).put("reviewStatus", viable ? "PREMISE_PASSED" : "PREMISE_REVIEW_REQUIRED");
+         next.set("premiseAnalysis", normalized.deepCopy());
+         next.set("premiseValidation", Documents.obj().put("passed", viable).put("checkedAt", Instant.now().toString()));
          ObjectNode updated = this.store.update(ResourceKind.STORY_DOCUMENT, Documents.id(latest), Documents.revision(latest), next);
-         this.jobs.succeed(Documents.id(job), Documents.obj().put("documentId", Documents.id(doc)).put("stage", "PREMISE").put("viable", premise.path("viable").asBoolean()).put("simulated", result.simulated()));
+         this.jobs.succeed(Documents.id(job), Documents.obj().put("documentId", Documents.id(doc)).put("stage", "PREMISE").put("viable", viable).put("simulated", result.simulated()));
          return updated;
       });
+      if (!viable) return;
       try {
          this.schedule(saved);
       } catch (RuntimeException error) {

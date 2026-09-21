@@ -45,12 +45,15 @@ public class GenerationWorker {
         }
     }
     @Scheduled(fixedDelayString="${drama.jobs.poll-delay-ms:1500}") public void scheduledTick(){if(enabled)tick();}
-    public void tick(){
-        if(!ticking.compareAndSet(false,true))return;
+    public void tick(){tickProject(null);}
+    public boolean tickProject(String projectId){
+        if(!ticking.compareAndSet(false,true))return false;
+        boolean worked=false;
         try{
-            for(ObjectNode job:store.list(GENERATION_JOB,null,null))if(text(job,"status").equals("RUNNING")&&Set.of("VIDEO","LIPSYNC").contains(text(job,"type"))&&!text(job,"providerTaskId").isBlank())poll(job);
-            jobs.claim().ifPresent(this::process);
+            for(ObjectNode job:store.list(GENERATION_JOB,projectId,null))if(text(job,"status").equals("RUNNING")&&Set.of("VIDEO","LIPSYNC").contains(text(job,"type"))&&!text(job,"providerTaskId").isBlank()){poll(job);worked=true;}
+            Optional<ObjectNode> claimed=jobs.claim(projectId);if(claimed.isPresent()){process(claimed.get());worked=true;}
         }finally{ticking.set(false);}
+        return worked;
     }
     public void process(ObjectNode job){
         try{
@@ -86,7 +89,7 @@ public class GenerationWorker {
                 .put("generationJobId",id(job)).put("providerRequestId",result.requestId()).put("promptVersionId",required(input,"promptVersionId"))
                 .put("handoffStatus","READY").put("qcStatus","PENDING").put("locked",false).put("selected",false).put("simulated",result.simulated());
             if(result.expiresAt()!=null)asset.put("providerUrlExpiresAt",result.expiresAt().toString());
-            if(result.simulated())asset.put("previewUrl","/demo/keyframe.svg");
+            if(result.simulated())asset.put("previewUrl","/demo/keyframe.png");
             JsonNode plannedShot=input.path("context").path("shot");for(String field:List.of("directorPlanVersion","dramaticBeatVersion","shotPlanVersion"))if(plannedShot.has(field))asset.set(field,plannedShot.path(field).deepCopy());
             for(String field:List.of("sequenceCompilerVersion","normalizedPromptHash","referenceBindingsHash","referenceAuthorityFingerprint","continuitySnapshotHash","sequenceStateFingerprint","providerCapabilitiesVersion"))if(input.has(field))asset.set(field,input.path(field).deepCopy());
             asset.set("assetViewIds",input.path("assetViewIds").deepCopy());asset.set("assetReferences",input.path("assetReferences").deepCopy());
@@ -113,11 +116,14 @@ public class GenerationWorker {
             throw new WorkflowException("PROVIDER_URL_EXPIRED","原始链接在排队期间过期，请用原提示词重画并重新质检");
         }
         if(!lipsync)workflow.checkHandoff(frame);
-        String url=lipsync?"":required(input,"firstFrameProviderUrl");
-        if(!lipsync&&!url.equals(required(frame,"providerUrl")))throw new WorkflowException("URL_SNAPSHOT_MISMATCH","关键帧生产链接与任务快照不一致");
+        String url=lipsync?"":text(input,"firstFrameProviderUrl");
+        String route=text(input,"videoRequestRoute");
+        if(!lipsync&&"FIRST_FRAME".equals(route)&&!url.equals(required(frame,"providerUrl")))throw new WorkflowException("URL_SNAPSHOT_MISMATCH","首帧路线的关键帧生产链接与任务快照不一致");
+        if(!lipsync&&"FULL_MODAL_REFERENCE".equals(route)&&!url.isBlank())throw new WorkflowException("REFERENCE_ROUTE_CONFLICT","全模态参考路线不得同时发送 first_frame");
+        if(!lipsync&&"CONTINUATION_LAST_FRAME".equals(route)&&!url.equals(text(input.path("context").path("previousTake"),"lastFrameUrl")))throw new WorkflowException("URL_SNAPSHOT_MISMATCH","续接尾帧与 previousTake 快照不一致");
         // The exact String returned by Seedream is the first frame. No storage call occurs on this path.
         List<VideoGenerator.Reference> references=new ArrayList<>();for(JsonNode ref:input.path("references"))references.add(new VideoGenerator.Reference(required(ref,"type"),required(ref,"url"),required(ref,"role")));
-        VideoGenerator.Submission submission=videos.submit(new VideoGenerator.VideoRequest(required(input,"prompt"),lipsync?null:url,references,map(input.path("providerOptions"))));
+        VideoGenerator.Submission submission=videos.submit(new VideoGenerator.VideoRequest(required(input,"prompt"),lipsync||url.isBlank()?null:url,references,map(input.path("providerOptions"))));
         jobs.mutate(id(job),j->j.put("providerTaskId",submission.taskId()).put("providerRequestId",submission.requestId()).put("providerAcceptedAt",Instant.now().toString()).put("simulated",submission.simulated()));
         try{
             store.transaction(()->{
@@ -190,7 +196,7 @@ public class GenerationWorker {
         JsonNode input=job.path("inputSnapshot");ResourceKind kind=ResourceKind.fromPath(required(input,"targetKind"));String targetId=required(input,"targetId");ObjectNode target=store.get(kind,targetId);
         if(kind==KEYFRAME&&!"HANDED_OFF".equals(text(target,"handoffStatus")))throw new WorkflowException("HANDOFF_REQUIRED","视频任务创建成功后才能归档关键帧");
         String archive;
-        if(input.path("simulated").asBoolean())archive=kind==KEYFRAME?"/demo/keyframe.svg":kind==VIDEO_TAKE?"/demo/take.mp4":"/demo/audio.wav";
+        if(input.path("simulated").asBoolean())archive=kind==KEYFRAME?"/demo/keyframe.png":kind==VIDEO_TAKE?"/demo/take.mp4":"/demo/audio.wav";
         else try(InputStream source=fetcher.open(required(input,"providerUrl"))){String suffix=kind==KEYFRAME?".png":kind==VIDEO_TAKE?".mp4":".mp3";String contentType=kind==KEYFRAME?"image/png":kind==VIDEO_TAKE?"video/mp4":"audio/mpeg";archive=storage.put(kind.path()+"/"+targetId+suffix,source,contentType);}
         catch(IOException e){throw new UncheckedIOException(e);}
         ObjectNode metadata=null;if(kind==VIDEO_TAKE&&!input.path("simulated").asBoolean()){if(!archive.startsWith("/api/media/"))throw new WorkflowException("ARCHIVE_URL_INVALID","归档地址无法用于媒体探测");try(InputStream saved=storage.open(archive.substring("/api/media/".length()))){metadata=mediaProbe.probe(saved,".mp4");}catch(IOException e){throw new UncheckedIOException(e);}}

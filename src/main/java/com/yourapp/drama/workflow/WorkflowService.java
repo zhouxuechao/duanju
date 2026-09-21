@@ -6,6 +6,7 @@ import com.yourapp.drama.job.JobService;
 import com.yourapp.drama.persistence.*;
 import com.yourapp.drama.production.ProductionService;
 import com.yourapp.drama.production.DirectorStyleResolver;
+import com.yourapp.drama.production.VideoRequestRouteResolver;
 import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.util.*;
@@ -28,7 +29,8 @@ public class WorkflowService {
     private final QualityDiagnosisService diagnoses;
     private final DirectorStyleResolver directorStyles;
     private final EpisodeFormatResolver episodeFormats;
-    public WorkflowService(DocumentStore store,JobService jobs,ProductionService production,StoryDevelopmentService development,AssetViewService assetViews,StoryFactResolver factResolver,RelationshipResolver relationshipResolver,LocationStateResolver locationStateResolver,CharacterStateResolver characterStateResolver,PropStateResolver propStateResolver,QualityDiagnosisService diagnoses,DirectorStyleResolver directorStyles,EpisodeFormatResolver episodeFormats){this.store=store;this.jobs=jobs;this.production=production;this.development=development;this.assetViews=assetViews;this.factResolver=factResolver;this.relationshipResolver=relationshipResolver;this.locationStateResolver=locationStateResolver;this.characterStateResolver=characterStateResolver;this.propStateResolver=propStateResolver;this.diagnoses=diagnoses;this.directorStyles=directorStyles;this.episodeFormats=episodeFormats;this.contextResolver=new ContextResolver();}
+    private final VideoRequestRouteResolver videoRoutes;
+    public WorkflowService(DocumentStore store,JobService jobs,ProductionService production,StoryDevelopmentService development,AssetViewService assetViews,StoryFactResolver factResolver,RelationshipResolver relationshipResolver,LocationStateResolver locationStateResolver,CharacterStateResolver characterStateResolver,PropStateResolver propStateResolver,QualityDiagnosisService diagnoses,DirectorStyleResolver directorStyles,EpisodeFormatResolver episodeFormats,VideoRequestRouteResolver videoRoutes){this.store=store;this.jobs=jobs;this.production=production;this.development=development;this.assetViews=assetViews;this.factResolver=factResolver;this.relationshipResolver=relationshipResolver;this.locationStateResolver=locationStateResolver;this.characterStateResolver=characterStateResolver;this.propStateResolver=propStateResolver;this.diagnoses=diagnoses;this.directorStyles=directorStyles;this.episodeFormats=episodeFormats;this.videoRoutes=videoRoutes;this.contextResolver=new ContextResolver();}
     public ObjectNode story(String projectId,ObjectNode body){
         ObjectNode doc=development.start(projectId,body);return doc.hasNonNull("generationJobId")?store.get(GENERATION_JOB,text(doc,"generationJobId")):doc;
     }
@@ -70,7 +72,12 @@ public class WorkflowService {
             if(old.path("submissionUncertain").asBoolean())throw new WorkflowException("SUBMISSION_UNCERTAIN","这一版本的拆镜请求状态尚未查明，请先核对已有任务的服务商记录，避免重复提交");
             if("FAILED".equals(text(old,"status"))&&active)recoverable=old;
         }
-        if(recoverable!=null)input.put("retryOfJobId",id(recoverable)).put("reuseProviderOutput",true);
+        if(recoverable!=null){
+            input.put("retryOfJobId",id(recoverable));
+            boolean hasValidatedProviderOutput=recoverable.path("providerOutput").isObject()&&!recoverable.path("providerOutput").isEmpty();
+            if(hasValidatedProviderOutput&&!recoverable.path("reusedValidatedProviderOutput").asBoolean(false))input.put("reuseProviderOutput",true);
+            else input.set("retryFeedback",obj().put("failureCode",text(recoverable,"failureCode")).put("failureReason",text(recoverable,"failureReason")).put("providerRequestId",text(recoverable,"providerRequestId")));
+        }
         int nextPlanVersion=scene.path("shotPlanVersion").asInt()+1;input.put("planVersion",nextPlanVersion).put("directorPlanVersion",nextPlanVersion).put("dramaticBeatVersion",nextPlanVersion).put("shotPlanVersion",nextPlanVersion);
         ObjectNode job=jobs.enqueue(project(scene),null,"DIRECTOR_PLAN",input,"director-plan:"+signature+":"+key(body));
         for(ObjectNode old:projectJobs)if(!id(old).equals(id(job))&&"DIRECTOR_PLAN".equals(text(old,"type"))&&sceneId.equals(text(old.path("inputSnapshot").path("scene"),"id"))&&Set.of("QUEUED","RUNNING","RETRY_WAIT").contains(text(old,"status")))jobs.cancel(id(old));
@@ -225,20 +232,19 @@ public class WorkflowService {
             ObjectNode shot=store.getForUpdate(SHOT,required(keyframe,"shotId"));noActiveGeneration(id(shot));List<ObjectNode> existingTakes=store.list(VIDEO_TAKE,project(shot),id(shot));int maxTakes=shot.path("maxVideoTakes").asInt(store.get(PROJECT,project(shot)).path("defaultMaxVideoTakes").asInt(0));if(maxTakes>0&&existingTakes.size()>=maxTakes)throw new WorkflowException("VIDEO_TAKE_LIMIT_REACHED","本镜已达到 "+maxTakes+" 次视频生成上限，请先审查失败原因或调整预算");
             ObjectNode keyframeSnapshot=compactKeyframeSnapshot(keyframe);
             ObjectNode context=context(shot);context.set("keyframe",keyframeSnapshot.deepCopy());context.set("providerCapabilities",production.videoCapabilities());context.set("videoOutputProfile",outputProfile(project(shot)));attachRetake(context,shot);
-            JsonNode previous=context.path("previousTake");int maxDepth=context.path("sceneContinuityPolicy").path("maxContinuationDepth").asInt(2);if("CONTINUOUS".equals(text(shot,"relationToPrevious"))&&previous.path("continuationDepth").asInt(0)>=maxDepth){context.set("reanchorPlan",obj().put("reason","达到连续生成深度上限 "+maxDepth).put("useCanonicalReferences",true).put("source","SCENE_CONTINUITY_POLICY"));((ObjectNode)context.path("shot")).put("sequenceRelation","REANCHOR_AFTER_DRIFT");}else if(context.path("retake").isObject())((ObjectNode)context.path("shot")).put("sequenceRelation","REPAIR_TAIL");validateCharacters(context.path("assets"),shot);
+            ObjectNode contextShot=(ObjectNode)context.path("shot");if(text(contextShot,"sequenceRelation").isBlank())contextShot.put("sequenceRelation",text(shot,"relationToPrevious"));
+            JsonNode previous=context.path("previousTake");int maxDepth=context.path("sceneContinuityPolicy").path("maxContinuationDepth").asInt(2);if("CONTINUOUS".equals(text(shot,"relationToPrevious"))&&previous.path("continuationDepth").asInt(0)>=maxDepth){context.set("reanchorPlan",obj().put("reason","达到连续生成深度上限 "+maxDepth).put("useCanonicalReferences",true).put("source","SCENE_CONTINUITY_POLICY"));contextShot.put("sequenceRelation","REANCHOR_AFTER_DRIFT");}else if(context.path("retake").isObject())contextShot.put("sequenceRelation","REPAIR_TAIL");validateCharacters(context.path("assets"),shot);
             JsonNode compiled=production.compileVideo(context);
             ObjectNode prompt=savePrompt(shot,"VIDEO",compiled,context);
             int takeNo=store.list(VIDEO_TAKE,project(shot),id(shot)).size()+1;
+            VideoRequestRouteResolver.Resolved videoRoute=videoRoutes.resolve(text(context.path("shot"),"sequenceRelation"),context.path("providerCapabilities"),keyframeSnapshot,previous,compiled.path("references"));
             ObjectNode input=obj().put("keyframeId",keyframeId).put("shotId",id(shot)).put("sceneId",required(shot,"sceneId")).put("episodeId",required(store.get(SCENE,required(shot,"sceneId")),"episodeId")).put("promptVersionId",id(prompt))
-                .put("prompt",compiled.path("prompt").asText()).put("firstFrameProviderUrl",required(keyframe,"providerUrl")).put("takeNo",takeNo);
+                .put("prompt",compiled.path("prompt").asText()).put("videoRequestRoute",videoRoute.route().name()).put("takeNo",takeNo);
+            if(videoRoute.firstFrameUrl()!=null)input.put("firstFrameProviderUrl",videoRoute.firstFrameUrl());
             copyPromptAudit(input,compiled,context);String strategy=compiled.path("strategy").asText("INDEPENDENT_CUT");int continuationDepth="CONTINUATION".equals(strategy)?previous.path("continuationDepth").asInt(0)+1:0;input.put("sequenceStrategy",strategy).put("sequenceRelation",text(context.path("shot"),"sequenceRelation")).put("continuationDepth",continuationDepth);if(previous.hasNonNull("id"))input.put("parentTakeId",text(previous,"id"));if(context.path("reanchorPlan").isObject())input.put("reanchorReason",text(context.path("reanchorPlan"),"reason"));if(context.path("retake").isObject())input.set("retake",context.path("retake").deepCopy());
             input.set("context",context);input.set("keyframeSnapshot",keyframeSnapshot);
             ArrayNode videoRefs=input.putArray("references");
-            for(JsonNode reference:compiled.path("references")){
-                String role=text(reference,"role");
-                if(Set.of("MOTION","PREVIOUS_LOCKED_TAKE").contains(role))videoRefs.add(obj().put("type","video_url").put("url",required(reference,"url")).put("role","reference_video"));
-                if("PREVIOUS_LAST_FRAME".equals(role))videoRefs.add(obj().put("type","image_url").put("url",required(reference,"url")).put("role","reference_image"));
-            }
+            for(com.yourapp.drama.model.VideoGenerator.Reference reference:videoRoute.references())videoRefs.add(obj().put("type",reference.type()).put("url",reference.url()).put("role",reference.role()));
             ObjectNode options=obj().put("duration",(int)Math.ceil(shot.path("duration").asDouble(3))).put("ratio",store.get(PROJECT,project(shot)).path("ratio").asText("9:16"));
             if(body.path("providerOptions").isObject())body.path("providerOptions").fields().forEachRemaining(e->options.set(e.getKey(),e.getValue()));
             options.put("generate_audio",false);

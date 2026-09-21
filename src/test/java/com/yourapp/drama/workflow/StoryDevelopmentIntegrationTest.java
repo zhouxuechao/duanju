@@ -63,10 +63,28 @@ class StoryDevelopmentIntegrationTest {
         core = store.get(STORY_DOCUMENT, id(core));
         assertThat(core.path("premiseAnalysis").path("viable").asBoolean()).isFalse();
         assertThat(core.path("premiseAnalysis").path("risks")).isNotEmpty();
-        assertThat(text(core, "reviewStatus")).isEqualTo("GENERATING");
-        ObjectNode coreJob = store.get(GENERATION_JOB, required(core, "generationJobId"));
+        assertThat(text(core, "reviewStatus")).isEqualTo("PREMISE_REVIEW_REQUIRED");
+        assertThat(store.list(GENERATION_JOB, id(project), null)).hasSize(1);
+        assertThat(core.path("premiseValidation").path("passed").asBoolean()).isFalse();
+    }
+
+    @Test
+    void forceContinueRequiresReasonAndRecordsAuditableOverrideBeforeCore() {
+        ObjectNode project = store.create(PROJECT, obj().put("name", "长篇前提门禁").put("idea", "主角找到一封信").put("episodeCount", 80).put("targetDuration", 100).put("ratio", "9:16"));
+        ObjectNode core = development.start(id(project), obj()); worker.tick(); core = store.get(STORY_DOCUMENT, id(core));
+
+        ObjectNode blocked = core;
+        assertThatThrownBy(() -> development.reviewPremise(id(blocked), obj().put("action", "FORCE_CONTINUE").put("overrideBy", "tester")))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("原因");
+
+        ObjectNode continued = development.reviewPremise(id(core), obj().put("action", "FORCE_CONTINUE")
+                .put("overrideBy", "tester").put("overrideReason", "已补充多个阶段目标，接受容量风险"));
+        assertThat(text(continued, "reviewStatus")).isEqualTo("GENERATING");
+        assertThat(text(continued.path("premiseOverride"), "overrideBy")).isEqualTo("tester");
+        assertThat(text(continued.path("premiseOverride"), "overrideReason")).contains("容量风险");
+        assertThat(text(continued.path("premiseOverride"), "overrideAt")).isNotBlank();
+        ObjectNode coreJob = store.get(GENERATION_JOB, required(continued, "generationJobId"));
         assertThat(text(coreJob.path("inputSnapshot"), "phase")).isEqualTo("CORE");
-        assertThat(coreJob.path("inputSnapshot").path("premiseAnalysis")).isEqualTo(core.path("premiseAnalysis"));
     }
 
     @Test

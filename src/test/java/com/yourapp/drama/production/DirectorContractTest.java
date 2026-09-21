@@ -115,6 +115,12 @@ class DirectorContractTest {
             .doesNotContain("sourceScript");
         assertThat(detailShot.path("cameraPlan").path("properties").fieldNames()).toIterable().contains("lensPreset").doesNotContain("lensMm");
     }
+    @Test void denseTwentyFourSecondScenesCanUseTheFullPhysicallyPossibleShotRange(){
+        input.put("sceneTargetDurationSeconds",24);input.putObject("directorStyleProfile").put("averageShotLength",3);
+        JsonNode shots=contract.planSchema(input).path("properties").path("shotSkeletons");
+        assertThat(shots.path("minItems").asInt()).isEqualTo(7);
+        assertThat(shots.path("maxItems").asInt()).isEqualTo(12);
+    }
     @Test void shotDetailRequiresExplicitBodySourceAndLimbEntrySides(){
         ObjectNode detailInput=input.deepCopy();detailInput.set("shotSkeletons",mapper.createArrayNode().add(mapper.createObjectNode()));
         JsonNode actor=contract.detailSchema(detailInput).path("properties").path("shots").path("items").path("properties")
@@ -180,12 +186,41 @@ class DirectorContractTest {
         assertThat(canonical.path("dramaticBeats").path(1).path("emotionBefore").asText()).isEqualTo("警觉");
         assertThat(output.path("dramaticBeats").path(1).path("emotionBefore").asText()).isEqualTo("警觉紧绷");
     }
+    @Test void canonicalPlanMakesDirectHoldingBidirectionalWithoutTreatingContainedPropsAsHandheld(){
+        ObjectNode plan=output.deepCopy();ObjectNode initial=plan.putObject("sceneInitialState");
+        initial.putObject("characters").putObject("actor").put("holding","bag");
+        ObjectNode props=initial.putObject("props");props.putObject("bag").put("holder","actor").put("position","人物右手");
+        props.putObject("photo").put("holder","actor").put("position","位于种子袋内部");
+        ObjectNode canonical=contract.canonicalizePlan(plan,input);
+        assertThat(canonical.path("sceneInitialState").path("props").path("bag").path("holder").asText()).isEqualTo("actor");
+        assertThat(canonical.path("sceneInitialState").path("props").path("photo").path("holder").asText()).isEmpty();
+        assertThat(plan.path("sceneInitialState").path("props").path("photo").path("holder").asText()).isEqualTo("actor");
+    }
     @Test void planDerivesActiveCharactersFromItsShotSkeletonsWhenTheModelOmitsThem(){
         ObjectNode plan=output.deepCopy();plan.set("shotSkeletons",plan.remove("shots"));((ObjectNode)plan.path("dramaticBeats").path(0)).remove("activeCharacters");
         JsonNode required=contract.planSchema(input).path("properties").path("dramaticBeats").path("items").path("required");
         assertThat(mapper.convertValue(required,String[].class)).doesNotContain("activeCharacters");
         ObjectNode canonical=contract.canonicalizePlan(plan,input);
         assertThat(canonical.path("dramaticBeats").path(0).path("activeCharacters")).containsExactly(mapper.getNodeFactory().textNode("actor"));
+    }
+    @Test void canonicalPlanKeepsThePreviousAxisSideWhenNoVisibleCrossingWasPlanned(){
+        ObjectNode plan=output.deepCopy();ArrayNode skeletons=plan.putArray("shotSkeletons");
+        for(JsonNode source:output.path("shots")){
+            ObjectNode skeleton=((ObjectNode)source).deepCopy();skeleton.set("basicBlocking",skeleton.remove("blocking"));skeletons.add(skeleton);
+        }
+        ((ObjectNode)skeletons.path(0).path("basicBlocking")).put("axisSide","A_SIDE").put("axisChangeReason","");
+        ((ObjectNode)skeletons.path(1).path("basicBlocking")).put("axisSide","B_SIDE").put("axisChangeReason","");
+        ObjectNode canonical=contract.canonicalizePlan(plan,input);
+        assertThat(canonical.path("shotSkeletons").path(1).path("basicBlocking").path("axisSide").asText()).isEqualTo("A_SIDE");
+        assertThat(plan.path("shotSkeletons").path(1).path("basicBlocking").path("axisSide").asText()).isEqualTo("B_SIDE");
+    }
+    @Test void canonicalPlanAllocatesModelDurationsToTheExactServerOwnedSceneBudget(){
+        input.put("sceneTargetDurationSeconds",5);ObjectNode plan=output.deepCopy();ArrayNode skeletons=plan.putArray("shotSkeletons");
+        for(JsonNode source:output.path("shots")){ObjectNode skeleton=((ObjectNode)source).deepCopy();skeleton.set("basicBlocking",skeleton.remove("blocking"));skeletons.add(skeleton);}
+        assertThat(skeletons).extracting(value->value.path("duration").asDouble()).containsExactly(3d,3d);
+        ObjectNode canonical=contract.canonicalizePlan(plan,input);
+        assertThat(canonical.path("shotSkeletons")).extracting(value->value.path("duration").asDouble()).containsExactly(2.5d,2.5d);
+        assertThat(plan.path("shotSkeletons")).extracting(value->value.path("duration").asDouble()).containsExactly(3d,3d);
     }
     @Test void unapprovedStoryTruthMutationsAreRemovedBeforeProductionValidation() {
         ObjectNode beat=(ObjectNode)output.path("dramaticBeats").path(0);

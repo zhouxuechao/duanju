@@ -176,6 +176,11 @@ class HandoffIntegrationTest {
         assertThatThrownBy(()->studio.create(PROJECT,obj().put("name","类型校验").put("idea","测试").put("episodeCount",10).put("targetDuration","20")))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("targetDuration");
     }
+    @Test void projectRejectsUnknownDirectorStyleFieldsBeforeTheyCanBreakShotPlanning(){
+        ObjectNode request=obj().put("name","导演字段校验").put("idea","测试");
+        request.putObject("directorStyleProfile").put("cuttingPace","FAST");
+        assertThatThrownBy(()->studio.create(PROJECT,request)).isInstanceOf(IllegalArgumentException.class).hasMessageContaining("cuttingPace");
+    }
     @Test void providerFailurePreservesRequestIdWithoutRetry(){
         when(images.generate(any())).thenThrow(new ProviderException("INVALID_STRUCTURED_OUTPUT","模型输出缺少必要字段","request-invalid-output",200,false,false));
         ObjectNode submitted=workflow.image(shotId,"KEYFRAME",obj());worker.tick();

@@ -1,0 +1,19 @@
+{
+  "provider": "VOLCENGINE_SEED_AUDIO",
+  "capturedContract": "2026-09",
+  "expectedRequest": {
+    "model": "seed-audio-replay",
+    "speaker": "approved-speaker-replay",
+    "format": "mp3",
+    "sample_rate": 48000
+  },
+  "responseHeaders": {
+    "X-Tt-Logid": "audio-replay-request-001",
+    "X-Api-Status-Code": "20000000"
+  },
+  "response": {
+    "audio": "<BASE64_AUDIO_REDACTED>",
+    "duration": 1.25,
+    "original_duration": 1.4
+  }
+}

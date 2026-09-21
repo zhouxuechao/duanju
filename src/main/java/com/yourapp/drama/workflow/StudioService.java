@@ -71,7 +71,8 @@ public class StudioService {
                 if(body.has("episodeCount")&&!body.path("episodeCount").isIntegralNumber())throw new IllegalArgumentException("episodeCount 必须为整数");
                 int count=body.path("episodeCount").asInt(1); if(count<1||count>100)throw new IllegalArgumentException("集数应为 1 到 100");
                 body.put("episodeCount",count); body.putIfAbsent("targetDuration",IntNode.valueOf(20)); body.putIfAbsent("ratio",TextNode.valueOf("9:16")); body.putIfAbsent("style",TextNode.valueOf("写实电影")); body.putIfAbsent("dialect",TextNode.valueOf("MANDARIN"));
-                if(!body.path("directorStyleProfile").isObject())body.set("directorStyleProfile",directorStyles.defaults());
+                if(body.has("directorStyleProfile")&&!body.path("directorStyleProfile").isObject())throw new IllegalArgumentException("directorStyleProfile 必须为对象");
+                body.set("directorStyleProfile",directorStyles.resolve(body,obj()));
                 if(!body.path("targetDuration").isNumber())throw new IllegalArgumentException("targetDuration 必须为数字");
                 if(body.path("targetDuration").asDouble()<10||body.path("targetDuration").asDouble()>1800)throw new IllegalArgumentException("单集时长应为 10 到 1800 秒");
                 ObjectNode enriched=storyProfiles.enrich(body); body.removeAll(); body.setAll(enriched);

@@ -79,6 +79,11 @@ class DirectorBatchRecoveryIntegrationTest {
             JsonNode value=ReflectionTestUtils.invokeMethod(director,"DIRECTOR_PLAN".equals(stage)?"demoPlan":"demoDetail",input);
             if("DIRECTOR_PLAN".equals(stage)){
                 int call=providerPlanCalls.incrementAndGet();
+                if(call==2){
+                    assertThat(text(input.path("retryFeedback"),"failureCode")).isEqualTo("INVALID_STRUCTURED_OUTPUT");
+                    assertThat(text(input.path("retryFeedback"),"failureReason")).contains("单个数字后多余引号");
+                    assertThat(text(input.path("retryFeedback"),"providerRequestId")).isEqualTo("req-malformed");
+                }
                 String marker="\"averageShotLength\":3.0",raw=value.toString();assertThat(raw).contains(marker);
                 if(call==1)throw new ProviderException("INVALID_STRUCTURED_OUTPUT","单个数字后多余引号","req-malformed",200,false,false).withRawOutput(raw.replace(marker,marker+"\""));
             }
@@ -88,6 +93,8 @@ class DirectorBatchRecoveryIntegrationTest {
         assertThat(text(store.get(GENERATION_JOB,id(failed)),"failureCode")).isEqualTo("INVALID_STRUCTURED_OUTPUT");
         ObjectNode recovered=workflow.plan(sceneId,obj().put("requestKey","malformed-local-recovery"));
         assertThat(text(recovered.path("inputSnapshot"),"retryOfJobId")).isEqualTo(id(failed));
+        assertThat(recovered.path("inputSnapshot").path("reuseProviderOutput").asBoolean()).isFalse();
+        assertThat(text(recovered.path("inputSnapshot").path("retryFeedback"),"failureCode")).isEqualTo("INVALID_STRUCTURED_OUTPUT");
         for(int i=0;i<16&&store.list(SHOT,projectId,sceneId).isEmpty();i++)worker.tick();
         assertThat(providerPlanCalls.get()).isEqualTo(2);
         assertThat(store.list(SHOT,projectId,sceneId)).hasSize(10);
@@ -140,6 +147,37 @@ class DirectorBatchRecoveryIntegrationTest {
         worker.tick();
         assertThat(providerCalls.get()).isZero();
         assertThat(text(store.get(GENERATION_JOB,id(revalidation)),"status")).isEqualTo("SUCCESS");
+    }
+
+    @Test void localPlanRevalidationTakesOverTheStillCurrentFailedPlanWithoutCallingTheProvider(){
+        ObjectNode failed=workflow.plan(sceneId,obj().put("requestKey","plan-local-revalidation"));
+        ObjectNode providerInput=ReflectionTestUtils.invokeMethod(director,"planInput",failed.path("inputSnapshot"));
+        ObjectNode output=ReflectionTestUtils.invokeMethod(director,"demoPlan",providerInput);
+        ObjectNode stored=store.get(GENERATION_JOB,id(failed));store.update(GENERATION_JOB,id(stored),revision(stored),stored.deepCopy()
+            .put("status","FAILED").put("failureCode","GENERATION_FAILED").put("providerRequestId","req-valid-plan").set("providerOutput",output));
+        ObjectNode revalidation=jobs.revalidate(id(failed));
+        reset(llm);AtomicInteger providerCalls=new AtomicInteger();when(llm.generate(any(),eq(JsonNode.class))).thenAnswer(invocation->{providerCalls.incrementAndGet();throw new AssertionError("本地规划复核不应调用三方");});
+        worker.tick();
+        assertThat(providerCalls.get()).isZero();
+        assertThat(text(store.get(GENERATION_JOB,id(revalidation)),"status")).isEqualTo("SUCCESS");
+        assertThat(text(store.get(SCENE,sceneId),"activeDirectorPlanJobId")).isEqualTo(id(revalidation));
+        assertThat(detailJobs()).hasSize(1);
+    }
+
+    @Test void aPlanThatStillFailsAfterLocalRevalidationRequestsFreshProviderOutputNext(){
+        ObjectNode failed=workflow.plan(sceneId,obj().put("requestKey","plan-invalid-local-revalidation"));
+        ObjectNode providerInput=ReflectionTestUtils.invokeMethod(director,"planInput",failed.path("inputSnapshot"));
+        ObjectNode output=ReflectionTestUtils.invokeMethod(director,"demoPlan",providerInput);
+        ((ObjectNode)output.path("shotSkeletons").path(0)).put("relationToPrevious","CONTINUOUS");
+        ObjectNode stored=store.get(GENERATION_JOB,id(failed));store.update(GENERATION_JOB,id(stored),revision(stored),stored.deepCopy()
+            .put("status","FAILED").put("failureCode","GENERATION_FAILED").put("providerRequestId","req-invalid-plan").set("providerOutput",output));
+        ObjectNode local=jobs.revalidate(id(failed));worker.tick();
+        assertThat(text(store.get(GENERATION_JOB,id(local)),"status")).isEqualTo("FAILED");
+        assertThat(text(store.get(SCENE,sceneId),"activeDirectorPlanJobId")).isEqualTo(id(local));
+        ObjectNode fresh=workflow.plan(sceneId,obj().put("requestKey","fresh-after-local-failure"));
+        assertThat(text(fresh.path("inputSnapshot"),"retryOfJobId")).isEqualTo(id(local));
+        assertThat(fresh.path("inputSnapshot").path("reuseProviderOutput").asBoolean()).isFalse();
+        assertThat(text(fresh.path("inputSnapshot").path("retryFeedback"),"failureReason")).contains("场景首镜");
     }
 
     private List<ObjectNode> detailJobs(){return store.list(GENERATION_JOB,projectId,null).stream().filter(j->"SHOT_DETAIL".equals(text(j,"type"))).toList();}

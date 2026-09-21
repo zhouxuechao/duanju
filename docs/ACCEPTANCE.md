@@ -24,3 +24,24 @@
 真实配置来自用户指定的 `D:\\project\\aimanju\\.env`，密钥没有复制到仓库或日志。Live 启动检查没有发起模型生成，因此没有产生本次验收调用费用。
 
 旧项目可读取的数据只有视频任务的 `lastFrameAssetId`。末帧资产既不是人物身份素材，也没有对应原始人物参考图，按连续性与授权规则不能用于冒充真实人物完成 P1/Benchmark 画质验收。取得合格人物素材后，可直接在剧组工作区绑定并执行真实 Keyframe → Seedance → QC → 后期链路。
+
+## 2026-09-21 源码收尾与真实链路复验
+
+| 验收项 | 结果 | 证据 |
+| --- | --- | --- |
+| Seedance CONTINUOUS Provider 路由 | DONE | `FIRST_FRAME`、`FULL_MODAL_REFERENCE`、`CONTINUATION_LAST_FRAME` 与能力阻断均有合同测试；真实第二镜请求包含 `reference_video`，且不含 `first_frame` |
+| Runtime Skill | DONE | Premise、Story Quality 等运行时 Skill 已打入最终 JAR，并由 `RuntimeSkillResourceTest` 从 classpath 读取 |
+| Premise Gate | DONE | `viable=false` 停在 `PREMISE_REVIEW_REQUIRED`；编辑、接受建议、强制继续及审计字段均有集成测试 |
+| PipelineRun / Resume | DONE | FREE 模式调用现有 Story、导演、媒体、QC、后期服务，按首个未完成阶段恢复 |
+| Skill Manifest / Catalog | DONE | Manifest 驱动生成，生成器不覆盖人工维护 Prompt；源码和 runtime catalog 指纹一致 |
+| PowerShell 脚本 | DONE | `LASTEXITCODE` 只检查刚执行的外部命令，并有静态回归测试 |
+| TestBudgetGuard | DONE | 幂等命中先于预算预留；LLM、IMAGE、VIDEO、TTS、LIPSYNC 分账；uncertain 保留预留并等待 reconcile |
+| FREE E2E | PASS | Golden fixture 从项目执行到可播放 `preview.mp4` / `final.mp4`，包含 QC 返修、恢复、字幕、BGM、SFX 与 FFmpeg 探测 |
+| Media E2E | PASS | 真实 PNG、MP4、WAV 媒体夹具经 FFmpeg/ffprobe 完成后期链路 |
+| Provider Replay | PASS | Seedream、Seedance submit/poll、TTS 脱敏历史合同回放通过 |
+| 后端全量测试 | PASS | 315/315，0 failed，0 skipped |
+| 前端测试与构建 | PASS | Vitest 6/6；Vite production build 通过 |
+
+真实两镜 Canary 已执行 1 次 Seedream 和 2 次 Seedance：首镜使用 `FIRST_FRAME`，第二镜使用 `FULL_MODAL_REFERENCE`，`previousTakeId=cgt-20260921180417-czf4s`，计划与估算实际成本均为 3.2 元，重复浪费成本为 0。人物脸、灰发、深蓝棉袄、站位、右手持铃、铃铛缺口与动作相位跨镜连续；首锚图把供桌放在门前，违反相对墙面约束，因此技术与连续性通过，场景拓扑和故事准确性未通过，最终决定为 `REANCHOR`，没有把 HTTP 200 当作画质通过。
+
+24 秒真实项目 `会发芽的欠条·真实全链路-0921-1622` 已完成故事、剧本、3 个人物、4 套定妆、3 个地点、3 个道具和 40 个已审核多视图。导演总规划沿用已付费响应完成本地复核，生成 12 个镜头骨架，服务端把镜头时长精确分配为 24 秒。第 1 个逐镜详情请求在服务商接单前被 `AccountOverdueError` 拒绝，两次请求 ID 分别为 `0217899895234839ee13f605c3786670e0524dbc441cb77a64d47`、`0217899896280663668eba1a5ab869c4433ad7bc82b08d379db92`；均无输出、无 usage、无不确定提交。真实项目保留在此断点，未继续发送图片、视频或语音付费请求。

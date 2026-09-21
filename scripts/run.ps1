@@ -33,8 +33,10 @@ if ($Build -or -not (Test-Path -LiteralPath 'target\drama-0.1.0-SNAPSHOT.jar')) 
     if ($Build -or -not (Test-Path -LiteralPath 'frontend\dist\index.html')) {
         Push-Location -LiteralPath 'frontend'
         try {
-            if (-not (Test-Path -LiteralPath 'node_modules')) { & npm.cmd ci }
-            if ($LASTEXITCODE -ne 0) { throw '界面依赖安装失败' }
+            if (-not (Test-Path -LiteralPath 'node_modules')) {
+                & npm.cmd ci
+                if ($LASTEXITCODE -ne 0) { throw '界面依赖安装失败' }
+            }
             & npm.cmd run build
             if ($LASTEXITCODE -ne 0) { throw '界面构建失败' }
         } finally { Pop-Location }

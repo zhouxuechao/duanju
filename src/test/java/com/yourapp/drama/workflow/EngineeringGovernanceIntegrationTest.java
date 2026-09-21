@@ -20,7 +20,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SpringBootTest
+@SpringBootTest(properties={"drama.render.ffmpeg=frontend/node_modules/ffmpeg-static/ffmpeg.exe","drama.render.ffprobe=frontend/node_modules/ffprobe-static/bin/win32/x64/ffprobe.exe"})
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Transactional
@@ -53,20 +53,46 @@ class EngineeringGovernanceIntegrationTest {
     }
 
     @Test
-    void pipelineRunPersistsStageCheckpointsAndResumesSameRun() throws Exception {
-        ObjectNode project=store.create(PROJECT,obj().put("name","断点验收").put("idea","测试").put("episodeCount",1).put("targetDuration",24).put("ratio","9:16"));
+    void pipelineRunExecutesMockProjectToFinalMp4AndKeepsSuccessfulCheckpointsOnResume() throws Exception {
+        ObjectNode fixture=(ObjectNode)mapper.readTree(java.nio.file.Files.readString(java.nio.file.Path.of("test-fixtures/e2e/golden-basic/project.json")));
+        fixture.put("idea","一只失踪的铜铃迫使两位村民在夜色中重新面对一桩旧事").put("ratio","9:16");
+        ObjectNode project=store.create(PROJECT,fixture);
         JsonNode started=mapper.readTree(mvc.perform(post("/api/projects/{id}/pipeline-runs",id(project)).contentType(MediaType.APPLICATION_JSON)
             .content(obj().put("mode","MOCK").put("scenarioId","golden-basic").toString())).andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
-        assertThat(started.path("status").asText()).isEqualTo("WAITING");
-        assertThat(started.path("resumeFromStage").asText()).isEqualTo("CORE");
+        assertThat(started.path("status").asText()).isEqualTo("SUCCESS");
+        assertThat(started.path("resumeFromStage").asText()).isBlank();
         assertThat(started.path("stages")).anyMatch(stage->stage.path("stage").asText().equals("PREFLIGHT")&&stage.path("status").asText().equals("SUCCESS"));
+        assertThat(started.path("stages")).allMatch(stage->stage.path("status").asText().equals("SUCCESS"));
         String runId=started.path("id").asText();
+        ObjectNode timeline=store.list(TIMELINE,id(project),null).getFirst();
+        assertThat(text(timeline,"previewUrl")).startsWith("/api/media/renders/");
+        assertThat(text(timeline,"finalUrl")).startsWith("/api/media/renders/");
+        assertThat(text(timeline,"finalQaStatus")).isEqualTo("PASSED");
+        assertThat(store.list(STORYBOARD,id(project),null)).isNotEmpty();
+        assertThat(store.list(QC_RESULT,id(project),null)).anyMatch(review->!review.path("passed").asBoolean());
+        assertThat(store.list(DIALOGUE_LINE,id(project),null)).isNotEmpty();
+        assertThat(store.list(AUDIO_CLIP,id(project),null)).allMatch(clip->clip.path("locked").asBoolean());
+        assertThat(store.list(TIMELINE_ITEM,id(project),null)).anyMatch(item->"BGM".equals(text(item,"track"))).anyMatch(item->"SFX".equals(text(item,"track")));
+        assertThat(store.list(GENERATION_JOB,id(project),null)).anyMatch(job->"VIDEO".equals(text(job,"type"))&&"FULL_MODAL_REFERENCE".equals(text(job.path("inputSnapshot"),"videoRequestRoute")));
+        int completedJobs=(int)store.list(GENERATION_JOB,id(project),null).stream().filter(job->"SUCCESS".equals(text(job,"status"))).count();
 
         JsonNode resumed=mapper.readTree(mvc.perform(post("/api/pipeline-runs/{id}/resume",runId).contentType(MediaType.APPLICATION_JSON).content("{}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
         assertThat(resumed.path("id").asText()).isEqualTo(runId);
-        assertThat(resumed.path("attempt").asInt()).isEqualTo(2);
+        assertThat(resumed.path("attempt").asInt()).isEqualTo(1);
         assertThat(store.list(PIPELINE_RUN,id(project),null)).hasSize(1);
+        assertThat((int)store.list(GENERATION_JOB,id(project),null).stream().filter(job->"SUCCESS".equals(text(job,"status"))).count()).isEqualTo(completedJobs);
         assertThat(store.list(STAGE_RUN,id(project),runId)).isNotEmpty();
+
+        ObjectNode currentTimeline=store.get(TIMELINE,id(timeline));
+        ObjectNode interruptedTimeline=currentTimeline.deepCopy().put("finalQaStatus","TECHNICAL_PASSED");interruptedTimeline.remove("finalCreativeQa");
+        store.update(TIMELINE,id(currentTimeline),revision(currentTimeline),interruptedTimeline);
+        ObjectNode interrupted=store.create(PIPELINE_RUN,obj().put("projectId",id(project)).put("scenarioId","golden-basic").put("mode","MOCK").put("status","WAITING").put("attempt",1).put("startedAt",java.time.Instant.now().toString()));
+        JsonNode recovered=mapper.readTree(mvc.perform(post("/api/pipeline-runs/{id}/resume",id(interrupted)).contentType(MediaType.APPLICATION_JSON).content("{}"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        assertThat(recovered.path("status").asText()).isEqualTo("SUCCESS");
+        assertThat(recovered.path("attempt").asInt()).isEqualTo(2);
+        assertThat(text(store.get(TIMELINE,id(timeline)),"finalQaStatus")).isEqualTo("PASSED");
+        assertThat((int)store.list(GENERATION_JOB,id(project),null).stream().filter(job->"SUCCESS".equals(text(job,"status"))).count()).isEqualTo(completedJobs);
     }
 }
