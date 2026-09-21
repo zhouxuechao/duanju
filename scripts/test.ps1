@@ -8,6 +8,8 @@ try {
         & npm.cmd ci
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
+    & npm.cmd run test
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     & npm.cmd run build
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } finally { Pop-Location }
