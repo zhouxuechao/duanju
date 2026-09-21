@@ -63,7 +63,7 @@ class EngineeringGovernanceIntegrationTest {
         assertThat(started.path("resumeFromStage").asText()).isBlank();
         assertThat(started.path("stages")).anyMatch(stage->stage.path("stage").asText().equals("PREFLIGHT")&&stage.path("status").asText().equals("SUCCESS"));
         assertThat(started.path("stages")).extracting(stage->stage.path("stage").asText()).containsExactly(
-            "PREFLIGHT","STORY","DIRECTOR","IMAGE","VIDEO","AUDIO","TIMELINE","PREVIEW","CREATIVE_QA","FINAL");
+            "PREFLIGHT","STORY","DIRECTOR","ASSET","KEYFRAME","VIDEO","AUDIO","TIMELINE","PREVIEW","CREATIVE_QA","FINAL");
         assertThat(started.path("stages")).allMatch(stage->stage.path("status").asText().equals("SUCCESS"));
         String runId=started.path("id").asText();
         ObjectNode timeline=store.list(TIMELINE,id(project),null).getFirst();

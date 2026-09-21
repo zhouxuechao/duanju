@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.yourapp.drama.persistence.DocumentStore;
 import com.yourapp.drama.persistence.ResourceKind;
 import com.yourapp.drama.job.GenerationWorker;
+import com.yourapp.drama.production.AssetDependencyAnalyzer;
 import org.springframework.stereotype.Service;
 
 import java.security.MessageDigest;
@@ -18,8 +19,8 @@ import static com.yourapp.drama.workflow.Documents.*;
 
 @Service
 public class PipelineRunService {
-    /** Public production stages. Story/Director/Image keep their own durable sub-artifacts internally. */
-    private static final List<String> STAGES=List.of("PREFLIGHT","STORY","DIRECTOR","IMAGE","VIDEO","AUDIO","TIMELINE","PREVIEW","CREATIVE_QA","FINAL");
+    /** Public production stages. Asset preparation and shot keyframes have independent restart checkpoints. */
+    private static final List<String> STAGES=List.of("PREFLIGHT","STORY","DIRECTOR","ASSET","KEYFRAME","VIDEO","AUDIO","TIMELINE","PREVIEW","CREATIVE_QA","FINAL");
     private final DocumentStore store;
     private final PipelinePreflightService preflight;
     private final ObjectMapper mapper;
@@ -91,9 +92,10 @@ public class PipelineRunService {
     private int storyOrder(ObjectNode document){return switch(text(document,"documentType")){case "STORY_BRIEF"->0;case "CORE"->1;case "OUTLINE_BATCH"->2;case "EPISODE_SCRIPT"->3;default->4;};}
 
     private void driveAssetViews(String projectId){
-        if(store.list(ASSET_VIEW,projectId,null).stream().noneMatch(v->!v.path("stale").asBoolean()))assetViews.generate(projectId,obj());
+        AssetDependencyAnalyzer.Level dependency=assetViews.requiredLevel(projectId);if(dependency==AssetDependencyAnalyzer.Level.A0)return;
+        if(store.list(ASSET_VIEW,projectId,null).stream().noneMatch(v->!v.path("stale").asBoolean()))assetViews.generate(projectId,obj().put("assetDependencyLevel",dependency.name()));
         for(int step=0;step<512;step++){
-            List<ObjectNode> views=store.list(ASSET_VIEW,projectId,null).stream().filter(v->!v.path("stale").asBoolean()).toList();
+            List<ObjectNode> views=store.list(ASSET_VIEW,projectId,null).stream().filter(v->!v.path("stale").asBoolean()&&(dependency!=AssetDependencyAnalyzer.Level.A1||v.path("master").asBoolean())).toList();
             if(!views.isEmpty()&&views.stream().allMatch(v->v.path("approved").asBoolean()))return;
             Optional<ObjectNode> review=views.stream().filter(v->"REVIEW".equals(text(v,"status"))).sorted(Comparator.comparing((ObjectNode v)->!v.path("master").asBoolean())).findFirst();
             if(review.isPresent()){ObjectNode view=review.get();assetViews.approve(id(view),obj().put("revision",revision(view)).put("reviewNote","FREE Pipeline 可重复素材合同验收"));continue;}
@@ -135,9 +137,9 @@ public class PipelineRunService {
             ObjectNode frame=approved(projectId,id(shot),KEYFRAME).orElseThrow();
             List<ObjectNode> takes=store.list(VIDEO_TAKE,projectId,id(shot));ObjectNode take=takes.stream().filter(t->"SUCCEEDED".equals(text(t,"providerStatus"))&&"PENDING".equals(text(t,"qcStatus"))).findFirst().orElse(null);
             if(take==null){ObjectNode job=workflow.video(id(frame),obj().put("requestKey","pipeline-video-"+id(shot)+"-"+takes.size()));complete(job);take=latest(projectId,id(shot),VIDEO_TAKE);}
-            JsonNode observed=shot.path("endState");ObjectNode review=visualPass();review.set("observedState",observed.isObject()&&!observed.isEmpty()?observed.deepCopy():obj().put("continuityReviewed",true));
-            if(observed.isEmpty())review.put("deviationDecision","ACCEPT_CANONICAL");
-            workflow.review(VIDEO_TAKE,id(take),review);workflow.lock(VIDEO_TAKE,id(take),obj());
+            drain(projectId,64);take=store.get(VIDEO_TAKE,id(take));
+            if(!"PASSED".equals(text(take,"qcStatus")))throw new WorkflowException("VIDEO_QC_PENDING","视频自动质检尚未通过");
+            workflow.lock(VIDEO_TAKE,id(take),obj());
         }
         drain(projectId,512);
     }
@@ -165,7 +167,7 @@ public class PipelineRunService {
             ObjectNode qa=post.quality(id(timeline));if(!qa.path("passed").asBoolean())throw new WorkflowException("QA_BLOCKING","时间线质检未通过："+qa.path("failureCodes"));
             timeline=workflow.lock(TIMELINE,id(timeline),obj());
             if(text(timeline,"finalUrl").isBlank()){complete(post.render(id(timeline),obj().put("quality","FINAL").put("requestKey","pipeline-final-"+id(timeline))));timeline=store.get(TIMELINE,id(timeline));}
-            if(!"PASSED".equals(text(timeline,"finalQaStatus"))){ObjectNode review=obj().put("decision","PASS").put("reviewer","FREE_PIPELINE").put("notes","模拟媒体合同、连续性和叙事节点验收通过");for(String metric:List.of("characterConsistency","propContinuity","positionContinuity","actionContinuity","editingRhythm","dialogueQuality","bgmFit","sfxAccuracy","subtitleAccuracy","hook","midHook","cliffhanger"))review.put(metric,5);post.finalReview(id(timeline),review);}
+            if(!"PASSED".equals(text(timeline,"finalQaStatus"))){ObjectNode review=obj().put("decision","PASS").put("reviewer","FREE_PIPELINE").put("notes","模拟媒体合同、连续性和叙事节点验收通过");for(String metric:FinalCreativeQualityService.METRICS)review.put(metric,5);post.finalReview(id(timeline),review);}
         }
     }
 
@@ -216,11 +218,13 @@ public class PipelineRunService {
         boolean story=!episodes.isEmpty()&&!scenes.isEmpty()&&List.of("STORY_BRIEF","CORE","OUTLINE_BATCH","EPISODE_SCRIPT").stream().allMatch(type->currentDocs.stream().anyMatch(d->type.equals(text(d,"documentType"))&&"CONFIRMED".equals(text(d,"reviewStatus"))));
         values.put("STORY",evaluation(story,"STORY_INCOMPLETE","创作需求、核心、集纲、单集剧本或场景尚未确认完成","DATA",mapper.valueToTree(currentDocs),artifacts(currentDocs)));
         values.put("DIRECTOR",resources(shots,d->!d.path("stale").asBoolean(),"DIRECTOR_INCOMPLETE","尚未形成有效导演镜头计划"));
+        AssetDependencyAnalyzer.Level assetDependency=assetViews.requiredLevel(projectId);List<ObjectNode> assetArtifacts=store.list(ASSET_VIEW,projectId,null).stream().filter(v->assetDependency!=AssetDependencyAnalyzer.Level.A1||v.path("master").asBoolean()).toList();
+        values.put("ASSET",assetDependency==AssetDependencyAnalyzer.Level.A0?evaluation(true,"","","DATA",mapper.createArrayNode(),List.of()):resources(assetArtifacts,v->!v.path("stale").asBoolean()&&v.path("approved").asBoolean(),"ASSET_NOT_APPROVED","项目所需人物、场景或道具参考视图尚未确认"));
         List<ObjectNode> storyboardArtifacts=store.list(STORYBOARD,projectId,null);
         StageEvaluation boards=resources(storyboardArtifacts,b->b.path("selected").asBoolean()&&b.path("locked").asBoolean()&&"PASSED".equals(text(b,"qcStatus")),"STORYBOARD_NOT_LOCKED","项目缺少已质检并锁定的构图故事板");
         StageEvaluation keyframes=resourcesForShots(projectId,shots,KEYFRAME,"KEYFRAME_NOT_LOCKED","镜头缺少已质检并锁定的关键帧");
         ArrayNode imageArtifacts=mapper.createArrayNode();imageArtifacts.addAll(boards.artifacts);imageArtifacts.addAll(keyframes.artifacts);
-        values.put("IMAGE",evaluation(boards.success&&keyframes.success,"IMAGE_INCOMPLETE","故事板或关键帧尚未全部质检并锁定","DATA",imageArtifacts,mapper.convertValue(imageArtifacts,new com.fasterxml.jackson.core.type.TypeReference<List<String>>(){})));
+        values.put("KEYFRAME",evaluation(boards.success&&keyframes.success,"KEYFRAME_INCOMPLETE","故事板或关键帧尚未全部质检并锁定","DATA",imageArtifacts,mapper.convertValue(imageArtifacts,new com.fasterxml.jackson.core.type.TypeReference<List<String>>(){})));
         values.put("VIDEO",resourcesForShots(projectId,shots,VIDEO_TAKE,"VIDEO_NOT_LOCKED","镜头缺少已质检并锁定的视频"));
         List<ObjectNode> dialogue=store.list(DIALOGUE_LINE,projectId,null),audio=store.list(AUDIO_CLIP,projectId,null);
         boolean tts=!dialogue.isEmpty()&&dialogue.stream().allMatch(line->audio.stream().anyMatch(a->id(line).equals(text(a,"dialogueLineId"))&&a.path("locked").asBoolean()));

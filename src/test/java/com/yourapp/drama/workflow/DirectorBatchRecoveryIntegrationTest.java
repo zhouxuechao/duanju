@@ -54,7 +54,9 @@ class DirectorBatchRecoveryIntegrationTest {
     }
 
     @Test void failedSecondBatchRetriesOnlyThatBatchAndResumesFromBatchOneCheckpoint(){
-        ObjectNode root=workflow.plan(sceneId,obj());worker.tick();worker.tick();
+        ObjectNode root=workflow.plan(sceneId,obj());
+        assertThat(text(root.path("inputSnapshot").path("directorRuleProfile"),"assetDependency")).isEqualTo("A2");
+        worker.tick();worker.tick();
         ObjectNode batch1=detailJobs().getFirst();assertThat(text(batch1,"status")).isEqualTo("SUCCESS");ObjectNode checkpoint=batch1.path("outputSnapshot").deepCopy();
         for(int i=0;i<4;i++)worker.tick();ObjectNode failed=detailJobs().stream().filter(j->j.path("inputSnapshot").path("shotStart").asInt()==5).findFirst().orElseThrow();
         assertThat(text(failed,"status")).isEqualTo("FAILED");assertThat(text(failed,"failureCode")).isEqualTo("OUTPUT_TRUNCATED");

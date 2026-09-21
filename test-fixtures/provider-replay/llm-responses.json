@@ -1,0 +1,19 @@
+{
+  "provider": "VOLCENGINE_RESPONSES",
+  "capturedContract": "2026-09",
+  "expectedRequest": {
+    "model": "text-replay",
+    "stream": false,
+    "store": false,
+    "max_output_tokens": 16384
+  },
+  "responseHeaders": { "x-request-id": "llm-replay-request-001" },
+  "response": {
+    "status": "completed",
+    "output": [{
+      "type": "message",
+      "content": [{ "type": "output_text", "text": "{\"title\":\"回放故事\"}" }]
+    }],
+    "usage": { "input_tokens": 64, "output_tokens": 12, "total_tokens": 76 }
+  }
+}

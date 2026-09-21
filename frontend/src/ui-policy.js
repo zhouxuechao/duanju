@@ -14,6 +14,15 @@ export function keyframePrimaryAction(frame) {
   return 'LOCK_AND_GENERATE_VIDEO'
 }
 
+export function storyboardPrimaryAction(board) {
+  if (!board || board.locked || board.qcStatus !== 'PASSED') return 'NONE'
+  return 'LOCK_AND_GENERATE_KEYFRAME'
+}
+
+export function creativeQaCanRelease(review) {
+  return Boolean(review?.passed === true && (!Array.isArray(review.BLOCKING) || review.BLOCKING.length === 0))
+}
+
 export function reconciliationChoices(job) {
   if (!job?.submissionUncertain) return []
   return ['VIDEO', 'LIPSYNC'].includes(job.type)
@@ -35,6 +44,6 @@ export function canResumePipeline(run) {
 }
 
 export function pipelineStageLabel(stage) {
-  return ({ PREFLIGHT: '生产准备', STORY: '故事', DIRECTOR: '导演', IMAGE: '画面', VIDEO: '视频',
+  return ({ PREFLIGHT: '生产准备', STORY: '故事', DIRECTOR: '导演', ASSET: '素材', KEYFRAME: '故事板与关键帧', VIDEO: '视频',
     AUDIO: '声音', TIMELINE: '剪辑', PREVIEW: '预览', CREATIVE_QA: '创作质检', FINAL: '成片' })[stage] || stage
 }

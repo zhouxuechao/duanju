@@ -10,6 +10,7 @@ import com.yourapp.drama.production.VideoRequestPlanner;
 import com.yourapp.drama.production.KeyframeSemanticRole;
 import com.yourapp.drama.production.ProviderFrameMode;
 import com.yourapp.drama.production.CrossShotQc;
+import com.yourapp.drama.production.AssetDependencyAnalyzer;
 import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.util.*;
@@ -43,13 +44,16 @@ public class WorkflowService {
         ObjectNode first=store.get(SCENE,sceneId);store.getForUpdate(PROJECT,project(first));
         ObjectNode scene=store.getForUpdate(SCENE,sceneId), input=obj();ObjectNode episode=store.get(EPISODE,required(scene,"episodeId"));
         if(scene.path("stale").asBoolean())throw new WorkflowException("STALE_SCENE","此场景已被新的确认剧本替代，请从当前剧本进入分镜生产");
-        input.set("continuitySnapshot",development.approvedSnapshot(episode));input.put("continuityHash",required(episode,"continuityHash"));input.set("scene",scene);input.set("episodeScript",episode);ObjectNode catalog=assets(project(scene));
+        input.set("continuitySnapshot",development.approvedSnapshot(episode));input.put("continuityHash",required(episode,"continuityHash"));input.set("scene",scene);input.set("episodeScript",episode);ObjectNode projectDocument=store.get(PROJECT,project(scene)),catalog=assets(project(scene));
         JsonNode script=store.get(STORY_DOCUMENT,required(episode,"storyDocumentId")).path("content");
         Map<String,Set<String>> scriptKeys=new HashMap<>();for(String field:List.of("characterKeys","locationKeys","propKeys")){Set<String> keys=new HashSet<>();script.path(field).forEach(v->keys.add(v.asText()));scriptKeys.put(field,keys);}
         Set<String> actors=new HashSet<>();catalog.path("characters").forEach(c->{if(scriptKeys.get("characterKeys").contains(text(c,"characterKey")))actors.add(id(c));});List<String> needed=new ArrayList<>();
         catalog.path("looks").forEach(l->{if(actors.contains(text(l,"characterId")))needed.add(id(l));});
         for(String field:List.of("locations","props"))catalog.path(field).forEach(a->{if(scriptKeys.get(field.equals("locations")?"locationKeys":"propKeys").contains(text(a,field.equals("locations")?"locationKey":"propKey")))needed.add(id(a));});
-        assetViews.requireReady(project(scene),required(episode,"storyBibleId"),needed);
+        double averageShotLength=directorStyles.resolve(projectDocument,scene).path("averageShotLength").asDouble(3);int estimatedShots=Math.max(1,(int)Math.ceil(scene.path("duration").asDouble(3)/Math.max(2,averageShotLength)));
+        AssetDependencyAnalyzer.Level assetDependency=new AssetDependencyAnalyzer().classify(actors.size(),scriptKeys.get("locationKeys").size(),estimatedShots,estimatedShots>1,projectDocument.path("episodeCount").asInt(1)>=30);
+        assetViews.requireReady(project(scene),required(episode,"storyBibleId"),needed,assetDependency);catalog=assets(project(scene),assetDependency);
+        input.set("directorRuleProfile",obj().put("assetDependency",assetDependency.name()));
         Set<String> neededIds=new HashSet<>(needed);
         for(String field:List.of("characters","looks","locations","props")){
             ArrayNode selected=JsonNodeFactory.instance.arrayNode();
@@ -61,8 +65,8 @@ public class WorkflowService {
             }catalog.set(field,selected);
         }
         input.set("assets",catalog);
-        ArrayNode pinnedViews=input.putArray("assetViewIds");for(String assetId:needed)assetViews.approvedReferences(project(scene),required(episode,"storyBibleId"),assetId).forEach(v->pinnedViews.add(id(v)));
-        ObjectNode projectDocument=store.get(PROJECT,project(scene)),styleScene=scene.deepCopy();if(body.path("directorStyleOverride").isObject())styleScene.set("directorStyleOverride",body.path("directorStyleOverride").deepCopy());
+        ArrayNode pinnedViews=input.putArray("assetViewIds");for(String assetId:needed)assetViews.approvedReferences(project(scene),required(episode,"storyBibleId"),assetId,assetDependency).forEach(v->pinnedViews.add(id(v)));
+        ObjectNode styleScene=scene.deepCopy();if(body.path("directorStyleOverride").isObject())styleScene.set("directorStyleOverride",body.path("directorStyleOverride").deepCopy());
         ObjectNode plannedScene=scene.deepCopy();plannedScene.set("sceneContinuityPolicy",resolvedSceneContinuityPolicy(scene,projectDocument));input.set("scene",plannedScene);
         ObjectNode projectContext=obj();for(String field:List.of("id","name","ratio","style","dialect","sceneContinuityPolicy"))if(projectDocument.has(field))projectContext.set(field,projectDocument.get(field).deepCopy());
         input.set("project",projectContext);input.set("episodeFormat",episodeFormats.resolve(projectDocument));input.put("sceneTargetDurationSeconds",scene.path("duration").asDouble());input.set("directorStyleProfile",directorStyles.resolve(projectDocument,styleScene));
@@ -136,7 +140,7 @@ public class WorkflowService {
             JsonNode compiled=production.compileImage(context);
             int version=store.list(type.equals("KEYFRAME")?KEYFRAME:STORYBOARD,project(shot),shotId).size()+1;
             ObjectNode prompt=savePrompt(shot,type,compiled,context);
-            ObjectNode input=obj().put("shotId",shotId).put("sceneId",required(shot,"sceneId")).put("episodeId",required(store.get(SCENE,required(shot,"sceneId")),"episodeId")).put("version",version).put("promptVersionId",id(prompt)).put("prompt",compiled.path("prompt").asText());copyPromptAudit(input,compiled,context);
+            ObjectNode input=obj().put("shotId",shotId).put("sceneId",required(shot,"sceneId")).put("episodeId",required(store.get(SCENE,required(shot,"sceneId")),"episodeId")).put("version",version).put("promptVersionId",id(prompt)).put("prompt",compiled.path("prompt").asText()).put("assetDependencyLevel",assetDependency(shot).name());copyPromptAudit(input,compiled,context);
             String semanticRole="STORYBOARD".equals(type)?KeyframeSemanticRole.STORYBOARD_GRID.name():body.path("semanticRole").asText(KeyframeSemanticRole.START_FRAME.name());KeyframeSemanticRole role=KeyframeSemanticRole.from(semanticRole);input.put("semanticRole",role.name()).put("providerFrameMode",role.nativeBoundary()?ProviderFrameMode.NATIVE_BOUNDARY.name():ProviderFrameMode.SEMANTIC_REFERENCE.name()).put("timeSec",body.path("timeSec").asDouble(role==KeyframeSemanticRole.END_FRAME?shot.path("duration").asDouble(0):0)).put("stateVersion",body.path("stateVersion").asInt(shot.path("shotPlanVersion").asInt(1)));
             input.set("context",context);
             ObjectNode imageOptions=body.path("providerOptions").isObject()?(ObjectNode)body.path("providerOptions").deepCopy():obj();
@@ -373,10 +377,10 @@ public class WorkflowService {
     }
     public ObjectNode context(ObjectNode source){
         if(source.path("stale").asBoolean())throw new WorkflowException("STALE_SHOT","此镜头依据的剧本已经修改，请使用当前确认版本重新拆镜");
-        ObjectNode shot=source.deepCopy();shot.put("shotId",id(source));
-        ObjectNode context=obj();context.set("shot",shot);context.set("assets",assets(project(source)));
+        ObjectNode shot=source.deepCopy();shot.put("shotId",id(source));AssetDependencyAnalyzer.Level assetDependency=assetDependency(source);
+        ObjectNode context=obj();context.set("shot",shot);context.set("assets",assets(project(source),assetDependency));
         ObjectNode scene=store.get(SCENE,required(source,"sceneId"));context.set("continuitySnapshot",development.approvedSnapshot(store.get(EPISODE,required(scene,"episodeId"))));context.set("previousState",scene.path("initialState").isObject()?scene.path("initialState"):obj());context.set("sceneContinuityPolicy",resolvedSceneContinuityPolicy(scene,store.get(PROJECT,project(source))));
-        ObjectNode filteredAssets=contextResolver.filterAssets(assets(project(source)),source);context.set("assets",filteredAssets);
+        ObjectNode filteredAssets=contextResolver.filterAssets((ObjectNode)context.path("assets"),source);context.set("assets",filteredAssets);
         String style=store.get(PROJECT,project(source)).path("style").asText("写实电影");context.put("style",style);filteredAssets.put("style",style);
         if(source.path("storyTime").isNumber()){
             List<String> visible=new ArrayList<>();source.path("characterIds").forEach(v->visible.add(v.asText()));
@@ -418,7 +422,9 @@ public class WorkflowService {
         });
     }
     private ObjectNode resolvedSceneContinuityPolicy(JsonNode scene,JsonNode project){JsonNode configured=scene.path("sceneContinuityPolicy").isObject()?scene.path("sceneContinuityPolicy"):project.path("sceneContinuityPolicy");ObjectNode policy=configured.isObject()?(ObjectNode)configured.deepCopy():obj();int max=policy.path("maxContinuationDepth").asInt(2);if(max<1||max>8)throw new WorkflowException("SCENE_CONTINUITY_POLICY_INVALID","maxContinuationDepth 必须在 1 到 8 之间");policy.put("maxContinuationDepth",max);policy.putIfAbsent("resetAtSceneBoundary",BooleanNode.TRUE);policy.putIfAbsent("reanchorFromCanonical",BooleanNode.TRUE);policy.putIfAbsent("reanchorOnIdentityDrift",BooleanNode.TRUE);policy.putIfAbsent("reanchorOnLocationDrift",BooleanNode.TRUE);policy.putIfAbsent("driftWarningCount",IntNode.valueOf(0));return policy;}
-    private ObjectNode assets(String projectId){ObjectNode assets=obj();String coreId=required(store.get(PROJECT,projectId),"activeStoryDocumentId");for(ResourceKind kind:List.of(CHARACTER,CHARACTER_LOOK,LOCATION,PROP)){ArrayNode array=assets.putArray(kind==CHARACTER_LOOK?"looks":kind.path());for(ObjectNode a:store.list(kind,projectId,null))if(coreId.equals(text(a,"storyBibleId"))&&!a.path("stale").asBoolean()){ObjectNode value=a.deepCopy();if(kind!=CHARACTER){ArrayNode views=value.putArray("approvedViews");assetViews.approvedReferences(projectId,coreId,id(a)).forEach(views::add);}array.add(value);}}return assets;}
+    private ObjectNode assets(String projectId){return assets(projectId,AssetDependencyAnalyzer.Level.A3);}
+    private ObjectNode assets(String projectId,AssetDependencyAnalyzer.Level level){ObjectNode assets=obj();String coreId=required(store.get(PROJECT,projectId),"activeStoryDocumentId");for(ResourceKind kind:List.of(CHARACTER,CHARACTER_LOOK,LOCATION,PROP)){ArrayNode array=assets.putArray(kind==CHARACTER_LOOK?"looks":kind.path());for(ObjectNode a:store.list(kind,projectId,null))if(coreId.equals(text(a,"storyBibleId"))&&!a.path("stale").asBoolean()){ObjectNode value=a.deepCopy();if(kind!=CHARACTER){ArrayNode views=value.putArray("approvedViews");assetViews.approvedReferences(projectId,coreId,id(a),level).forEach(views::add);}array.add(value);}}return assets;}
+    private AssetDependencyAnalyzer.Level assetDependency(JsonNode source){String value=text(source.path("directorRuleProfile"),"assetDependency");if(value.isBlank())value=text(source,"assetDependencyLevel");try{return value.isBlank()?AssetDependencyAnalyzer.Level.A3:AssetDependencyAnalyzer.Level.valueOf(value);}catch(IllegalArgumentException error){throw new WorkflowException("ASSET_DEPENDENCY_INVALID","素材依赖等级无效："+value);}}
     private void validateCharacters(JsonNode assets,JsonNode shot){
         List<String> requiredAssets=new ArrayList<>();requiredAssets.add(required(shot,"locationId"));shot.path("propIds").forEach(p->requiredAssets.add(p.asText()));
         for(JsonNode ref:shot.path("characterIds")){
@@ -427,13 +433,13 @@ public class WorkflowService {
             String lookId=required(shot.path("startState").path("characters").path(ref.asText()),"lookId");
             if(!ref.asText().equals(required(store.get(CHARACTER_LOOK,lookId),"characterId")))throw new WorkflowException("LOOK_OWNER_MISMATCH","定妆与人物不匹配");requiredAssets.add(lookId);
         }
-        assetViews.requireReady(project(shot),required(store.get(PROJECT,project(shot)),"activeStoryDocumentId"),requiredAssets);
+        assetViews.requireReady(project(shot),required(store.get(PROJECT,project(shot)),"activeStoryDocumentId"),requiredAssets,assetDependency(shot));
     }
     public void checkReferenceSnapshot(JsonNode snapshot){
         if(snapshot.path("assetReferencesStale").asBoolean())throw new WorkflowException("ASSET_VERSION_CHANGED","此结果使用的素材版本已经修改，请用当前已批准素材重新生成");
-        JsonNode ids=snapshot.path("assetViewIds");if(!ids.isArray()||ids.isEmpty())throw new WorkflowException("ASSET_REFERENCES_REQUIRED","缺少已批准素材视图的版本快照，请使用新流程生成");
+        JsonNode ids=snapshot.path("assetViewIds");if(!ids.isArray()||ids.isEmpty()){if(assetDependency(snapshot)==AssetDependencyAnalyzer.Level.A0)return;throw new WorkflowException("ASSET_REFERENCES_REQUIRED","缺少已批准素材视图的版本快照，请使用新流程生成");}
         for(JsonNode id:ids){ObjectNode view=store.get(ASSET_VIEW,id.asText());String coreId=required(store.get(PROJECT,project(view)),"activeStoryDocumentId");
-            if(view.path("stale").asBoolean()||!view.path("approved").asBoolean()||!coreId.equals(text(view,"coreId")))throw new WorkflowException("ASSET_VERSION_CHANGED","引用的素材视图已被修改或退回，请重新生成对应镜头");assetViews.requireReady(project(view),coreId,List.of(required(view,"assetId")));}
+            if(view.path("stale").asBoolean()||!view.path("approved").asBoolean()||!coreId.equals(text(view,"coreId")))throw new WorkflowException("ASSET_VERSION_CHANGED","引用的素材视图已被修改或退回，请重新生成对应镜头");}
     }
     private ObjectNode savePrompt(ObjectNode shot,String purpose,JsonNode compiled,JsonNode context){
         int version=store.list(PROMPT_VERSION,project(shot),null).size()+1;
@@ -457,7 +463,7 @@ public class WorkflowService {
         if(value.contains("STYLE")||value.contains("LIGHT"))return "DYNAMIC AVOID";
         return "CURRENT ACTION / ENDPOINT";
     }
-    private void noActiveGeneration(String shotId){for(ObjectNode job:store.list(GENERATION_JOB,null,null))if(shotId.equals(text(job,"shotId"))&&!"ARCHIVE".equals(text(job,"type"))){
+    private void noActiveGeneration(String shotId){for(ObjectNode job:store.list(GENERATION_JOB,null,null))if(shotId.equals(text(job,"shotId"))&&!Set.of("ARCHIVE","VIDEO_QC").contains(text(job,"type"))){
         if(job.path("submissionUncertain").asBoolean())throw new WorkflowException("SUBMISSION_UNCERTAIN","此镜头已有服务商结果不确定的请求，请先核对请求记录，避免重复提交");
         if(Set.of("QUEUED","RUNNING","RETRY_WAIT").contains(text(job,"status")))throw new WorkflowException("GENERATION_ACTIVE","此镜头已有任务运行，请等待完成或取消");
     }}

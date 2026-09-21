@@ -168,7 +168,10 @@
       "runtime": true,
       "promptPath": "skills/06-shot-planning/prompt.md",
       "schemaPath": "",
-      "rulePackDependencies": [],
+      "rulePackDependencies": [
+        "skills/vendor/manju-laoli-skill",
+        "skills/vendor/oiuv-ai-short-drama"
+      ],
       "source": "HUMAN_MAINTAINED",
       "fingerprint": "b9ec1dae9b6b694ebf62425faeb6c6fa823f96db520485d23099bdcbaad131b2",
       "agent": "DirectorAgent",
@@ -439,10 +442,12 @@
       "skillId": "17-video-prompt-compile",
       "version": "1.0.0",
       "phase": "VIDEO",
-      "runtime": false,
+      "runtime": true,
       "promptPath": "skills/17-video-prompt-compile/prompt.md",
       "schemaPath": "skills/17-video-prompt-compile/output-schema.json",
-      "rulePackDependencies": [],
+      "rulePackDependencies": [
+        "skills/vendor/oiuv-ai-short-drama"
+      ],
       "source": "HUMAN_MAINTAINED",
       "fingerprint": "ace10a07f84d2cb1a86dc37cf4b8b9b6529aad5fc56590abdc78216ff34e72c3",
       "agent": "DirectorAgent",

@@ -92,6 +92,7 @@ public class GenerationWorker {
             if(result.simulated())asset.put("previewUrl","/demo/keyframe.png");
             JsonNode plannedShot=input.path("context").path("shot");for(String field:List.of("directorPlanVersion","dramaticBeatVersion","shotPlanVersion"))if(plannedShot.has(field))asset.set(field,plannedShot.path(field).deepCopy());
             for(String field:List.of("semanticRole","providerFrameMode","timeSec","stateVersion"))if(input.has(field))asset.set(field,input.path(field).deepCopy());
+            if(input.has("assetDependencyLevel"))asset.set("assetDependencyLevel",input.path("assetDependencyLevel").deepCopy());
             for(String field:List.of("sequenceCompilerVersion","normalizedPromptHash","referenceBindingsHash","referenceAuthorityFingerprint","continuitySnapshotHash","sequenceStateFingerprint","providerCapabilitiesVersion"))if(input.has(field))asset.set(field,input.path(field).deepCopy());
             asset.set("assetViewIds",input.path("assetViewIds").deepCopy());asset.set("assetReferences",input.path("assetReferences").deepCopy());
             if(kind==KEYFRAME&&input.path("storyboardReference").isObject())asset.set("storyboardReference",input.path("storyboardReference").deepCopy());
@@ -202,7 +203,7 @@ public class GenerationWorker {
         catch(IOException e){throw new UncheckedIOException(e);}
         ObjectNode metadata=null;if(kind==VIDEO_TAKE&&!input.path("simulated").asBoolean()){if(!archive.startsWith("/api/media/"))throw new WorkflowException("ARCHIVE_URL_INVALID","归档地址无法用于媒体探测");try(InputStream saved=storage.open(archive.substring("/api/media/".length()))){metadata=mediaProbe.probe(saved,".mp4");}catch(IOException e){throw new UncheckedIOException(e);}}
         String finalArchive=archive;ObjectNode finalMetadata=metadata;
-        store.transaction(()->{ObjectNode latest=store.getForUpdate(kind,targetId),next=latest.deepCopy().put("archiveUrl",finalArchive).put("archiveStatus","SUCCEEDED");if(finalMetadata!=null){next.setAll(finalMetadata);next.put("mediaProbeStatus","SUCCEEDED");}store.update(kind,targetId,revision(latest),next);ObjectNode result=obj().put("archiveUrl",finalArchive);if(finalMetadata!=null)result.set("mediaMetadata",finalMetadata);jobs.succeed(id(job),result);return null;});
+        store.transaction(()->{ObjectNode latest=store.getForUpdate(kind,targetId),next=latest.deepCopy().put("archiveUrl",finalArchive).put("archiveStatus","SUCCEEDED");if(finalMetadata!=null){next.setAll(finalMetadata);next.put("mediaProbeStatus","SUCCEEDED");}store.update(kind,targetId,revision(latest),next);ObjectNode result=obj().put("archiveUrl",finalArchive);if(finalMetadata!=null)result.set("mediaMetadata",finalMetadata);jobs.succeed(id(job),result);if(kind==VIDEO_TAKE){String reviewKey="auto-video-qc:"+targetId;jobs.enqueue(project(latest),required(latest,"shotId"),"VIDEO_QC",obj().put("takeId",targetId).put("apply",true).put("requestKey",reviewKey),reviewKey);}return null;});
     }
     private void failed(ObjectNode job,String code,String reason,boolean retryable,boolean uncertain){
         ObjectNode saved=jobs.fail(id(job),code,redact(reason),retryable,uncertain);

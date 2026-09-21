@@ -1,0 +1,20 @@
+{
+  "status": "BLOCKED_PROVIDER_ACCOUNT_OVERDUE",
+  "executedAt": "2026-09-22T00:29:43.5013982+08:00",
+  "stage": "SEEDREAM_KEYFRAME_SUBMIT",
+  "requestId": "021790008157052a94a092d6e1517e56ac52cca715566bed8899d",
+  "providerErrorCode": "AccountOverdueError",
+  "acceptedImageRequests": 0,
+  "acceptedVideoRequests": 0,
+  "actualCostCny": 0,
+  "costBasis": "No provider task was accepted; failure occurred on the first image request.",
+  "prerequisiteEvidence": {
+    "mvnVerify": "PASS",
+    "frontendTests": "8/8 PASS",
+    "frontendBuild": "PASS",
+    "freeE2E": "PASS",
+    "mediaE2E": "PASS",
+    "providerReplay": "PASS"
+  },
+  "retryPolicy": "DO_NOT_RETRY_UNTIL_PROVIDER_ACCOUNT_IS_ACTIVE"
+}

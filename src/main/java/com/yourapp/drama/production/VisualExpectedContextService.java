@@ -34,6 +34,9 @@ public class VisualExpectedContextService {
         required.set("composition",composition);
         ObjectNode compliance=mapper.createObjectNode();for(String field:List.of("directorIntent","shotPurpose","subject","secondarySubjects","cameraMovement","eyeLine","focus","blocking","performancePlan","visibilityPlan","transition","directorPlanVersion","dramaticBeatVersion","shotPlanVersion"))if(shot.has(field))compliance.set(field,visualOnly(shot.path(field)));required.set("directorCompliance",compliance);
         required.set("action",mapper.createObjectNode().put("action",shot.path("action").asText()).put("emotion",shot.path("emotion").asText()));
+        required.set("shotStart",visualOnly(shot.path("startState")));
+        required.set("shotEnd",visualOnly(shot.path("endState")));
+        if(generationContext.path("previousTake").path("observedState").isObject())required.set("previousAcceptedEnd",visualOnly(generationContext.path("previousTake").path("observedState")));
         required.put("style",generationContext.path("style").asText(assets.path("style").asText()));
         String revisionFeedback=generationContext.path("revisionFeedback").asText();
         if(!revisionFeedback.isBlank())required.put("priorFailureToRecheck",revisionFeedback);

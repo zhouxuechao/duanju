@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.yourapp.drama.job.JobService;
 import com.yourapp.drama.model.ImageGenerator;
 import com.yourapp.drama.persistence.DocumentStore;
+import com.yourapp.drama.production.AssetDependencyAnalyzer;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -77,6 +78,32 @@ class AssetViewIntegrationTest {
         assertThat(assets.approvedReferences(projectId,coreId,lookId)).hasSize(4);
         verify(images,times(3)).generate(argThat(r->r.referenceImageUrls().equals(List.of(text(approved,"providerUrl")))));
         verify(images,times(1)).generate(argThat(r->r.referenceImageUrls().isEmpty()));
+    }
+
+    @Test void readinessGateScalesWithAssetDependencyLevel(){
+        generateLook();
+        approve(run(current(lookId,"FRONT")));
+
+        assertThatCode(()->assets.requireReady(projectId,coreId,List.of(lookId),AssetDependencyAnalyzer.Level.A0))
+                .doesNotThrowAnyException();
+        assertThatCode(()->assets.requireReady(projectId,coreId,List.of(lookId),AssetDependencyAnalyzer.Level.A1))
+                .doesNotThrowAnyException();
+        assertThatThrownBy(()->assets.requireReady(projectId,coreId,List.of(lookId),AssetDependencyAnalyzer.Level.A2))
+                .isInstanceOf(WorkflowException.class)
+                .hasMessageContaining("多视图");
+    }
+
+    @Test void a1AssetPreparationSubmitsOnlyTheMasterReference(){
+        ObjectNode request=obj().put("assetDependencyLevel","A1");request.putArray("assetIds").add(lookId);
+        assets.generate(projectId,request);
+        assertThat(store.list(ASSET_VIEW,projectId,lookId)).hasSize(4);
+        assertThat(store.list(GENERATION_JOB,projectId,null)).hasSize(1);
+
+        approve(run(current(lookId,"FRONT")));
+
+        assertThat(store.list(GENERATION_JOB,projectId,null)).hasSize(1);
+        assertThat(text(store.get(CHARACTER_LOOK,lookId),"referenceStatus")).isEqualTo("APPROVED");
+        assertThat(current(lookId,"LEFT").hasNonNull("generationJobId")).isFalse();
     }
 
     @Test void changedDescriptionCannotBeApprovedOrUsedAndRegenerationStartsANewMaster(){

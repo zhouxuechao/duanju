@@ -5,12 +5,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import com.yourapp.drama.model.ImageGenerator;
+import com.yourapp.drama.model.LlmGateway;
 import com.yourapp.drama.model.VideoGenerator;
 import com.yourapp.drama.model.voice.VoiceGenerator;
 import com.yourapp.drama.provider.audio.SeedAudioProperties;
 import com.yourapp.drama.provider.audio.SeedAudioVoiceGenerator;
 import com.yourapp.drama.provider.volcengine.ArkHttpClient;
 import com.yourapp.drama.provider.volcengine.VolcengineImageGenerator;
+import com.yourapp.drama.provider.volcengine.VolcengineLlmGateway;
 import com.yourapp.drama.provider.volcengine.VolcengineProperties;
 import com.yourapp.drama.provider.volcengine.VolcengineVideoGenerator;
 import org.junit.jupiter.api.AfterEach;
@@ -34,11 +36,12 @@ class ProviderReplayContractTest {
     private final ObjectMapper mapper=new ObjectMapper();
     private final Map<String,JsonNode> captured=new ConcurrentHashMap<>();
     private HttpServer server;
-    private JsonNode imageFixture,submitFixture,pollFixture,audioFixture;
+    private JsonNode llmFixture,imageFixture,submitFixture,pollFixture,audioFixture;
 
     @BeforeEach void start() throws Exception {
-        imageFixture=fixture("seedream.json");submitFixture=fixture("seedance-submit.json");pollFixture=fixture("seedance-poll.json");audioFixture=fixture("seed-audio.json");
+        llmFixture=fixture("llm-responses.json");imageFixture=fixture("seedream.json");submitFixture=fixture("seedance-submit.json");pollFixture=fixture("seedance-poll.json");audioFixture=fixture("seed-audio.json");
         server=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);
+        server.createContext("/api/v3/responses",exchange->handle(exchange,"llm",llmFixture,false));
         server.createContext("/api/v3/images/generations",exchange->handle(exchange,"image",imageFixture,false));
         server.createContext("/api/v3/contents/generations/tasks",exchange->{
             if("POST".equals(exchange.getRequestMethod()))handle(exchange,"video-submit",submitFixture,false);
@@ -48,15 +51,22 @@ class ProviderReplayContractTest {
         server.start();
     }
 
-    @AfterEach void stop(){server.stop(0);}
+    @AfterEach void stop(){if(server!=null)server.stop(0);}
 
     @Test void sanitizedProviderRecordsReplayAgainstCurrentAdapters() throws Exception {
-        String fixtureText=Files.readString(Path.of("test-fixtures/provider-replay/seedream.json"))+Files.readString(Path.of("test-fixtures/provider-replay/seedance-submit.json"))+Files.readString(Path.of("test-fixtures/provider-replay/seedance-poll.json"))+Files.readString(Path.of("test-fixtures/provider-replay/seed-audio.json"));
+        String fixtureText=Files.readString(Path.of("test-fixtures/provider-replay/llm-responses.json"))+Files.readString(Path.of("test-fixtures/provider-replay/seedream.json"))+Files.readString(Path.of("test-fixtures/provider-replay/seedance-submit.json"))+Files.readString(Path.of("test-fixtures/provider-replay/seedance-poll.json"))+Files.readString(Path.of("test-fixtures/provider-replay/seed-audio.json"));
         assertThat(fixtureText).doesNotContain("Bearer ").doesNotContain("ark-").doesNotContain("api_key");
 
         VolcengineProperties properties=new VolcengineProperties();
         properties.setBaseUrl(URI.create(base()+"/api/v3"));properties.setApiKey("replay-only-key");properties.setTextModel("text-replay");properties.setImageModel("seedream-replay");properties.setVideoModel("seedance-replay");properties.setRequestTimeout(Duration.ofSeconds(3));
         ArkHttpClient http=new ArkHttpClient(mapper,properties);
+        try(var validatorFactory=jakarta.validation.Validation.buildDefaultValidatorFactory()){
+            var schema=Map.<String,Object>of("type","object","properties",Map.of("title",Map.of("type","string")),"required",List.of("title"),"additionalProperties",false);
+            var llm=new VolcengineLlmGateway(http,properties,new StructuredJson(mapper,validatorFactory.getValidator()));
+            var story=llm.generate(new LlmGateway.StructuredRequest("你是编剧。","写一个一句话故事。",schema,Map.of()),JsonNode.class);
+            assertThat(story.value().path("title").asText()).isEqualTo("回放故事");
+            assertSubset(captured.get("llm"),llmFixture.path("expectedRequest"));
+        }
         ImageGenerator.ImageResult image=new VolcengineImageGenerator(http,properties).generate(new ImageGenerator.ImageRequest("一只铜铃置于木桌正中",List.of(),Map.of("watermark",false)));
         assertThat(image.providerUrl()).isEqualTo("https://media.example.invalid/replay/keyframe.png");
         assertSubset(captured.get("image"),imageFixture.path("expectedRequest"));

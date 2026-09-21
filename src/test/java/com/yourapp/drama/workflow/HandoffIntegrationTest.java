@@ -433,6 +433,16 @@ class HandoffIntegrationTest {
         ObjectNode assessment=store.list(QC_RESULT,projectId,null).getLast();assertThat(assessment.path("targetKind").asText()).isEqualTo("video-takes");assertThat(assessment.path("shadow").asBoolean()).isTrue();
         verify(videoFrames).extract("archive.png");
     }
+    @Test void completedVideoArchiveAutomaticallyRunsAppliedVideoQc(){
+        ObjectNode frame=generateFrame();workflow.review(KEYFRAME,id(frame),obj().put("passed",true));workflow.lock(KEYFRAME,id(frame),obj().put("generateVideo",false));
+        workflow.video(id(frame),obj().put("requestKey","automatic-video-qc-source"));
+        for(int i=0;i<8;i++)worker.tickProject(projectId);
+
+        assertThat(store.list(GENERATION_JOB,projectId,null)).anyMatch(job->"VIDEO_QC".equals(text(job,"type"))&&"SUCCESS".equals(text(job,"status")));
+        assertThat(store.list(QC_RESULT,projectId,null)).anyMatch(review->VIDEO_TAKE.path().equals(text(review,"targetKind"))&&"AUTOMATIC".equals(text(review,"reviewer"))&&!review.path("shadow").asBoolean());
+        ObjectNode take=store.list(VIDEO_TAKE,projectId,shotId).getFirst();
+        assertThat(text(take,"qcStatus")).isEqualTo("PASSED");
+    }
     @Test void appliedHighConfidenceVideoFailureCreatesOneBoundedReplacementJob(){
         ObjectNode frame=generateFrame();workflow.review(KEYFRAME,id(frame),obj().put("passed",true));workflow.lock(KEYFRAME,id(frame),obj().put("generateVideo",false));
         workflow.video(id(frame),obj().put("requestKey","video-vlm-repair-source"));worker.tick();worker.tick();worker.tick();
@@ -448,6 +458,8 @@ class HandoffIntegrationTest {
         assertThat(text(reviewed.path("automaticRepairJob"),"type")).isEqualTo("VIDEO");
         assertThat(store.list(GENERATION_JOB,projectId,null)).hasSize(before+1);
         automaticVideoReview.review(id(take),request);
+        assertThat(store.list(GENERATION_JOB,projectId,null)).hasSize(before+1);
+        automaticVideoReview.review(id(take),obj().put("apply",true).put("requestKey","video-vlm-repair-same-take-different-client-key"));
         assertThat(store.list(GENERATION_JOB,projectId,null)).hasSize(before+1);
     }
     @Test void thirdConsecutiveVideoFailureWithSameCodeEscalatesToHumanWithoutAnotherPaidJob(){

@@ -6,6 +6,7 @@ import com.yourapp.drama.job.JobService;
 import com.yourapp.drama.model.ImageGenerator;
 import com.yourapp.drama.persistence.*;
 import com.yourapp.drama.production.LocationViewProjection;
+import com.yourapp.drama.production.AssetDependencyAnalyzer;
 import com.yourapp.drama.production.ProviderCapabilityRegistry;
 import com.yourapp.drama.storage.*;
 import org.springframework.stereotype.Service;
@@ -31,7 +32,8 @@ public class AssetViewService {
     public AssetViewService(DocumentStore store,JobService jobs,ImageGenerator images,MediaStorage storage,ProviderMediaFetcher fetcher){this.store=store;this.jobs=jobs;this.images=images;this.storage=storage;this.fetcher=fetcher;}
 
     public ObjectNode generate(String projectId,ObjectNode request){return store.transaction(()->{
-        ObjectNode project=store.getForUpdate(PROJECT,projectId),core=currentCore(project);
+        ObjectNode project=store.getForUpdate(PROJECT,projectId),core=currentCore(project);AssetDependencyAnalyzer.Level dependency=dependencyLevel(project,request);
+        if(dependency==AssetDependencyAnalyzer.Level.A0){ObjectNode empty=obj().put("assetDependencyLevel",dependency.name());empty.putArray("views");return empty;}
         Set<String> requested=new HashSet<>();request.path("assetIds").forEach(v->requested.add(v.asText()));
         if(!requested.isEmpty())for(ObjectNode look:store.list(CHARACTER_LOOK,projectId,null))if(requested.contains(id(look))){
             String base=text(store.get(CHARACTER,required(look,"characterId")),"baseLookId");if(!base.isBlank())requested.add(base);
@@ -40,16 +42,20 @@ public class AssetViewService {
             for(ObjectNode asset:store.list(kind,projectId,null))if(id(core).equals(text(asset,"storyBibleId"))&&!asset.path("stale").asBoolean()&&(requested.isEmpty()||requested.contains(id(asset))))assets.add(asset);
         if(!requested.isEmpty()&&!assets.stream().map(Documents::id).collect(java.util.stream.Collectors.toSet()).containsAll(requested))throw new WorkflowException("ASSET_NOT_CURRENT","请选择当前故事版本中的人物定妆、场景或道具");
         if(assets.isEmpty())throw new WorkflowException("ASSETS_REQUIRED","请先确认整季核心故事，生成角色定妆、场景和道具设定");
-        ObjectNode result=obj();ArrayNode list=result.putArray("views");
+        ObjectNode result=obj().put("assetDependencyLevel",dependency.name());ArrayNode list=result.putArray("views");
         for(ObjectNode asset:assets){List<ObjectNode> existing=currentViews(projectId,id(core),id(asset));
-            if(!existing.isEmpty()&&existing.stream().allMatch(this::compilerCurrent)){existing.forEach(list::add);continue;}
+            if(!existing.isEmpty()&&existing.stream().allMatch(this::compilerCurrent)){
+                for(ObjectNode view:existing)if(!dependency.name().equals(text(view,"assetDependencyLevel")))store.update(ASSET_VIEW,id(view),revision(view),view.deepCopy().put("assetDependencyLevel",dependency.name()));
+                boolean masterApproved=currentViews(projectId,id(core),id(asset)).stream().anyMatch(view->view.path("master").asBoolean()&&view.path("approved").asBoolean());
+                if(dependency!=AssetDependencyAnalyzer.Level.A1&&masterApproved)for(ObjectNode view:currentViews(projectId,id(core),id(asset)))if(!view.path("master").asBoolean()&&"PLANNED".equals(text(view,"status")))schedule(view);
+                existing.forEach(list::add);continue;}
             if(!existing.isEmpty()){
                 Set<String> invalidIds=new HashSet<>();for(ObjectNode old:existing){invalidIds.add(id(old));cancel(old);store.update(ASSET_VIEW,id(old),revision(old),old.deepCopy().put("stale",true).put("approved",false).put("status","STALE").put("staleReason","REFERENCE_COMPILER_CHANGED"));}
                 invalidateDependents(projectId,invalidIds);
             }
             String kind=asset.hasNonNull("characterId")?"CHARACTER_LOOK":asset.hasNonNull("locationKey")?"LOCATION":"PROP";
             int version=store.list(ASSET_VIEW,projectId,id(asset)).stream().mapToInt(v->v.path("setVersion").asInt()).max().orElse(0)+1;
-            List<ObjectNode> set=createSet(asset,kind,version,source(asset,kind));
+            List<ObjectNode> set=createSet(asset,kind,version,source(asset,kind),dependency);
             set.forEach(v->list.add(store.get(ASSET_VIEW,id(v))));
         }
         for(ObjectNode view:store.list(ASSET_VIEW,projectId,null))if(id(core).equals(text(view,"coreId"))&&!view.path("stale").asBoolean()&&view.path("master").asBoolean()&&"PLANNED".equals(text(view,"status"))&&masterCanStart(view))schedule(view);
@@ -67,7 +73,7 @@ public class AssetViewService {
             if(!master.path("approved").asBoolean())throw new WorkflowException("MASTER_REVIEW_REQUIRED","请先确认本套主参考图");
         }
         ObjectNode saved=store.update(ASSET_VIEW,viewId,revision(view),view.deepCopy().put("status","APPROVED").put("approved",true).put("approvedAt",Instant.now().toString()).put("reviewNote",text(request,"reviewNote")));
-        if(saved.path("master").asBoolean())for(ObjectNode other:currentViews(project(saved),text(saved,"coreId"),text(saved,"assetId")))
+        if(saved.path("master").asBoolean()&&assetDependency(saved)!=AssetDependencyAnalyzer.Level.A1)for(ObjectNode other:currentViews(project(saved),text(saved,"coreId"),text(saved,"assetId")))
             if("PLANNED".equals(text(other,"status")))schedule(other);
         if(saved.path("master").asBoolean()&&"CHARACTER_LOOK".equals(text(saved,"assetKind")))for(ObjectNode other:store.list(ASSET_VIEW,project(saved),null))
             if(!other.path("stale").asBoolean()&&other.path("master").asBoolean()&&text(saved,"characterId").equals(text(other,"characterId"))&&"PLANNED".equals(text(other,"status"))&&masterCanStart(other))schedule(other);
@@ -100,7 +106,7 @@ public class AssetViewService {
             throw new WorkflowException("GENERATION_ACTIVE","本套素材还有视图正在生成，请等待后再替换版本，避免重复付费");
         Set<String> invalidIds=new HashSet<>();for(ObjectNode v:previous){invalidIds.add(id(v));cancel(v);store.update(ASSET_VIEW,id(v),revision(v),v.deepCopy().put("stale",true).put("status","STALE"));}
         invalidateDependents(project(old),invalidIds);
-        List<ObjectNode> next=createSet(asset,text(old,"assetKind"),old.path("setVersion").asInt()+1,snapshot);
+        List<ObjectNode> next=createSet(asset,text(old,"assetKind"),old.path("setVersion").asInt()+1,snapshot,assetDependency(old));
         String newMasterId=id(next.stream().filter(v->v.path("master").asBoolean()).findFirst().orElseThrow());
         ObjectNode replacement=null;
         for(ObjectNode v:next){
@@ -166,7 +172,22 @@ public class AssetViewService {
         if(views.isEmpty()||views.size()!=viewsFor(text(views.getFirst(),"assetKind")).size()||views.stream().anyMatch(v->!v.path("approved").asBoolean()||!isCurrent(v)||!compilerCurrent(v)))return List.of();
         return views;
     }
-    public void requireReady(String projectId,String coreId,List<String> assetIds){for(String assetId:new LinkedHashSet<>(assetIds))if(approvedReferences(projectId,coreId,assetId).isEmpty())throw new WorkflowException("ASSET_VIEWS_REVIEW_REQUIRED","本镜头使用的素材多视图尚未全部确认，或素材设定已更新；请先完成素材审查");}
+    public List<ObjectNode> approvedReferences(String projectId,String coreId,String assetId,AssetDependencyAnalyzer.Level level){
+        if(level==AssetDependencyAnalyzer.Level.A0)return List.of();
+        if(level!=AssetDependencyAnalyzer.Level.A1)return approvedReferences(projectId,coreId,assetId);
+        return currentViews(projectId,coreId,assetId).stream()
+                .filter(view->view.path("master").asBoolean()&&view.path("approved").asBoolean()&&isCurrent(view)&&compilerCurrent(view))
+                .toList();
+    }
+    public void requireReady(String projectId,String coreId,List<String> assetIds){requireReady(projectId,coreId,assetIds,AssetDependencyAnalyzer.Level.A3);}
+    public void requireReady(String projectId,String coreId,List<String> assetIds,AssetDependencyAnalyzer.Level level){
+        if(level==AssetDependencyAnalyzer.Level.A0)return;
+        for(String assetId:new LinkedHashSet<>(assetIds)){
+            if(level==AssetDependencyAnalyzer.Level.A1){
+                if(approvedReferences(projectId,coreId,assetId,level).isEmpty())throw new WorkflowException("ASSET_MASTER_REVIEW_REQUIRED","本镜头使用的主体素材主参考图尚未确认，或素材设定已更新；请先完成主参考图审查");
+            }else if(approvedReferences(projectId,coreId,assetId).isEmpty())throw new WorkflowException("ASSET_VIEWS_REVIEW_REQUIRED","本镜头使用的素材多视图尚未全部确认，或素材设定已更新；请先完成素材审查");
+        }
+    }
     public String referenceUrl(ObjectNode view){
         current(view);
         if(!expired(view)&&!text(view,"providerUrl").isBlank())return text(view,"providerUrl");
@@ -181,9 +202,9 @@ public class AssetViewService {
             ids.add(id(view));cancel(view);store.update(ASSET_VIEW,id(view),revision(view),view.deepCopy().put("stale",true).put("status","STALE"));}
         invalidateDependents(projectId,ids);return null;});}
 
-    private List<ObjectNode> createSet(ObjectNode asset,String kind,int version,ObjectNode snapshot){
+    private List<ObjectNode> createSet(ObjectNode asset,String kind,int version,ObjectNode snapshot,AssetDependencyAnalyzer.Level dependency){
         List<ObjectNode> result=new ArrayList<>();for(String angle:viewsFor(kind)){
-            ObjectNode view=obj().put("projectId",project(asset)).put("parentId",id(asset)).put("coreId",text(asset,"storyBibleId")).put("assetKind",kind).put("assetId",id(asset)).put("assetName",text(asset,"name")).put("setVersion",version).put("view",angle).put("master",angle.equals(masterFor(kind))).put("status","PLANNED").put("approved",false).put("stale",false).put("sourceHash",hash(snapshot));
+            ObjectNode view=obj().put("projectId",project(asset)).put("parentId",id(asset)).put("coreId",text(asset,"storyBibleId")).put("assetKind",kind).put("assetId",id(asset)).put("assetName",text(asset,"name")).put("setVersion",version).put("view",angle).put("master",angle.equals(masterFor(kind))).put("assetDependencyLevel",dependency.name()).put("status","PLANNED").put("approved",false).put("stale",false).put("sourceHash",hash(snapshot));
             if(asset.hasNonNull("characterId"))view.put("characterId",text(asset,"characterId"));view.set("sourceSnapshot",snapshot.deepCopy());view.putArray("referenceViewIds");result.add(store.create(ASSET_VIEW,view));
         }return result;
     }
@@ -281,7 +302,7 @@ public class AssetViewService {
     private void checkRevision(ObjectNode view,ObjectNode request){if(request.path("revision").asLong(-1)!=revision(view))throw new RevisionConflictException(ASSET_VIEW,id(view));}
     private void cancel(ObjectNode view){if(!text(view,"generationJobId").isBlank())jobs.cancel(text(view,"generationJobId"));}
     private ObjectNode mutate(String viewId,java.util.function.Consumer<ObjectNode> action){return store.transaction(()->{ObjectNode view=store.getForUpdate(ASSET_VIEW,viewId);ObjectNode next=view.deepCopy();action.accept(next);return store.update(ASSET_VIEW,viewId,revision(view),next);});}
-    private void updateAssetReadiness(ObjectNode view){ObjectNode asset=asset(view);boolean ready=currentViews(project(view),text(view,"coreId"),id(asset)).stream().filter(v->v.path("approved").asBoolean()).count()==viewsFor(text(view,"assetKind")).size();ObjectNode next=asset.deepCopy().put("referenceStatus",ready?"APPROVED":"REVIEW").put("referenceSetVersion",view.path("setVersion").asInt());store.update(ResourceKind.valueOf(text(view,"assetKind")),id(asset),revision(asset),next);}
+    private void updateAssetReadiness(ObjectNode view){ObjectNode asset=asset(view);List<ObjectNode> current=currentViews(project(view),text(view,"coreId"),id(asset));boolean ready=assetDependency(view)==AssetDependencyAnalyzer.Level.A1?current.stream().anyMatch(v->v.path("master").asBoolean()&&v.path("approved").asBoolean()):current.stream().filter(v->v.path("approved").asBoolean()).count()==viewsFor(text(view,"assetKind")).size();ObjectNode next=asset.deepCopy().put("referenceStatus",ready?"APPROVED":"REVIEW").put("referenceSetVersion",view.path("setVersion").asInt());store.update(ResourceKind.valueOf(text(view,"assetKind")),id(asset),revision(asset),next);}
     private void invalidateDependents(String projectId,Set<String> viewIds){
         if(viewIds.isEmpty())return;Set<String> invalidViews=new HashSet<>(viewIds);boolean expanded;
         do{expanded=false;for(ObjectNode view:store.list(ASSET_VIEW,projectId,null))if(!view.path("stale").asBoolean()&&containsReference(view.path("referenceViewIds"),invalidViews)){
@@ -298,6 +319,9 @@ public class AssetViewService {
     }
     private boolean containsReference(JsonNode value,Set<String> ids){if(value.isTextual())return ids.contains(value.asText());if(value.isContainerNode())for(JsonNode child:value)if(containsReference(child,ids))return true;return false;}
     private static List<String> viewsFor(String kind){return switch(kind){case "CHARACTER_LOOK"->List.of("FRONT","LEFT","RIGHT","BACK");case "LOCATION"->LocationViewProjection.allViews();case "PROP"->List.of("FRONT","SIDE","BACK","SCALE");default->throw new IllegalArgumentException("未知素材类型");};}
+    public AssetDependencyAnalyzer.Level requiredLevel(String projectId){return dependencyLevel(store.get(PROJECT,projectId),obj());}
+    private AssetDependencyAnalyzer.Level dependencyLevel(ObjectNode project,JsonNode request){String configured=text(request,"assetDependencyLevel");if(!configured.isBlank())try{return AssetDependencyAnalyzer.Level.valueOf(configured);}catch(IllegalArgumentException error){throw new WorkflowException("ASSET_DEPENDENCY_INVALID","素材依赖等级无效："+configured);}String coreId=text(project,"activeStoryDocumentId");int subjects=0,locations=0;if(!coreId.isBlank()){subjects=(int)store.list(CHARACTER,project(project),null).stream().filter(a->coreId.equals(text(a,"storyBibleId"))&&!a.path("stale").asBoolean()).count();locations=(int)store.list(LOCATION,project(project),null).stream().filter(a->coreId.equals(text(a,"storyBibleId"))&&!a.path("stale").asBoolean()).count();}int episodes=Math.max(1,project.path("episodeCount").asInt(1));double seconds=Math.max(1,project.path("targetDuration").asDouble(24))*episodes;int shots=Math.max(1,(int)Math.ceil(seconds/3));return new AssetDependencyAnalyzer().classify(subjects,locations,shots,shots>1,episodes>=30);}
+    private AssetDependencyAnalyzer.Level assetDependency(JsonNode view){String value=text(view,"assetDependencyLevel");try{return value.isBlank()?AssetDependencyAnalyzer.Level.A3:AssetDependencyAnalyzer.Level.valueOf(value);}catch(IllegalArgumentException error){throw new WorkflowException("ASSET_DEPENDENCY_INVALID","素材依赖等级无效："+value);}}
     private static String masterFor(String kind){return "LOCATION".equals(kind)?"LAYOUT":"FRONT";}
     private static String hash(JsonNode value){try{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(canonical(value).toString().getBytes(java.nio.charset.StandardCharsets.UTF_8)));}catch(Exception error){throw new IllegalStateException(error);}}
     private static JsonNode canonical(JsonNode value){if(value.isObject()){ObjectNode result=obj();SortedSet<String> keys=new TreeSet<>();value.fieldNames().forEachRemaining(keys::add);keys.forEach(k->result.set(k,canonical(value.get(k))));return result;}if(value.isArray()){ArrayNode result=JsonNodeFactory.instance.arrayNode();value.forEach(v->result.add(canonical(v)));return result;}return value;}

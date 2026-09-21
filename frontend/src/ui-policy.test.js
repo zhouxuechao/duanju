@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   canAcceptObservedDeviation, canConfirmStory, canResumePipeline, keyframePrimaryAction,
-  pipelineStageLabel, premiseReviewActions, reconciliationChoices, timelinePreviewLabel
+  creativeQaCanRelease, pipelineStageLabel, premiseReviewActions, reconciliationChoices,
+  storyboardPrimaryAction, timelinePreviewLabel
 } from './ui-policy.js'
 
 describe('production UI gates', () => {
@@ -18,8 +19,16 @@ describe('production UI gates', () => {
   })
 
   it('exposes keyframe lock as the transition that starts video', () => {
+    expect(storyboardPrimaryAction({ qcStatus: 'PASSED', locked: false })).toBe('LOCK_AND_GENERATE_KEYFRAME')
+    expect(storyboardPrimaryAction({ qcStatus: 'PENDING', locked: false })).toBe('NONE')
     expect(keyframePrimaryAction({ qcStatus: 'PASSED', locked: false })).toBe('LOCK_AND_GENERATE_VIDEO')
     expect(keyframePrimaryAction({ qcStatus: 'PENDING', locked: false })).toBe('NONE')
+  })
+
+  it('releases a final only after creative QA passes without blocking findings', () => {
+    expect(creativeQaCanRelease({ passed: true, BLOCKING: [] })).toBe(true)
+    expect(creativeQaCanRelease({ passed: true, BLOCKING: [{ code: 'IDENTITY_DRIFT' }] })).toBe(false)
+    expect(creativeQaCanRelease({ passed: false, BLOCKING: [] })).toBe(false)
   })
 
   it('shows provider reconciliation only for uncertain submissions', () => {
@@ -41,7 +50,7 @@ describe('production UI gates', () => {
   })
 
   it('presents canonical pipeline stages in production language', () => {
-    expect(['STORY','DIRECTOR','IMAGE','VIDEO','AUDIO','TIMELINE','PREVIEW','CREATIVE_QA','FINAL'].map(pipelineStageLabel))
-      .toEqual(['故事','导演','画面','视频','声音','剪辑','预览','创作质检','成片'])
+    expect(['STORY','DIRECTOR','ASSET','KEYFRAME','VIDEO','AUDIO','TIMELINE','PREVIEW','CREATIVE_QA','FINAL'].map(pipelineStageLabel))
+      .toEqual(['故事','导演','素材','故事板与关键帧','视频','声音','剪辑','预览','创作质检','成片'])
   })
 })
