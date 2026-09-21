@@ -1,0 +1,12 @@
+{
+  "fixtureId": "asset-character",
+  "compiler": "SEEDREAM",
+  "taskType": "ASSET_REFERENCE",
+  "expectedSections": [
+    "TASK / IMAGE PURPOSE",
+    "REFERENCE BINDINGS",
+    "CONTINUITY LOCK",
+    "DYNAMIC AVOID"
+  ],
+  "invariant": "asset character"
+}

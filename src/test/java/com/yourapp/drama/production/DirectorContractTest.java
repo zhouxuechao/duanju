@@ -23,7 +23,7 @@ class DirectorContractTest {
             "locations":[{"id":"yard"}],"props":[{"id":"bell"}]},"dialogues":[]}
           """);
         ObjectNode shot=(ObjectNode)mapper.readTree("""
-          {"purpose":"老人听见门铃","duration":3,"action":"老人凝视铁铃","visualFocus":"老人的眼睛","emotion":"警觉",
+          {"purpose":"老人听见门铃","feltIntent":"让观众意识到门外的声音不属于熟人","duration":3,"action":"老人凝视铁铃","visualFocus":"老人的眼睛","emotion":"警觉",
           "shotSize":"MEDIUM","cameraAngle":"EYE_LEVEL","cameraMovement":"STATIC","relationToPrevious":"ESTABLISHING","difficulty":"B",
           "cameraPlan":{"position":"院门南侧2米","height":"1.5米","distance":"2米","lensMm":50,"horizontalAngle":"朝北0度","verticalAngle":"水平0度","subjectPlacement":"左侧三分之一","focusPoint":"老人眼睛","depthOfField":"中等景深，门环可辨","lightingDirection":"西侧月光，从左后入射","movementPath":"固定","movementSpeed":"0米每秒"},
           "characterIds":["actor"],"propIds":["bell"],"dialogues":[],"authorizedChanges":[],
@@ -125,7 +125,7 @@ class DirectorContractTest {
             .contains("visibleBodyPart","bodyFrameSide","limbEntrySide","contactPoint");
     }
     @Test void stateDeltasAndBlockingStartValuesComeFromTheServerContinuityLedger(){
-        ObjectNode skeleton=mapper.createObjectNode().put("shotIndex",1).put("purpose","老人走向水井").put("action","老人从门边走到水井旁")
+        ObjectNode skeleton=mapper.createObjectNode().put("shotIndex",1).put("purpose","老人走向水井").put("feltIntent","让观众注意老人正在接近危险来源").put("action","老人从门边走到水井旁")
             .put("beatId","beat-1").put("directorIntent","SHOW_ACTION").put("subject","actor").put("dialogueOwner","actor").put("transition","CUT")
             .put("duration",3).put("shotSize","MEDIUM").put("cameraAngle","EYE_LEVEL").put("cameraMovement","STATIC").put("relationToPrevious","ESTABLISHING");
         skeleton.putArray("secondarySubjects");skeleton.set("characterIds",shot(0).path("characterIds").deepCopy());skeleton.set("propIds",shot(0).path("propIds").deepCopy());
@@ -139,7 +139,7 @@ class DirectorContractTest {
         ObjectNode selectedViews=detail.putObject("referenceViews");selectedViews.putArray("characterViews").add("FRONT");selectedViews.put("locationView","FRONT");selectedViews.putArray("propViews").add("SIDE");
         ObjectNode framing=detail.putObject("blocking");framing.putArray("characters").addObject().put("characterId","actor").put("framePosition","画面左三分之一").put("eyeLineTarget","水井")
             .put("visibleBodyPart","WHOLE_BODY").put("bodyFrameSide","IN_FRAME_LEFT").put("limbEntrySide","NONE").put("contactPoint","");
-        detail.putArray("stateChanges").add(mapper.createObjectNode().put("path","characters.actor.position").put("to","水井旁").put("reason","本镜明确拍摄老人走到水井旁"));
+        detail.putArray("stateChanges").add(mapper.createObjectNode().put("path","characters.actor.position").put("to","水井旁").put("reason","本镜明确拍摄老人走到水井旁").put("atSeconds",2.2));
         ObjectNode details=mapper.createObjectNode();details.putArray("shots").add(detail);
         ObjectNode result=contract.reconstructBatch(details,batch,"request-delta");
         assertThat(result.path("shots").path(0).path("startState").path("characters").path("actor").path("position").asText()).isEqualTo("院门南侧一米");

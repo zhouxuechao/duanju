@@ -1,0 +1,58 @@
+{
+  "scenarioId": "golden-basic",
+  "name": "铜铃回声",
+  "episodeCount": 2,
+  "targetDuration": 24,
+  "storyProfile": {
+    "settingGenre": "RURAL",
+    "storyType": "SUSPENSE_MYSTERY",
+    "audience": "GENERAL",
+    "tones": [
+      "悬疑",
+      "克制"
+    ],
+    "intensity": "HIGH"
+  },
+  "characters": [
+    {
+      "key": "lin",
+      "name": "林婶"
+    },
+    {
+      "key": "zhou",
+      "name": "周伯"
+    }
+  ],
+  "locations": [
+    {
+      "key": "ancestral-hall",
+      "name": "村祠堂"
+    },
+    {
+      "key": "village-road",
+      "name": "村口土路"
+    }
+  ],
+  "props": [
+    {
+      "key": "bell",
+      "name": "缺口铜铃"
+    }
+  ],
+  "requirements": {
+    "scenesPerEpisode": [
+      2,
+      2
+    ],
+    "shotsPerEpisode": [
+      4,
+      4
+    ],
+    "hasContinuous": true,
+    "hasCut": true,
+    "hasDialogue": true,
+    "hasBgm": true,
+    "hasSfx": true,
+    "storyboardOptional": true
+  }
+}

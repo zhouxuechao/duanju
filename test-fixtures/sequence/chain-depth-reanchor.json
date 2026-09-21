@@ -1,0 +1,13 @@
+{
+  "fixtureId": "chain-depth-reanchor",
+  "compiler": "SEEDANCE_SEQUENCE",
+  "taskType": "VIDEO",
+  "expectedSections": [
+    "SOURCE / LINEAGE",
+    "ACTUAL OPENING STATE",
+    "COMPLETED BEAT EXCLUSIONS",
+    "RESERVED FUTURE BEAT EXCLUSIONS"
+  ],
+  "invariant": "chain depth reanchor",
+  "paidProviderAllowed": false
+}

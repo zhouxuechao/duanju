@@ -1,0 +1,9 @@
+{
+  "baselineVersion": 1,
+  "storyType": "IDENTITY_REVERSAL",
+  "episodeFormatFamily": "MICRO",
+  "requiredRuleId": "TYPE_IDENTITY_REVERSAL",
+  "qualityContract": "STRUCTURE_AND_INVARIANTS",
+  "model": "OFFLINE_DETERMINISTIC",
+  "promptVersion": "story-regression-v1"
+}

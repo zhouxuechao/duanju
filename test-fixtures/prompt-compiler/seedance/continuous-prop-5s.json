@@ -1,0 +1,12 @@
+{
+  "fixtureId": "continuous-prop-5s",
+  "compiler": "SEEDANCE",
+  "taskType": "VIDEO",
+  "expectedSections": [
+    "SHOT INTENT / CARRIERS",
+    "SOURCE / LINEAGE",
+    "CURRENT ACTION / ENDPOINT",
+    "AUDIO POLICY"
+  ],
+  "invariant": "continuous prop 5s"
+}

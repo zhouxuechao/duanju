@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.yourapp.drama.domain.JobType;
 import com.yourapp.drama.persistence.DocumentStore;
 import com.yourapp.drama.workflow.WorkflowException;
+import com.yourapp.drama.workflow.ModelRoutingPolicy;
+import com.yourapp.drama.workflow.TestBudgetGuard;
 import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.util.*;
@@ -16,11 +18,14 @@ import static com.yourapp.drama.workflow.Documents.*;
 public class JobService {
     private final DocumentStore store;
     private final JobEvents events;
-    public JobService(DocumentStore store,JobEvents events){this.store=store;this.events=events;}
+    private final ModelRoutingPolicy routing;
+    private final TestBudgetGuard testBudget;
+    public JobService(DocumentStore store,JobEvents events,ModelRoutingPolicy routing,TestBudgetGuard testBudget){this.store=store;this.events=events;this.routing=routing;this.testBudget=testBudget;}
     public ObjectNode enqueue(String projectId,String shotId,String type,JsonNode input,String requestKey){
         try{JobType.valueOf(type);}catch(IllegalArgumentException error){throw new WorkflowException("JOB_TYPE_INVALID","当前流程不支持任务类型："+type);}
+        testBudget.reserve(type,input);
         ObjectNode job=store.transaction(()->{
-            store.getForUpdate(PROJECT,projectId);
+            ObjectNode projectDocument=store.getForUpdate(PROJECT,projectId);enforceBudget(projectDocument,shotId,type,input);
             if(requestKey!=null&&!requestKey.isBlank())for(ObjectNode old:store.list(GENERATION_JOB,projectId,null))if(requestKey.equals(text(old,"requestKey"))){
                 if(!type.equals(text(old,"type"))||!Objects.equals(shotId,old.hasNonNull("shotId")?text(old,"shotId"):null))throw new WorkflowException("IDEMPOTENCY_CONFLICT","此请求标识已用于其他操作");
                 return old;
@@ -28,10 +33,18 @@ public class JobService {
             ObjectNode next=obj().put("projectId",projectId).put("type",type).put("status","QUEUED").put("progress",0)
                 .put("attempts",0).put("maxAttempts",3).put("cost",0).put("costKnown",false).put("requestKey",requestKey==null?UUID.randomUUID().toString():requestKey);
             if(shotId!=null)next.put("shotId",shotId);
+            ObjectNode routingDecision=routing.decide(type,input.path("complexity").asText("MEDIUM"),input.path("qualityTier").asText("BALANCED"));next.set("routingDecision",routingDecision);next.put("plannedModel",routingDecision.path("plannedModel").asText()).put("qualityTier",routingDecision.path("qualityTier").asText());
+            for(String field:List.of("compilerVersion","sequenceCompilerVersion","normalizedPromptHash","referenceBindingsHash","referenceAuthorityFingerprint","continuitySnapshotHash","sequenceStateFingerprint","providerCapabilitiesVersion","sequenceStrategy","sequenceRelation","parentTakeId","continuationDepth","reanchorReason"))if(input.has(field))next.set(field,input.path(field).deepCopy());
             next.set("inputSnapshot",input.deepCopy()); next.set("outputSnapshot",obj());
             next.putArray("statusHistory").add(obj().put("to","QUEUED").put("at",java.time.Instant.now().toString()));
             return store.create(GENERATION_JOB,next);
         }); events.publish(job);return job;
+    }
+    private void enforceBudget(ObjectNode projectDocument,String shotId,String type,JsonNode input){
+        double projectSpent=store.list(COST_RECORD,id(projectDocument),null).stream().mapToDouble(c->c.path("actualCost").asDouble(c.path("estimatedCost").asDouble())).sum(),estimated=input.path("estimatedCost").asDouble(0),projectLimit=projectDocument.path("maxProjectBudget").asDouble(0);
+        if(projectLimit>0&&projectSpent+estimated>projectLimit)throw new WorkflowException("PROJECT_BUDGET_EXCEEDED","项目预算已用 "+projectSpent+"，本次预计 "+estimated+"，上限 "+projectLimit);
+        String episodeId=text(input,"episodeId");double episodeLimit=0;if(!episodeId.isBlank()){ObjectNode episode=store.get(EPISODE,episodeId);episodeLimit=episode.path("maxEpisodeBudget").asDouble(projectDocument.path("defaultEpisodeBudget").asDouble(0));double spent=store.list(COST_RECORD,id(projectDocument),null).stream().filter(c->episodeId.equals(text(c,"episodeId"))).mapToDouble(c->c.path("actualCost").asDouble(c.path("estimatedCost").asDouble())).sum();if(episodeLimit>0&&spent+estimated>episodeLimit)throw new WorkflowException("EPISODE_BUDGET_EXCEEDED","本集预算已用 "+spent+"，本次预计 "+estimated+"，上限 "+episodeLimit);}
+        if(shotId!=null&&Set.of("STORYBOARD","KEYFRAME","VIDEO","TTS","LIPSYNC").contains(type)){ObjectNode shot=store.get(SHOT,shotId);int max=shot.path("maxPaidRetries").asInt(projectDocument.path("defaultMaxPaidRetries").asInt(0)),submitted=0;for(ObjectNode old:store.list(GENERATION_JOB,id(projectDocument),null))if(shotId.equals(text(old,"shotId"))&&type.equals(text(old,"type"))&&(!text(old,"providerRequestId").isBlank()||Set.of("QUEUED","RUNNING","SUCCESS").contains(text(old,"status"))))submitted++;if(max>0&&submitted>=max)throw new WorkflowException("SHOT_PAID_RETRY_LIMIT_REACHED","本镜此类付费任务已达到 "+max+" 次上限，请先审查失败原因");}
     }
     public ObjectNode mutate(String id,Consumer<ObjectNode> changes){
         ObjectNode saved=store.transaction(()->{ObjectNode old=store.getForUpdate(GENERATION_JOB,id);ObjectNode next=old.deepCopy();changes.accept(next);recordTransition(old,next);return store.update(GENERATION_JOB,id,revision(old),next);});
@@ -53,29 +66,69 @@ public class JobService {
         }
         return Optional.empty();
     }
-    public ObjectNode succeed(String id,JsonNode output){return mutate(id,j->{
+    public ObjectNode succeed(String id,JsonNode output){ObjectNode saved=mutate(id,j->{
         if(text(j,"status").equals("CANCELLED"))return;
         j.put("status","SUCCESS").put("progress",100).put("completedAt",Instant.now().toString());j.set("outputSnapshot",output.deepCopy());
-    });}
-    public ObjectNode fail(String id,String code,String reason,boolean retryable,boolean uncertain){return mutate(id,j->{
+    });recordTerminalCost(saved);return saved;}
+    public ObjectNode fail(String id,String code,String reason,boolean retryable,boolean uncertain){ObjectNode saved=mutate(id,j->{
         if(Set.of("CANCELLED","SUCCESS").contains(text(j,"status")))return;
         boolean unresolved=uncertain||j.path("submissionUncertain").asBoolean();
         boolean retry=retryable&&!unresolved&&!j.path("cancelRequested").asBoolean()&&j.path("attempts").asInt()<j.path("maxAttempts").asInt(3);
         j.put("status",retry?"RETRY_WAIT":"FAILED").put("failureCode",code).put("failureReason",reason)
             .put("submissionUncertain",unresolved).put("retryable",retryable&&!unresolved);
         if(retry)j.put("retryAt",Instant.now().plusSeconds(5L*(1L<<Math.min(j.path("attempts").asInt(),5))).toString());
-    });}
+    });recordTerminalCost(saved);return saved;}
     public ObjectNode retry(String id){return store.transaction(()->{
         ObjectNode j=store.getForUpdate(GENERATION_JOB,id);
         if(!Set.of("FAILED","CANCELLED").contains(text(j,"status")))throw new WorkflowException("NOT_RETRYABLE","仅失败或取消的任务可以重试");
         if(j.path("submissionUncertain").asBoolean())throw new WorkflowException("SUBMISSION_UNCERTAIN","服务商可能已接受请求，请先在控制台核对任务，避免重复扣费");
         for(ObjectNode existing:store.list(GENERATION_JOB,project(j),null))if(id.equals(text(existing.path("inputSnapshot"),"retryOfJobId"))&&text(j,"type").equals(text(existing,"type"))&&Set.of("QUEUED","RUNNING","RETRY_WAIT","SUCCESS").contains(text(existing,"status")))return existing;
-        if(!text(j,"providerRequestId").isBlank()&&!"SHOT_DETAIL".equals(text(j,"type")))throw new WorkflowException("NEW_TAKE_REQUIRED","服务商已创建任务，请使用重拍生成新版本");
+        if(!text(j,"providerRequestId").isBlank()&&!"SHOT_DETAIL".equals(text(j,"type"))&&!"CONFIRMED_NOT_SUBMITTED".equals(text(j,"reconciliationStatus")))throw new WorkflowException("NEW_TAKE_REQUIRED","服务商已创建任务，请使用重拍生成新版本");
         if(j.hasNonNull("shotId"))for(ObjectNode other:store.list(GENERATION_JOB,project(j),null))
             if(text(j,"shotId").equals(text(other,"shotId"))&&Set.of("QUEUED","RUNNING","RETRY_WAIT").contains(text(other,"status"))&&!"ARCHIVE".equals(text(other,"type")))throw new WorkflowException("GENERATION_ACTIVE","此镜头已有生产任务，请等待完成");
         ObjectNode input=(ObjectNode)j.path("inputSnapshot").deepCopy();input.remove("reuseProviderOutput");input.put("retryOfJobId",id);
         return enqueue(project(j),j.hasNonNull("shotId")?text(j,"shotId"):null,text(j,"type"),input,"retry:"+id+":"+UUID.randomUUID());
     });}
+    public ObjectNode reconcile(String id,ObjectNode request){
+        ObjectNode saved=store.transaction(()->{
+            ObjectNode old=store.getForUpdate(GENERATION_JOB,id);
+            if(!"FAILED".equals(text(old,"status"))||!old.path("submissionUncertain").asBoolean())throw new WorkflowException("RECONCILIATION_NOT_REQUIRED","只有提交状态不确定的失败任务需要对账");
+            String decision=required(request,"decision").toUpperCase(Locale.ROOT),evidence=required(request,"evidence"),reviewer=required(request,"reviewer");
+            if(!Set.of("CONFIRMED_SUBMITTED","CONFIRMED_NOT_SUBMITTED","UNRESOLVED").contains(decision))throw new WorkflowException("RECONCILIATION_DECISION_INVALID","对账结论无效");
+            ObjectNode next=old.deepCopy().put("reconciliationStatus",decision).put("reconciledAt",Instant.now().toString());
+            next.withArray("reconciliationHistory").add(obj().put("decision",decision).put("evidence",evidence).put("reviewer",reviewer).put("at",Instant.now().toString()));
+            if("CONFIRMED_SUBMITTED".equals(decision)){
+                if(!Set.of("VIDEO","LIPSYNC").contains(text(old,"type")))throw new WorkflowException("RECONCILIATION_RESUME_UNSUPPORTED","此类任务没有可安全轮询的服务商任务号，不能假定成功后继续");
+                String taskId=text(request,"providerTaskId");if(taskId.isBlank())taskId=text(old,"providerTaskId");
+                if(taskId.isBlank())throw new WorkflowException("PROVIDER_TASK_ID_REQUIRED","确认服务商已接单时必须填写服务商任务号");
+                String takeId=ensureRecoveredTake(old,request,taskId);
+                next.put("providerTaskId",taskId).put("status","RUNNING").put("progress",20).put("submissionUncertain",false).put("retryable",false).put("reconciliationRequired",false).put("resumedAt",Instant.now().toString());
+                next.set("outputSnapshot",obj().put("takeId",takeId));next.remove(List.of("failureReason","retryAt"));
+            }else if("CONFIRMED_NOT_SUBMITTED".equals(decision)){
+                next.put("submissionUncertain",false).put("retryable",true).put("reconciliationRequired",false);
+            }else{
+                next.put("submissionUncertain",true).put("retryable",false).put("reconciliationRequired",true);
+            }
+            recordTransition(old,next);return store.update(GENERATION_JOB,id,revision(old),next);
+        });events.publish(saved);return saved;
+    }
+    private String ensureRecoveredTake(ObjectNode job,ObjectNode request,String taskId){
+        String takeId=text(request,"videoTakeId");if(takeId.isBlank())takeId=text(job.path("outputSnapshot"),"takeId");
+        if(!takeId.isBlank()){store.get(VIDEO_TAKE,takeId);return takeId;}
+        JsonNode input=job.path("inputSnapshot");boolean lipsync="LIPSYNC".equals(text(job,"type"));
+        String frameId=text(input,lipsync?"sourceKeyframeId":"keyframeId");
+        if(frameId.isBlank()||!job.hasNonNull("shotId")||text(input,"promptVersionId").isBlank())throw new WorkflowException("RECONCILIATION_INPUT_INCOMPLETE","本地缺少恢复视频轮询所需的镜头、关键帧或提示词版本");
+        ObjectNode frame=store.get(KEYFRAME,frameId);
+        ObjectNode take=obj().put("projectId",project(job)).put("shotId",text(job,"shotId")).put("takeNo",input.path("takeNo").asInt(1))
+                .put("provider",request.path("provider").asText("VOLCENGINE")).put("sourceKeyframeId",frameId).put("sourceProviderUrlSnapshot",required(frame,"providerUrl"))
+                .put("promptVersionId",text(input,"promptVersionId")).put("generationJobId",id(job)).put("providerRequestId",text(job,"providerRequestId"))
+                .put("providerTaskId",taskId).put("providerStatus","QUEUED").put("qcStatus","PENDING").put("selected",false).put("locked",false).put("simulated",job.path("simulated").asBoolean());
+        for(String field:List.of("parentTakeId","continuationDepth","reanchorReason","sequenceStrategy","sequenceRelation","sequenceCompilerVersion","normalizedPromptHash","referenceBindingsHash","referenceAuthorityFingerprint","continuitySnapshotHash","sequenceStateFingerprint","providerCapabilitiesVersion"))if(input.has(field))take.set(field,input.path(field).deepCopy());
+        if(input.path("retake").isObject())take.set("retakeAudit",input.path("retake").deepCopy());
+        if(lipsync)take.put("variantType","LIPSYNC").put("sourceVideoTakeId",text(input,"sourceTakeId"));
+        take.set("inputSnapshot",input.deepCopy());take.set("assetViewIds",frame.path("assetViewIds").deepCopy());take.set("assetReferences",frame.path("assetReferences").deepCopy());
+        return id(store.create(VIDEO_TAKE,take));
+    }
     public ObjectNode revalidate(String id){return store.transaction(()->{
         ObjectNode j=store.getForUpdate(GENERATION_JOB,id);
         if(!Set.of("FAILED","CANCELLED").contains(text(j,"status")))throw new WorkflowException("NOT_REVALIDATABLE","仅失败或取消的任务可以本地复核");
@@ -94,10 +147,12 @@ public class JobService {
         List<String> path;
         if(from.equals("RUNNING")&&to.equals("RETRY_WAIT"))path=List.of("FAILED","RETRY_WAIT");
         else if(from.equals("RETRY_WAIT")&&to.equals("RUNNING"))path=List.of("QUEUED","RUNNING");
+        else if(from.equals("FAILED")&&to.equals("RUNNING")&&"CONFIRMED_SUBMITTED".equals(text(next,"reconciliationStatus")))path=List.of("RUNNING");
         else if((from.equals("QUEUED")&&Set.of("RUNNING","CANCELLED").contains(to)) ||
                 (from.equals("RUNNING")&&Set.of("SUCCESS","FAILED","CANCELLED").contains(to)) ||
                 (from.equals("RETRY_WAIT")&&to.equals("CANCELLED")))path=List.of(to);
         else throw new WorkflowException("ILLEGAL_JOB_TRANSITION","任务状态不能从 "+from+" 改为 "+to);
         String previous=from;for(String status:path){next.withArray("statusHistory").add(obj().put("from",previous).put("to",status).put("at",Instant.now().toString()));previous=status;}
     }
+    private void recordTerminalCost(ObjectNode job){if(!Set.of("SUCCESS","FAILED","CANCELLED").contains(text(job,"status")))return;store.transaction(()->{for(ObjectNode record:store.list(COST_RECORD,project(job),null))if(id(job).equals(text(record,"generationJobId")))return null;ObjectNode priceSnapshot=store.list(PRICE_SNAPSHOT,project(job),null).stream().max(Comparator.comparingInt(value->value.path("version").asInt())).orElseGet(()->store.create(PRICE_SNAPSHOT,obj().put("projectId",project(job)).put("version",1).put("currency","CNY").put("status","UNPRICED").put("source","LOCAL_CONFIG").set("prices",obj())));JsonNode usage=job.path("providerUsage");double amount=job.path("cost").asDouble(0);boolean known=job.path("costKnown").asBoolean(false),wasted=!"SUCCESS".equals(text(job,"status"));ObjectNode record=obj().put("projectId",project(job)).put("generationJobId",id(job)).put("taskId",id(job)).put("taskType",text(job,"type")).put("provider",job.path("provider").asText("UNKNOWN")).put("model",job.path("model").asText("UNKNOWN")).put("inputTokens",usage.path("promptTokens").asLong(usage.path("inputTokens").asLong(0))).put("outputTokens",usage.path("completionTokens").asLong(usage.path("outputTokens").asLong(0))).put("totalTokens",usage.path("totalTokens").asLong(0)).put("estimatedCost",amount).put("currency",job.path("currency").asText("CNY")).put("billingStatus",job.path("submissionUncertain").asBoolean()?"POSSIBLY_BILLED":known?"ACTUAL":"ESTIMATED").put("selectedResult",false).put("wastedCost",wasted?amount:0).put("priceSnapshotId",id(priceSnapshot)).put("terminalStatus",text(job,"status"));if(known)record.put("actualCost",amount);if(job.hasNonNull("shotId"))record.put("shotId",text(job,"shotId"));JsonNode input=job.path("inputSnapshot");for(String field:List.of("episodeId","sceneId","episodeNo"))if(input.hasNonNull(field))record.set(field,input.path(field));for(String field:List.of("providerRequestId","providerTaskId"))if(job.hasNonNull(field))record.set(field,job.path(field));store.create(COST_RECORD,record);return null;});}
 }

@@ -1,0 +1,12 @@
+{
+  "fixtureId": "repair-wrong-hand",
+  "compiler": "SEEDREAM",
+  "taskType": "REPAIR_EDIT",
+  "expectedSections": [
+    "TASK / IMAGE PURPOSE",
+    "REFERENCE BINDINGS",
+    "CONTINUITY LOCK",
+    "DYNAMIC AVOID"
+  ],
+  "invariant": "repair wrong hand"
+}

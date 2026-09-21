@@ -6,6 +6,7 @@ import com.yourapp.drama.job.JobService;
 import com.yourapp.drama.model.ImageGenerator;
 import com.yourapp.drama.persistence.*;
 import com.yourapp.drama.production.LocationViewProjection;
+import com.yourapp.drama.production.ProviderCapabilityRegistry;
 import com.yourapp.drama.storage.*;
 import org.springframework.stereotype.Service;
 import java.io.*;
@@ -126,6 +127,7 @@ public class AssetViewService {
         ObjectNode saved=store.transaction(()->{
             ObjectNode now=store.getForUpdate(ASSET_VIEW,id(view));boolean stale=now.path("stale").asBoolean()||!isCurrent(now);
             ObjectNode next=now.deepCopy().put("providerUrl",result.providerUrl()).put("providerRequestId",result.requestId()).put("model",result.model()).put("simulated",result.simulated()).put("approved",false).put("status",stale?"STALE":"REVIEW").put("stale",stale);
+            for(String field:List.of("compilerVersion","normalizedPromptHash","referenceBindingsHash","referenceAuthorityFingerprint","continuitySnapshotHash","providerCapabilitiesVersion"))if(job.path("inputSnapshot").has(field))next.set(field,job.path("inputSnapshot").path(field).deepCopy());
             if(result.expiresAt()!=null)next.put("providerUrlExpiresAt",result.expiresAt().toString());
             return store.update(ASSET_VIEW,id(now),revision(now),next);
         });
@@ -185,7 +187,8 @@ public class AssetViewService {
         }else if(!baselineLook(current).isBlank()){
             ObjectNode baseline=currentViews(project(current),text(current,"coreId"),baselineLook(current)).stream().filter(v->v.path("master").asBoolean()&&v.path("approved").asBoolean()).findFirst().orElseThrow(()->new WorkflowException("IDENTITY_ANCHOR_REQUIRED","请先确认这个演员的基础定妆主图，后续服装才能保持同一张脸"));references.add(id(baseline));
         }
-        ObjectNode input=obj().put("assetViewId",id(current)).put("coreId",text(current,"coreId")).put("sourceHash",text(current,"sourceHash")).put("prompt",prompt(current,!references.isEmpty()));input.set("sourceSnapshot",current.path("sourceSnapshot").deepCopy());input.set("referenceViewIds",references);
+        String compiledPrompt=prompt(current,!references.isEmpty());ArrayNode bindings=JsonNodeFactory.instance.arrayNode();for(JsonNode referenceId:references){ObjectNode reference=store.get(ASSET_VIEW,referenceId.asText());ObjectNode binding=obj().put("referenceId",id(reference)).put("sourceResourceId",text(reference,"assetId")).put("sourceVersion",reference.path("setVersion").asInt()).put("role","ASSET_IDENTITY_REFERENCE").put("authorityPriority",100).put("instructions","只控制同一素材的身份、几何、材质和纹理，不转移姿势、背景或相机");binding.putArray("controls").add("assetIdentity").add("geometry").add("material").add("texture");binding.putArray("mustNotTransfer").add("pose").add("background").add("camera");bindings.add(binding);}
+        String bindingHash=hash(bindings);ObjectNode input=obj().put("assetViewId",id(current)).put("coreId",text(current,"coreId")).put("sourceHash",text(current,"sourceHash")).put("imageTaskType","ASSET_REFERENCE").put("compilerVersion","4.0.0-asset-reference").put("normalizedPromptHash",hash(TextNode.valueOf(compiledPrompt.replaceAll("\\s+"," ").trim()))).put("referenceBindingsHash",bindingHash).put("referenceAuthorityFingerprint",bindingHash).put("continuitySnapshotHash",text(current,"sourceHash")).put("providerCapabilitiesVersion",ProviderCapabilityRegistry.VERSION).put("prompt",compiledPrompt);input.set("sourceSnapshot",current.path("sourceSnapshot").deepCopy());input.set("referenceViewIds",references);input.set("referenceBindings",bindings);
         if("LOCATION".equals(text(current,"assetKind")))input.set("viewCamera",locationCamera(text(current,"view")));
         ObjectNode job=jobs.enqueue(project(current),null,"ASSET_IMAGE",input,"asset-view:"+id(current));jobs.mutate(id(job),j->j.put("maxAttempts",1));
         ObjectNode next=current.deepCopy().put("status","GENERATING").put("generationJobId",id(job));next.set("referenceViewIds",references.deepCopy());return store.update(ASSET_VIEW,id(current),revision(current),next);
@@ -197,7 +200,7 @@ public class AssetViewService {
         if("LOCATION".equals(text(view,"assetKind")))angle=locationCamera(text(view,"view")).toString();
         String skill=loadPrompt(view.path("assetKind").asText());
         String metadata="\\n本次执行参数（供模型理解，不要在图片中显示，也不要返回 JSON）：assetKind="+text(view,"assetKind")+"；assetId="+text(view,"assetId")+"；view="+text(view,"view")+"；sourceSnapshot="+view.path("sourceSnapshot")+"；referenceViewIds="+view.path("referenceViewIds")+"。\\n";
-        String anchor=switch(text(view,"assetKind")){case "CHARACTER_LOOK"->"这是角色身份与定妆参考图。角色身份锚点与服装定妆分开：不得把手持道具、场景、剧情动作或临时姿势固化到人物主图；基础身份主图只确认脸、发型、体态和比例，服装主图只在此身份上确认本套衣服。";case "LOCATION"->"这是空场景参考图。所有入口、出口、门窗、道路、井、树和固定地标按同一世界坐标保留；不同视角只能改变相机位置，不能旋转、镜像或移动建筑。";default->"这是单件道具参考图。保持轮廓、尺寸比例、材质、重量感、颜色、纹理、刻痕、磨损和当前状态；不要出现手、人、第二件同类道具或文字。";};
+        String anchor=switch(text(view,"assetKind")){case "CHARACTER_LOOK"->"这是角色身份与定妆参考图。角色身份锚点与服装定妆分开：不得把手持道具、场景、剧情动作或临时姿势固化到人物主图；基础身份主图只确认脸、发型、体态和比例，服装主图只在此身份上确认本套衣服。";case "LOCATION"->"这是空场景参考图。所有入口、出口、门窗、道路、井、树和固定地标按同一世界坐标保留；门窗必须保持同一开关状态；不同视角只能改变相机位置，不能旋转、镜像或移动建筑。";default->"这是单件道具参考图。保持轮廓、尺寸比例、材质、重量感、颜色、纹理、刻痕、磨损和当前状态；不要出现手、人、第二件同类道具或文字。";};
         String refs=references?"输入参考图是已经确认的同一素材锚点；严格保持身份、几何、材质和纹理，只改变观察视角。":"这是本套多视图的主参考，生成后需人工确认后才能成为其它视角锚点。";
         return skill+metadata+"本视角："+angle+"。"+anchor+refs+"。只生成一张单视角制作参考图，不要拼图、四宫格、重复主体、文字水印或 JSON。";
     }
@@ -215,7 +218,18 @@ public class AssetViewService {
         if(!"CONFIRMED".equals(text(core,"reviewStatus"))||core.path("stale").asBoolean())throw new WorkflowException("CORE_REVIEW_REQUIRED","请先确认当前整季核心故事");return core;
     }
     private ObjectNode asset(ObjectNode view){return store.get(ResourceKind.valueOf(text(view,"assetKind")),text(view,"assetId"));}
-    private ObjectNode source(ObjectNode asset,String kind){ObjectNode result=obj();result.set("asset",description(asset));if("CHARACTER_LOOK".equals(kind))result.set("character",description(store.get(CHARACTER,required(asset,"characterId"))));return result;}
+    private ObjectNode source(ObjectNode asset,String kind){
+        ObjectNode result=obj();
+        if("CHARACTER_LOOK".equals(kind)){
+            result.set("asset",visualFields(asset,List.of("id","characterId","lookKey","name","description","visualPrompt","clothing","accessories")));
+            ObjectNode character=store.get(CHARACTER,required(asset,"characterId"));
+            result.set("character",visualFields(character,List.of("id","characterKey","name","visualIdentity","identityTraits","baseLookId")));
+        }else if("LOCATION".equals(kind))result.set("asset",visualFields(asset,List.of("id","locationKey","name","description","locationBible","visualIdentity")));
+        else if("PROP".equals(kind))result.set("asset",visualFields(asset,List.of("id","propKey","name","description","propBible","visualIdentity","state")));
+        else throw new IllegalArgumentException("未知素材类型："+kind);
+        return result;
+    }
+    private ObjectNode visualFields(ObjectNode source,List<String> fields){ObjectNode result=obj();for(String field:fields)if(source.has(field))result.set(field,source.get(field).deepCopy());return result;}
     private ObjectNode description(ObjectNode value){ObjectNode result=value.deepCopy();METADATA.forEach(result::remove);return result;}
     private boolean isCurrent(ObjectNode view){try{current(view);return true;}catch(WorkflowException ignored){return false;}}
     private void current(ObjectNode view){

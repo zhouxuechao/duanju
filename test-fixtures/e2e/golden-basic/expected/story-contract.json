@@ -1,0 +1,11 @@
+{
+  "requiredStages": [
+    "PREMISE",
+    "CORE",
+    "OUTLINE_BATCH",
+    "EPISODE_SCRIPT",
+    "STORY_QA"
+  ],
+  "episodeCount": 2,
+  "confirmedBeforeProduction": true
+}

@@ -1,0 +1,12 @@
+{
+  "fixtureId": "storyboard-two-person",
+  "compiler": "SEEDREAM",
+  "taskType": "STORYBOARD",
+  "expectedSections": [
+    "TASK / IMAGE PURPOSE",
+    "REFERENCE BINDINGS",
+    "CONTINUITY LOCK",
+    "DYNAMIC AVOID"
+  ],
+  "invariant": "storyboard two person"
+}

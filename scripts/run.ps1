@@ -23,7 +23,10 @@ if (-not $env:JAVA_HOME -or -not (Test-Path -LiteralPath "$env:JAVA_HOME\bin\jav
     if (Test-Path -LiteralPath "$taskJdk\bin\javac.exe") { $env:JAVA_HOME = $taskJdk }
 }
 if ($env:JAVA_HOME) { $env:Path = "$env:JAVA_HOME\bin;$env:Path" }
-if (-not $env:FFMPEG_PATH -and (Test-Path -LiteralPath 'D:\project\aimanju\node_modules\ffmpeg-static\ffmpeg.exe')) { $env:FFMPEG_PATH='D:\project\aimanju\node_modules\ffmpeg-static\ffmpeg.exe' }
+$taskFfmpeg = Join-Path $taskRoot 'frontend\node_modules\ffmpeg-static\ffmpeg.exe'
+$taskFfprobe = Join-Path $taskRoot 'frontend\node_modules\ffprobe-static\bin\win32\x64\ffprobe.exe'
+if (-not $env:FFMPEG_PATH -and (Test-Path -LiteralPath $taskFfmpeg)) { $env:FFMPEG_PATH=$taskFfmpeg }
+if (-not $env:FFPROBE_PATH -and (Test-Path -LiteralPath $taskFfprobe)) { $env:FFPROBE_PATH=$taskFfprobe }
 $env:PORT = "$Port"
 $env:SPRING_PROFILES_ACTIVE = switch ($Mode) { 'Demo' {'demo'} 'Live' {'demo,live'} 'Prod' {'prod'} }
 if ($Build -or -not (Test-Path -LiteralPath 'target\drama-0.1.0-SNAPSHOT.jar')) {

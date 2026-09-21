@@ -1,0 +1,9 @@
+{
+  "baselineVersion": 1,
+  "storyType": "COMEDY",
+  "episodeFormatFamily": "CUSTOM",
+  "requiredRuleId": "TYPE_COMEDY",
+  "qualityContract": "STRUCTURE_AND_INVARIANTS",
+  "model": "OFFLINE_DETERMINISTIC",
+  "promptVersion": "story-regression-v1"
+}

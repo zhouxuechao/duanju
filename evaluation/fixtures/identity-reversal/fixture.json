@@ -1,0 +1,24 @@
+{
+  "fixtureId": "identity-reversal",
+  "idea": "被轻视的赘婿隐瞒集团继承人身份，证据逐层出现",
+  "episodeCount": 10,
+  "targetDuration": 24,
+  "distributionProfile": "GENERAL",
+  "seed": "regression-v1",
+  "storyProfile": {
+    "settingGenre": "URBAN",
+    "storyType": "IDENTITY_REVERSAL",
+    "audience": "MALE",
+    "tones": [
+      "爽",
+      "轻喜"
+    ],
+    "tropes": []
+  },
+  "expectedInvariants": {
+    "requiredRuleId": "TYPE_IDENTITY_REVERSAL",
+    "coreLoopMustContain": "隐藏身份",
+    "futureFactLeakageAllowed": false,
+    "literalTextComparison": false
+  }
+}

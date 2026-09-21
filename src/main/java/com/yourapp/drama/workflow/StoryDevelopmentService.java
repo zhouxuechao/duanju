@@ -29,28 +29,49 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
 @Service
 public class StoryDevelopmentService {
+   private static final Logger log = LoggerFactory.getLogger(StoryDevelopmentService.class);
    private final DocumentStore store;
    private final JobService jobs;
    private final LlmGateway llm;
    private final ObjectMapper mapper;
    private final StructuredJson structured;
+   private final StoryProfilePolicy storyProfiles;
+   private final EpisodeFormatResolver episodeFormats;
+   private final ScreenwritingRuleResolver ruleResolver;
+   private final StoryContractValidator storyContracts;
+   private final StoryQualityService storyQuality;
 
-   public StoryDevelopmentService(DocumentStore store, JobService jobs, LlmGateway llm, ObjectMapper mapper, Validator validator) {
+   public StoryDevelopmentService(DocumentStore store, JobService jobs, LlmGateway llm, ObjectMapper mapper, Validator validator,
+                                  StoryProfilePolicy storyProfiles, EpisodeFormatResolver episodeFormats,
+                                  ScreenwritingRuleResolver ruleResolver, StoryContractValidator storyContracts,
+                                  StoryQualityService storyQuality) {
       this.store = store;
       this.jobs = jobs;
       this.llm = llm;
       this.mapper = mapper;
       this.structured = new StructuredJson(mapper, validator);
+      this.storyProfiles = storyProfiles;
+      this.episodeFormats = episodeFormats;
+      this.ruleResolver = ruleResolver;
+      this.storyContracts = storyContracts;
+      this.storyQuality = storyQuality;
    }
 
    public ObjectNode start(String projectId, ObjectNode request) {
       return (ObjectNode)this.store.transaction(() -> {
          ObjectNode project = this.store.getForUpdate(ResourceKind.PROJECT, projectId);
+         ObjectNode normalizedProject = this.storyProfiles.enrich(project);
+         normalizedProject.set("episodeFormat", this.episodeFormats.resolve(normalizedProject));
+         if (!normalizedProject.equals(project)) {
+            project = this.store.update(ResourceKind.PROJECT, projectId, Documents.revision(project), normalizedProject);
+         }
          if (project.hasNonNull("activeStoryDocumentId")) {
             return this.store.get(ResourceKind.STORY_DOCUMENT, Documents.text(project, "activeStoryDocumentId"));
          } else if (project.path("episodeCount").isIntegralNumber() && project.path("episodeCount").asInt() >= 1 && project.path("episodeCount").asInt() <= 100) {
@@ -67,7 +88,7 @@ public class StoryDevelopmentService {
                draft.set("content", Documents.obj());
                ObjectNode saved = this.store.create(ResourceKind.STORY_DOCUMENT, draft);
                this.store.update(ResourceKind.PROJECT, projectId, Documents.revision(project), project.deepCopy().put("activeStoryDocumentId", coreId));
-               return this.schedule(saved);
+               return this.schedulePremise(saved);
             } else {
                throw new IllegalArgumentException("请先设置每集目标时长");
             }
@@ -78,7 +99,7 @@ public class StoryDevelopmentService {
    }
 
    public ObjectNode edit(String documentId, ObjectNode request) {
-      return (ObjectNode)this.store.transaction(() -> {
+      ObjectNode saved = (ObjectNode)this.store.transaction(() -> {
          ObjectNode before = this.store.get(ResourceKind.STORY_DOCUMENT, documentId);
          this.store.getForUpdate(ResourceKind.PROJECT, Documents.project(before));
          ObjectNode doc = this.store.getForUpdate(ResourceKind.STORY_DOCUMENT, documentId);
@@ -97,7 +118,8 @@ public class StoryDevelopmentService {
                if ("CONFIRMED".equals(Documents.text(doc, "reviewStatus"))) {
                   String nextId = UUID.randomUUID().toString();
                   next.remove(List.of("id", "parentId", "revision", "createdAt", "updatedAt", "generationJobId", "confirmedAt", "continuitySnapshot", "continuityHash", "failureReason", "failureCode"));
-                  next.put("id", nextId).put("supersedesId", documentId).put("version", doc.path("version").asInt() + 1).put("reviewStatus", "REVIEW").put("stale", false);
+                  next.put("id", nextId).put("supersedesId", documentId).put("version", doc.path("version").asInt() + 1).put("reviewStatus", this.needsStoryQa(doc) ? "QA_PENDING" : "REVIEW").put("stale", false);
+                  this.clearStoryQa(next);
                   if ("CORE".equals(Documents.text(doc, "documentType"))) {
                      next.put("coreId", nextId);
                   } else {
@@ -105,21 +127,58 @@ public class StoryDevelopmentService {
                   }
 
                   this.invalidate(doc);
-                  ObjectNode saved = this.store.create(ResourceKind.STORY_DOCUMENT, next);
+                  ObjectNode created = this.store.create(ResourceKind.STORY_DOCUMENT, next);
                   if ("CORE".equals(Documents.text(doc, "documentType"))) {
                      ObjectNode p = this.store.getForUpdate(ResourceKind.PROJECT, Documents.project(doc));
                      this.store.update(ResourceKind.PROJECT, Documents.id(p), Documents.revision(p), p.deepCopy().put("activeStoryDocumentId", nextId));
                   }
-
-                  return saved;
+                  this.recordHumanEdit(doc, created, request);
+                  return created;
                } else {
-                  next.put("reviewStatus", "REVIEW");
+                  next.put("reviewStatus", this.needsStoryQa(doc) ? "QA_PENDING" : "REVIEW");
+                  this.clearStoryQa(next);
                   next.remove(List.of("failureReason", "failureCode"));
-                  return this.store.update(ResourceKind.STORY_DOCUMENT, documentId, Documents.revision(doc), next);
+                  ObjectNode updated = this.store.update(ResourceKind.STORY_DOCUMENT, documentId, Documents.revision(doc), next);
+                  this.recordHumanEdit(doc, updated, request);
+                  return updated;
                }
             }
          }
       });
+      return this.needsStoryQa(saved) ? this.scheduleStoryQa(saved) : saved;
+   }
+
+   private void recordHumanEdit(ObjectNode before, ObjectNode after, ObjectNode request) {
+      if (before.path("content").equals(after.path("content"))) return;
+      ObjectNode context = Documents.obj()
+         .put("documentVersion", after.path("version").asInt())
+         .put("storyDocumentId", Documents.id(after));
+      String jobId = Documents.text(before, "generationJobId");
+      if (!jobId.isBlank()) {
+         this.store.find(ResourceKind.GENERATION_JOB, jobId).ifPresent(job -> {
+            context.put("model", Documents.text(job, "model"));
+            context.put("promptVersionId", Documents.text(job.path("inputSnapshot"), "promptVersionId"));
+            context.put("rulePackFingerprint", Documents.text(job.path("inputSnapshot"), "rulePackFingerprint"));
+         });
+      }
+      ObjectNode feedback = Documents.obj()
+         .put("projectId", Documents.project(after))
+         .put("targetKind", Documents.text(after, "documentType"))
+         .put("targetId", Documents.id(after))
+         .put("sourceTargetId", Documents.id(before))
+         .put("fieldPath", "content")
+         .put("episodeNo", after.path("episodeNo").asInt(0))
+         .put("storyType", Documents.text(after.path("projectSnapshot").path("storyProfile"), "storyType"))
+         .put("freeformNote", Documents.text(request, "feedbackNote"));
+      feedback.set("beforeTextOrJson", before.path("content").deepCopy());
+      feedback.set("afterTextOrJson", after.path("content").deepCopy());
+      ArrayNode reasons = feedback.putArray("reasonCodes");
+      if (request.path("reasonCodes").isArray()) request.path("reasonCodes").forEach(value -> {
+         String code = value.asText("").trim();
+         if (!code.isBlank()) reasons.add(code);
+      });
+      feedback.set("versionContext", context);
+      this.store.create(ResourceKind.HUMAN_EDIT_FEEDBACK, feedback);
    }
 
    public ObjectNode confirm(String documentId, ObjectNode request) {
@@ -135,6 +194,9 @@ public class StoryDevelopmentService {
             if (!"REVIEW".equals(Documents.text(doc, "reviewStatus"))) {
                throw new WorkflowException("DRAFT_NOT_READY", "文档尚未生成或修改完成，请先处理本阶段问题");
             } else {
+               if (this.needsStoryQa(doc) && (!doc.path("storyQa").path("passed").asBoolean() || !this.storyQuality.contentHash(doc.path("content")).equals(Documents.text(doc, "qaContentHash")))) {
+                  throw new WorkflowException("STORY_QA_REQUIRED", "当前剧本内容尚未通过对应版本的故事质检，请完成质检后再确认");
+               }
                ObjectNode next = doc.deepCopy();
                next.set("validation", this.validate(doc, doc.path("content")));
                next.put("reviewStatus", "CONFIRMED").put("confirmedAt", Instant.now().toString());
@@ -171,6 +233,12 @@ public class StoryDevelopmentService {
    }
 
    public ObjectNode retry(String documentId) {
+      ObjectNode snapshot = this.store.get(ResourceKind.STORY_DOCUMENT, documentId);
+      if ("QA_FAILED".equals(Documents.text(snapshot, "reviewStatus"))) {
+         ObjectNode oldQa = this.store.get(ResourceKind.GENERATION_JOB, Documents.required(snapshot, "qaJobId"));
+         if (oldQa.path("submissionUncertain").asBoolean()) throw new WorkflowException("SUBMISSION_UNCERTAIN", "故事质检提交状态不确定，请先核对服务商记录；不能自动重发");
+         return this.scheduleStoryQa(snapshot);
+      }
       return (ObjectNode)this.store.transaction(() -> {
          ObjectNode before = this.store.get(ResourceKind.STORY_DOCUMENT, documentId);
          this.store.getForUpdate(ResourceKind.PROJECT, Documents.project(before));
@@ -186,9 +254,42 @@ public class StoryDevelopmentService {
          } else if ("CONFIRMED".equals(Documents.text(doc, "reviewStatus"))) {
             throw new WorkflowException("ALREADY_CONFIRMED", "已确认的内容请通过修改创建新版本");
          } else {
-            return this.schedule(doc);
+            return "CORE".equals(Documents.text(doc, "documentType")) && !doc.path("premiseAnalysis").isObject()
+                    ? this.schedulePremise(doc) : this.schedule(doc);
          }
       });
+   }
+
+   public ObjectNode rewrite(String documentId, ObjectNode request) {
+      ObjectNode created = this.store.transaction(() -> {
+         ObjectNode before = this.store.get(ResourceKind.STORY_DOCUMENT, documentId);
+         this.store.getForUpdate(ResourceKind.PROJECT, Documents.project(before));
+         ObjectNode doc = this.store.getForUpdate(ResourceKind.STORY_DOCUMENT, documentId);
+         this.requireCurrent(doc);
+         this.expectRevision(doc, request);
+         if (!this.needsStoryQa(doc)) throw new WorkflowException("REWRITE_STAGE_INVALID", "只有单集剧本支持按 Story QA 定向改写");
+         if (!"REVIEW".equals(Documents.text(doc, "reviewStatus")) || !doc.path("storyQa").path("rewriteRequired").asBoolean())
+            throw new WorkflowException("REWRITE_NOT_REQUIRED", "当前剧本没有需要自动改写的 Story QA 阻断问题");
+         int attempt = doc.path("rewriteAttempt").asInt() + 1;
+         if (attempt > 2) throw new WorkflowException("REWRITE_LIMIT_REACHED", "自动改写最多执行两次，请人工修改剧本或上游集纲");
+         String nextId = UUID.randomUUID().toString();
+         ObjectNode next = doc.deepCopy();
+         next.remove(List.of("id", "parentId", "revision", "createdAt", "updatedAt", "generationJobId", "confirmedAt", "qaJobId",
+                 "qaProviderRequestId", "qaModel", "qaContentHash", "storyQa", "qaFailureCode", "qaFailureReason", "failureReason", "failureCode"));
+         next.put("id", nextId).put("supersedesId", documentId).put("version", doc.path("version").asInt() + 1)
+                 .put("rewriteAttempt", attempt).put("reviewStatus", "WAITING").put("stale", false);
+         ObjectNode source = (ObjectNode)doc.path("sourceSnapshot").deepCopy();
+         ObjectNode rewrite = Documents.obj().put("attempt", attempt).put("preserveStartState", Documents.text(doc.path("content"), "startState"))
+                 .put("preserveEndState", Documents.text(doc.path("content"), "endState"));
+         rewrite.set("blockingIssues", doc.path("storyQa").path("blockingIssues").deepCopy());
+         rewrite.set("rewriteInstructions", doc.path("storyQa").path("rewriteInstructions").deepCopy());
+         rewrite.set("previousScript", doc.path("content").deepCopy());
+         source.set("rewriteRequest", rewrite);
+         next.set("sourceSnapshot", source);
+         this.invalidate(doc);
+         return this.store.create(ResourceKind.STORY_DOCUMENT, next);
+      });
+      return this.schedule(created);
    }
 
    public void process(ObjectNode job) {
@@ -196,6 +297,10 @@ public class StoryDevelopmentService {
       ObjectNode doc = this.store.get(ResourceKind.STORY_DOCUMENT, documentId);
       if (this.current(doc) && Documents.id(job).equals(Documents.text(doc, "generationJobId")) && !job.path("cancelRequested").asBoolean()) {
          JsonNode input = job.path("inputSnapshot");
+         if ("PREMISE".equals(Documents.text(input, "phase"))) {
+            this.processPremise(job, doc, input);
+            return;
+         }
          ObjectNode schema = StoryDevelopmentSchemas.forDocument(doc);
          LlmGateway.StructuredRequest request = new LlmGateway.StructuredRequest(this.prompt(Documents.text(doc, "documentType")), input.toString(), this.mapper.convertValue(schema, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {}), Map.of());
          LlmGateway.StructuredResult<JsonNode> result = this.llm.generate(request, JsonNode.class);
@@ -205,33 +310,38 @@ public class StoryDevelopmentService {
          try {
             validation = this.validate(doc, (JsonNode)result.value());
          } catch (RuntimeException error) {
+            String rawMessage = error.getMessage();
+            String failureMessage = rawMessage == null || rawMessage.isBlank() ? error.getClass().getSimpleName() : rawMessage;
+            log.warn("Story document validation failed: documentId={}, type={}", documentId, Documents.text(doc, "documentType"), error);
             this.store.transaction(() -> {
                ObjectNode latest = this.store.getForUpdate(ResourceKind.STORY_DOCUMENT, documentId);
                ObjectNode invalid = latest.deepCopy().put("reviewStatus", "FAILED");
                invalid.set("content", (JsonNode)result.value());
-               invalid.set("validation", Documents.obj().put("passed", false).put("message", error.getMessage()));
+               invalid.set("validation", Documents.obj().put("passed", false).put("message", failureMessage));
                this.store.update(ResourceKind.STORY_DOCUMENT, documentId, Documents.revision(latest), invalid);
                return null;
             });
             throw error;
          }
 
-         this.store.transaction(() -> {
+         ObjectNode generated = this.store.transaction(() -> {
             ObjectNode latest = this.store.getForUpdate(ResourceKind.STORY_DOCUMENT, documentId);
-            ObjectNode next = latest.deepCopy().put("reviewStatus", this.current(latest) ? "REVIEW" : "STALE").put("providerRequestId", result.requestId());
+            boolean needsQa = "EPISODE_SCRIPT".equals(Documents.text(latest, "documentType")) && this.current(latest);
+            ObjectNode next = latest.deepCopy().put("reviewStatus", this.current(latest) ? (needsQa ? "QA_PENDING" : "REVIEW") : "STALE").put("providerRequestId", result.requestId());
             next.set("content", ((JsonNode)result.value()).deepCopy());
             next.set("validation", validation);
-            this.store.update(ResourceKind.STORY_DOCUMENT, documentId, Documents.revision(latest), next);
+            ObjectNode saved = this.store.update(ResourceKind.STORY_DOCUMENT, documentId, Documents.revision(latest), next);
             this.jobs.succeed(Documents.id(job), Documents.obj().put("documentId", documentId).put("stage", Documents.text(doc, "documentType")).put("awaitingReview", this.current(latest)).put("simulated", result.simulated()));
-            return null;
+            return saved;
          });
+         if ("QA_PENDING".equals(Documents.text(generated, "reviewStatus"))) this.scheduleStoryQa(generated);
       } else {
          this.jobs.mutate(Documents.id(job), (j) -> j.put("status", "CANCELLED"));
       }
    }
 
    public void syncFailure(ObjectNode job) {
-      if (Set.of("STORY", "SCRIPT").contains(Documents.text(job, "type"))) {
+      if (Set.of("STORY", "SCRIPT").contains(Documents.text(job, "type")) && Set.of("FAILED", "RETRY_WAIT").contains(Documents.text(job, "status"))) {
          String documentId = Documents.text(job.path("inputSnapshot"), "documentId");
          if (!documentId.isBlank()) {
             this.store.transaction(() -> {
@@ -249,9 +359,36 @@ public class StoryDevelopmentService {
       }
    }
 
+   private boolean needsStoryQa(JsonNode document) {
+      return "EPISODE_SCRIPT".equals(Documents.text(document, "documentType"));
+   }
+
+   private void clearStoryQa(ObjectNode document) {
+      document.remove(List.of("qaJobId", "qaProviderRequestId", "qaModel", "qaContentHash", "storyQa", "qaFailureCode", "qaFailureReason"));
+   }
+
+   private ObjectNode scheduleStoryQa(ObjectNode document) {
+      try {
+         return this.storyQuality.schedule(document);
+      } catch (RuntimeException error) {
+         log.warn("Unable to schedule story QA: documentId={}", Documents.id(document), error);
+         return this.storyQuality.markSchedulingFailure(document, error);
+      }
+   }
+
    private ObjectNode schedule(ObjectNode doc) {
       ObjectNode input = Documents.obj().put("pipelineVersion", 2).put("documentId", Documents.id(doc)).put("phase", Documents.text(doc, "documentType"));
-      input.set("project", doc.path("projectSnapshot").deepCopy());
+      ObjectNode project = this.storyProfiles.enrich((ObjectNode)doc.path("projectSnapshot").deepCopy());
+      ObjectNode episodeFormat = this.episodeFormats.resolve(project);
+      project.set("episodeFormat", episodeFormat.deepCopy());
+      input.set("project", project);
+      input.set("storyProfile", project.path("storyProfile").deepCopy());
+      input.set("episodeFormat", episodeFormat);
+      input.set("rulePack", this.ruleResolver.resolve(Documents.text(doc, "documentType"), project.path("storyProfile"),
+              episodeFormat, project.path("distributionProfile").asText("GENERAL")));
+      if ("CORE".equals(Documents.text(doc, "documentType")) && doc.path("premiseAnalysis").isObject()) {
+         input.set("premiseAnalysis", doc.path("premiseAnalysis").deepCopy());
+      }
       if (!"CORE".equals(Documents.text(doc, "documentType"))) {
          ObjectNode core = this.store.get(ResourceKind.STORY_DOCUMENT, Documents.text(doc, "coreId"));
          this.requireConfirmed(core);
@@ -275,6 +412,49 @@ public class StoryDevelopmentService {
       ObjectNode next = doc.deepCopy().put("generationJobId", Documents.id(submitted)).put("reviewStatus", "GENERATING");
       next.remove(List.of("failureReason", "failureCode"));
       return this.store.update(ResourceKind.STORY_DOCUMENT, Documents.id(doc), Documents.revision(doc), next);
+   }
+
+   private ObjectNode schedulePremise(ObjectNode doc) {
+      ObjectNode project = this.storyProfiles.enrich((ObjectNode)doc.path("projectSnapshot").deepCopy());
+      ObjectNode format = this.episodeFormats.resolve(project);
+      project.set("episodeFormat", format.deepCopy());
+      ObjectNode input = Documents.obj().put("pipelineVersion", 2).put("documentId", Documents.id(doc)).put("phase", "PREMISE");
+      input.set("project", project);
+      input.set("storyProfile", project.path("storyProfile").deepCopy());
+      input.set("episodeFormat", format);
+      input.set("rulePack", this.ruleResolver.resolve("PREMISE", project.path("storyProfile"), format, project.path("distributionProfile").asText("GENERAL")));
+      ObjectNode submitted = this.jobs.enqueue(Documents.project(doc), null, "STORY", input, "premise:" + Documents.id(doc) + ":" + UUID.randomUUID());
+      this.jobs.mutate(Documents.id(submitted), j -> j.put("maxAttempts", 1));
+      ObjectNode next = doc.deepCopy().put("generationJobId", Documents.id(submitted)).put("reviewStatus", "PREMISE_ANALYSIS");
+      next.remove(List.of("failureReason", "failureCode"));
+      return this.store.update(ResourceKind.STORY_DOCUMENT, Documents.id(doc), Documents.revision(doc), next);
+   }
+
+   private void processPremise(ObjectNode job, ObjectNode doc, JsonNode input) {
+      LlmGateway.StructuredRequest request = new LlmGateway.StructuredRequest(this.prompt("PREMISE"), input.toString(),
+              this.mapper.convertValue(StoryDevelopmentSchemas.premise(), new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {}), Map.of());
+      LlmGateway.StructuredResult<JsonNode> result = this.llm.generate(request, JsonNode.class);
+      JsonNode premise = this.structured.parse(result.value().toString(), StoryDevelopmentSchemas.premise(), JsonNode.class, result.requestId());
+      this.jobs.mutate(Documents.id(job), j -> j.put("providerRequestId", result.requestId()).put("model", result.model()).put("simulated", result.simulated()));
+      ObjectNode saved = this.store.transaction(() -> {
+         ObjectNode latest = this.store.getForUpdate(ResourceKind.STORY_DOCUMENT, Documents.id(doc));
+         ObjectNode next = latest.deepCopy().put("premiseProviderRequestId", result.requestId()).put("premiseModel", result.model()).put("reviewStatus", "PREMISE_READY");
+         next.set("premiseAnalysis", premise.deepCopy());
+         next.set("premiseValidation", Documents.obj().put("passed", true).put("checkedAt", Instant.now().toString()));
+         ObjectNode updated = this.store.update(ResourceKind.STORY_DOCUMENT, Documents.id(latest), Documents.revision(latest), next);
+         this.jobs.succeed(Documents.id(job), Documents.obj().put("documentId", Documents.id(doc)).put("stage", "PREMISE").put("viable", premise.path("viable").asBoolean()).put("simulated", result.simulated()));
+         return updated;
+      });
+      try {
+         this.schedule(saved);
+      } catch (RuntimeException error) {
+         log.warn("Premise analysis was saved but CORE scheduling failed: documentId={}", Documents.id(doc), error);
+         this.store.transaction(() -> {
+            ObjectNode latest = this.store.getForUpdate(ResourceKind.STORY_DOCUMENT, Documents.id(doc));
+            String message = error.getMessage() == null || error.getMessage().isBlank() ? error.getClass().getSimpleName() : error.getMessage();
+            return this.store.update(ResourceKind.STORY_DOCUMENT, Documents.id(latest), Documents.revision(latest), latest.deepCopy().put("reviewStatus", "FAILED").put("failureCode", "CORE_SCHEDULE_FAILED").put("failureReason", message));
+         });
+      }
    }
 
    private void advance(ObjectNode confirmed) {
@@ -309,6 +489,11 @@ public class StoryDevelopmentService {
       if (!this.findSlot(core, "OUTLINE_BATCH", "batchNo", no).isPresent()) {
          ObjectNode doc = this.draft(core, "OUTLINE_BATCH").put("batchNo", no).put("startEpisode", start).put("endEpisode", end).put("version", this.nextVersion(core, "OUTLINE_BATCH", "batchNo", no));
          ObjectNode source = Documents.obj().put("coreId", Documents.id(core)).put("coreHash", Documents.text(core, "continuityHash"));
+         source.set("episodeFormat", this.episodeFormats.resolve(core.path("projectSnapshot")));
+         ArrayNode activeUnits = source.putArray("activeUnitArcs");
+         for (JsonNode unit : core.path("content").path("unitArcs")) {
+            if (unit.path("endEpisode").asInt() >= start && unit.path("startEpisode").asInt() <= end) activeUnits.add(unit.deepCopy());
+         }
          if (previous != null) {
             this.requireConfirmed(previous);
             source.put("previousBatchId", Documents.id(previous));
@@ -349,6 +534,7 @@ public class StoryDevelopmentService {
          if (expected == core.path("projectSnapshot").path("episodeCount").asInt() + 1 && owner != null) {
             ObjectNode doc = this.draft(core, "EPISODE_SCRIPT").put("episodeNo", no).put("sourceBatchId", Documents.id(owner)).put("version", this.nextVersion(core, "EPISODE_SCRIPT", "episodeNo", no));
             ObjectNode source = Documents.obj().put("coreId", Documents.id(core)).put("coreHash", Documents.text(core, "continuityHash")).put("batchId", Documents.id(owner)).put("batchHash", this.hash(owner.path("content")));
+            source.set("episodeFormat", this.episodeFormats.resolve(core.path("projectSnapshot")));
             source.set("episodeOutline", outline.deepCopy());
             if (previous != null) {
                this.requireConfirmed(previous);
@@ -399,6 +585,11 @@ public class StoryDevelopmentService {
          for(JsonNode p : content.path("characters")) {
             this.unique(p.path("looks"), "lookKey");
          }
+         ObjectNode expectedProfile = this.storyProfiles.enrich((ObjectNode)doc.path("projectSnapshot").deepCopy()).withObject("storyProfile");
+         if (!expectedProfile.equals(content.path("storyProfile"))) {
+            throw new IllegalArgumentException("CORE.storyProfile 必须与项目已确认故事画像一致");
+         }
+         this.storyContracts.validateCore(content, doc.path("projectSnapshot").path("episodeCount").asInt());
       } else {
          ObjectNode core = this.store.get(ResourceKind.STORY_DOCUMENT, Documents.text(doc, "coreId"));
          this.requireConfirmed(core);
@@ -418,6 +609,7 @@ public class StoryDevelopmentService {
 
                this.checkRefs(ep, canon);
                this.duration(ep.path("scenePlan"), doc);
+               this.storyContracts.validateOutlineEpisode(ep, this.episodeFormats.resolve(doc.path("projectSnapshot")));
                if (!preceding.isBlank() && !preceding.equals(Documents.text(ep, "startState"))) {
                   throw new IllegalArgumentException("第 " + ep.path("episodeNo").asInt() + " 集开场状态未承接上一集结尾，请修改开场或显式过渡描述");
                }
@@ -427,6 +619,7 @@ public class StoryDevelopmentService {
          } else {
             this.checkRefs(content, canon);
             this.duration(content.path("scenes"), doc);
+            this.storyContracts.validateScript(content, this.episodeFormats.resolve(doc.path("projectSnapshot")));
             JsonNode outline = doc.path("sourceSnapshot").path("episodeOutline");
 
             for(String k : List.of("startState", "endState")) {
@@ -447,7 +640,7 @@ public class StoryDevelopmentService {
          total += s.path("duration").asDouble();
       }
 
-      double target = doc.path("projectSnapshot").path("targetDuration").asDouble((double)20.0F);
+      double target = this.episodeFormats.resolve(doc.path("projectSnapshot")).path("targetDurationSec").asDouble(20);
       if (Math.abs(total - target) > 0.01) {
          throw new IllegalArgumentException("场景时长合计 " + total + " 秒，必须与本集目标 " + target + " 秒一致");
       }
@@ -511,6 +704,7 @@ public class StoryDevelopmentService {
    private String prompt(String type) {
       String var10000;
       switch (type) {
+         case "PREMISE" -> var10000 = "00-premise-analysis";
          case "CORE" -> var10000 = "01-story-planning";
          case "OUTLINE_BATCH" -> var10000 = "03-episode-planning";
          default -> var10000 = "04-script-writing";
@@ -603,6 +797,7 @@ public class StoryDevelopmentService {
 
    private void materializeEpisode(ObjectNode doc) {
       ObjectNode ep = Documents.obj().put("projectId", Documents.project(doc)).put("storyBibleId", Documents.text(doc, "coreId")).put("storyDocumentId", Documents.id(doc)).put("episodeNo", doc.path("episodeNo").asInt()).put("name", Documents.text(doc.path("content"), "title")).put("summary", Documents.text(doc.path("content"), "summary")).put("script", Documents.text(doc.path("content"), "script")).put("scriptReviewStatus", "CONFIRMED").put("locked", true).put("continuityHash", Documents.text(doc, "continuityHash"));
+      for (String field : List.of("episodeFormatId", "beatMode", "targetDurationSec", "beatBoundaries", "midHook")) if (doc.path("content").has(field)) ep.set(field, doc.path("content").path(field).deepCopy());
       ObjectNode saved = this.store.create(ResourceKind.EPISODE, ep);
       int no = 0;
 

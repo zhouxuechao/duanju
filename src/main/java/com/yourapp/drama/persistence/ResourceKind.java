@@ -36,6 +36,11 @@ public enum ResourceKind {
     PROMPT_TEMPLATE("prompt_template", "prompt-templates", null, null),
     PROMPT_VERSION("prompt_version", "prompt-versions", null, null),
     COST_RECORD("cost_record", "cost-records", null, null),
+    PRICE_SNAPSHOT("price_snapshot", "price-snapshots", null, null),
+    HUMAN_EDIT_FEEDBACK("human_edit_feedback", "human-edit-feedback", null, null),
+    RULE_EXPERIMENT("rule_experiment", "rule-experiments", null, null),
+    PIPELINE_RUN("pipeline_run", "pipeline-runs", null, null),
+    STAGE_RUN("stage_run", "stage-runs", PIPELINE_RUN, "pipelineRunId"),
     TIMELINE("timeline", "timelines", EPISODE, "episodeId"),
     TIMELINE_ITEM("timeline_item", "timeline-items", TIMELINE, "timelineId"),
     DIALECT_DICTIONARY("dialect_dictionary", "dialect-dictionaries", null, null),
@@ -54,7 +59,7 @@ public enum ResourceKind {
     public String path() { return path; }
     public ResourceKind parentKind() { return parent; }
     public String parentField() { return parentField; }
-    public boolean immutable() { return this == PROMPT_VERSION || this == COST_RECORD || this == QC_RESULT; }
+    public boolean immutable() { return this == PROMPT_VERSION || this == COST_RECORD || this == PRICE_SNAPSHOT || this == HUMAN_EDIT_FEEDBACK || this == QC_RESULT; }
     public static ResourceKind fromPath(String value) {
         String normalized = value.toLowerCase(Locale.ROOT).replace('_', '-');
         return Arrays.stream(values()).filter(k -> k.path.equals(normalized)

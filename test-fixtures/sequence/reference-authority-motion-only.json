@@ -1,0 +1,13 @@
+{
+  "fixtureId": "reference-authority-motion-only",
+  "compiler": "SEEDANCE_SEQUENCE",
+  "taskType": "VIDEO",
+  "expectedSections": [
+    "SOURCE / LINEAGE",
+    "ACTUAL OPENING STATE",
+    "COMPLETED BEAT EXCLUSIONS",
+    "RESERVED FUTURE BEAT EXCLUSIONS"
+  ],
+  "invariant": "reference authority motion only",
+  "paidProviderAllowed": false
+}

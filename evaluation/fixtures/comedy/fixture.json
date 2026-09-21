@@ -1,0 +1,24 @@
+{
+  "fixtureId": "comedy",
+  "idea": "小镇婚礼上三组人因同名快递不断错认身份",
+  "episodeCount": 10,
+  "targetDuration": 150,
+  "distributionProfile": "GENERAL",
+  "seed": "regression-v1",
+  "storyProfile": {
+    "settingGenre": "COMEDY",
+    "storyType": "COMEDY",
+    "audience": "GENERAL",
+    "tones": [
+      "搞笑",
+      "轻喜"
+    ],
+    "tropes": []
+  },
+  "expectedInvariants": {
+    "requiredRuleId": "TYPE_COMEDY",
+    "coreLoopMustContain": "目标",
+    "futureFactLeakageAllowed": false,
+    "literalTextComparison": false
+  }
+}

@@ -36,7 +36,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Transactional
 class HandoffIntegrationTest {
     @Autowired DocumentStore store;@Autowired WorkflowService workflow;@Autowired GenerationWorker worker;@Autowired JobService jobs;@Autowired StudioService studio;@Autowired AssetViewService assetViews;@Autowired WebApplicationContext web;@Autowired AutomaticVisualReviewService automaticVisualReview;@Autowired AutomaticVideoReviewService automaticVideoReview;@Autowired VisualExpectedContextService visualExpected;@Autowired QualityMetricsService qualityMetrics;@Autowired VisualCalibrationService calibration;@Autowired com.fasterxml.jackson.databind.ObjectMapper mapper;
-    @MockitoBean ImageGenerator images;@MockitoBean VideoGenerator videos;@MockitoBean MediaStorage storage;@MockitoBean ProviderMediaFetcher fetcher;@MockitoBean VideoFrameExtractor videoFrames;@MockitoBean VisualQualityReviewer visualReviewer;@MockitoBean VideoQualityReviewer videoReviewer;
+    @MockitoBean ImageGenerator images;@MockitoBean VideoGenerator videos;@MockitoBean MediaStorage storage;@MockitoBean ProviderMediaFetcher fetcher;@MockitoBean MediaProbeService mediaProbe;@MockitoBean VideoFrameExtractor videoFrames;@MockitoBean VisualQualityReviewer visualReviewer;@MockitoBean VideoQualityReviewer videoReviewer;
     private String projectId,shotId;
     private static final String ORIGINAL="https://image.volces.com/seedream/frame.png?token=a%2Fb+Z&sig=ABC%2B123%3D&x=1";
     @BeforeEach void setup(){
@@ -58,6 +58,7 @@ class HandoffIntegrationTest {
         when(videos.poll(anyString())).thenReturn(new VideoGenerator.VideoTask("video-task-1",VideoGenerator.Status.SUCCEEDED,"https://video.volces.com/result.mp4",null,"poll-1",null,null,false));
         when(fetcher.open(anyString())).thenReturn(new ByteArrayInputStream(new byte[]{1,2,3}));
         when(storage.put(anyString(),any(),anyString())).thenReturn("/api/media/archive.png");
+        when(mediaProbe.probe(nullable(java.io.InputStream.class),eq(".mp4"))).thenReturn(obj().put("actualDurationMs",3000).put("width",1080).put("height",1920).put("frameRate",25).put("hasAudio",false));
         when(videoFrames.extract(anyString())).thenReturn(java.util.stream.IntStream.range(0,5).mapToObj(i->new VideoQualityReviewer.Frame(i,"data:image/jpeg;base64,/9j/2Q==")).toList());
         lenient().when(visualReviewer.review(any(),any())).thenAnswer(call->new FakeVisualQualityReviewer(mapper).review(call.getArgument(0),call.getArgument(1)));
         lenient().when(videoReviewer.review(any(),anyList())).thenAnswer(call->new FakeVideoQualityReviewer(mapper).review(call.getArgument(0),call.getArgument(1)));
@@ -68,9 +69,10 @@ class HandoffIntegrationTest {
         workflow.review(KEYFRAME,id(frame),obj().put("passed",true).put("score",95));workflow.lock(KEYFRAME,id(frame),obj().put("generateVideo",false));
         ObjectNode job=workflow.video(id(frame),obj().put("requestKey","p1-integration"));worker.tick();
         verify(videos).submit(argThat(request->request.firstFrameUrl().equals(ORIGINAL)));
+        JsonNode audit=job.path("inputSnapshot");assertThat(audit.path("providerOptions").path("generate_audio").asBoolean()).isFalse();assertThat(audit.path("sequenceCompilerVersion").asText()).isEqualTo("4.0.0-sequence");assertThat(audit.path("normalizedPromptHash").asText()).hasSize(64);assertThat(audit.path("referenceBindingsHash").asText()).hasSize(64);assertThat(audit.path("continuitySnapshotHash").asText()).hasSize(64);assertThat(audit.path("sequenceStateFingerprint").asText()).hasSize(64);assertThat(audit.path("referenceAuthorityFingerprint").asText()).hasSize(64);assertThat(audit.path("providerCapabilitiesVersion").asText()).isNotBlank();assertThat(audit.path("sequenceRelation").asText()).isEqualTo("SEQUENCE_FIRST_CLIP");
         verifyNoInteractions(storage,fetcher);
         ObjectNode take=store.list(VIDEO_TAKE,projectId,shotId).getFirst();
-        assertThat(text(take,"sourceProviderUrlSnapshot")).isEqualTo(ORIGINAL);assertThat(text(store.get(KEYFRAME,id(frame)),"handoffStatus")).isEqualTo("HANDED_OFF");
+        assertThat(text(take,"sourceProviderUrlSnapshot")).isEqualTo(ORIGINAL);assertThat(text(take,"sequenceCompilerVersion")).isEqualTo("4.0.0-sequence");assertThat(text(take,"sequenceRelation")).isEqualTo("SEQUENCE_FIRST_CLIP");assertThat(take.path("sequenceStateFingerprint").asText()).hasSize(64);assertThat(text(store.get(KEYFRAME,id(frame)),"handoffStatus")).isEqualTo("HANDED_OFF");
         worker.tick();
         assertThat(text(store.get(GENERATION_JOB,id(job)),"status")).isEqualTo("SUCCESS");
         assertThat(text(store.get(VIDEO_TAKE,id(take)),"videoUrl")).endsWith("result.mp4");
@@ -275,6 +277,7 @@ class HandoffIntegrationTest {
         workflow.review(KEYFRAME,id(frame),obj().put("passed",false).put("notes","人物站到了门的另一侧，恢复已确认的东侧站位"));
         ObjectNode revised=workflow.image(required(frame,"shotId"),"KEYFRAME",obj().put("requestKey","visual-repair"));
         assertThat(revised.path("inputSnapshot").path("prompt").asText()).contains("恢复已确认的东侧站位");
+        assertThat(revised.path("inputSnapshot").path("context").path("imageTaskType").asText()).isEqualTo("REPAIR_EDIT");
     }
     @Test void sameVisualFailureCannotTriggerAnUnboundedPaidRetryLoop(){
         ObjectNode frame=generateFrame();

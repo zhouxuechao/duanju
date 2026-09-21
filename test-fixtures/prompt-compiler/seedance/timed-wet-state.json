@@ -1,0 +1,12 @@
+{
+  "fixtureId": "timed-wet-state",
+  "compiler": "SEEDANCE",
+  "taskType": "VIDEO",
+  "expectedSections": [
+    "SHOT INTENT / CARRIERS",
+    "SOURCE / LINEAGE",
+    "CURRENT ACTION / ENDPOINT",
+    "AUDIO POLICY"
+  ],
+  "invariant": "timed wet state"
+}

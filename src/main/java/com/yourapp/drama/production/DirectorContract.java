@@ -18,7 +18,7 @@ public final class DirectorContract {
     private static final List<String> CAMERA_ANGLES=List.of("EYE_LEVEL","HIGH","LOW","HIGH_ANGLE","LOW_ANGLE","TOP_DOWN","DUTCH","PROFILE","FRONTAL","BACK","OVER_SHOULDER","POV");
     private static final List<String> CAMERA_MOVEMENTS=List.of("STATIC","PAN","TILT","DOLLY_IN","DOLLY_OUT","TRACK","FOLLOW","HANDHELD","ORBIT");
     private static final List<String> DIRECTOR_INTENTS=List.of("ESTABLISH_SPACE","SHOW_ACTION","SHOW_REACTION","REVEAL_INFORMATION","BUILD_TENSION","EMPHASIZE_EMOTION","HIDE_INFORMATION","TRANSITION","PAYOFF");
-    private static final List<String> TRANSITIONS=List.of("CUT","MATCH_CUT","DISSOLVE","FADE","WHIP_PAN","HOLD");
+    private static final List<String> TRANSITIONS=List.of("CUT","MATCH_CUT","CROSS_DISSOLVE","FADE_TO_BLACK");
     private static final List<String> SCREEN_DIRECTIONS=List.of("FRAME_LEFT","FRAME_RIGHT","INTO_DEPTH","OUT_OF_DEPTH","STATIC");
     private static final List<String> VISIBLE_BODY_PARTS=List.of("WHOLE_BODY","FACE","TORSO","LEFT_HAND","RIGHT_HAND","BOTH_HANDS","LEFT_FOOT","RIGHT_FOOT","OTHER");
     private static final List<String> BODY_FRAME_SIDES=List.of("IN_FRAME_LEFT","IN_FRAME_CENTER","IN_FRAME_RIGHT","OFFSCREEN_LEFT","OFFSCREEN_RIGHT","OFFSCREEN_TOP","OFFSCREEN_BOTTOM","BEHIND_CAMERA");
@@ -37,7 +37,7 @@ public final class DirectorContract {
         int[] bounds=shotBounds(input);
         ObjectNode skeleton=object(),p=skeleton.withObject("properties");
         p.set("shotIndex",obj().put("type","integer").put("minimum",1).put("maximum",bounds[1]));
-        p.set("beatId",string());p.set("purpose",boundedString(1,160));p.set("action",boundedString(1,180));
+        p.set("beatId",string());p.set("purpose",boundedString(1,160));p.set("feltIntent",boundedString(1,180));p.set("action",boundedString(1,180));
         p.set("subject",boundedString(1,120));p.set("secondarySubjects",array(boundedString(1,120),0).put("maxItems",6));
         p.set("dialogueOwner",values(withEmpty(keys(assets,"characters"))));
         p.set("duration",obj().put("type","number").put("minimum",2).put("maximum",5));
@@ -62,7 +62,7 @@ public final class DirectorContract {
         p.set("referenceViews",detailReferenceViewsSchema(input));
         ObjectNode change=object(),cp=change.withObject("properties");
         cp.set("path",boundedString(1,240).put("pattern","^(characters\\.[^.]+\\.(lookId|position|lookDirection|holding|pose|actionState)|props\\.[^.]+\\.(holder|position|state))$"));
-        cp.set("to",boundedString(0,240));cp.set("reason",boundedString(1,240));requireAll(change);
+        cp.set("to",boundedString(0,240));cp.set("reason",boundedString(1,240));cp.set("atSeconds",obj().put("type","number").put("minimum",0).put("maximum",120));requireAll(change);
         p.set("stateChanges",array(change,0).put("maxItems",20));requireAll(detail);
         ObjectNode root=object();root.withObject("properties").set("shots",array(detail,count).put("maxItems",count));requireAll(root);return root;
     }
@@ -98,7 +98,7 @@ public final class DirectorContract {
         JsonNode assets=input.path("assets");
         if(keys(assets,"locations").isEmpty())invalid("input.assets.locations","拆镜前需要本版故事的场景资产");
         ObjectNode shot=object();ObjectNode p=(ObjectNode)shot.path("properties");
-        for(String field:List.of("purpose","action","visualFocus","emotion"))p.set(field,string());
+        for(String field:List.of("purpose","feltIntent","action","visualFocus","emotion"))p.set(field,string());
         p.set("beatId",string());p.set("directorIntent",values(DIRECTOR_INTENTS));
         p.set("shotPurpose",string());p.set("subject",string());p.set("secondarySubjects",array(string(),0).put("maxItems",8));
         p.set("blocking",blockingSchema(assets));p.set("performancePlan",performanceSchema());p.set("visibilityPlan",visibilitySchema());
@@ -298,8 +298,8 @@ public final class DirectorContract {
             JsonNode skeleton=batchInput.path("shotSkeletons").path(index),detail=detailOutput.path("shots").path(index);String path="$.shots["+index+"]";
             if(detail.path("shotIndex").asInt()!=skeleton.path("shotIndex").asInt())invalid(path+".shotIndex","详情必须与本批镜头骨架逐项对应");
             ObjectNode start=ledger.deepCopy(),end=ledger.deepCopy();ArrayNode authorized=JsonNodeFactory.instance.arrayNode();
-            for(JsonNode change:detail.path("stateChanges")){String from=applyChange(end,change,path+".stateChanges");authorized.add(obj().put("path",text(change,"path")).put("from",from).put("to",text(change,"to")).put("reason",text(change,"reason")));}
-            ObjectNode shot=obj();for(String field:List.of("purpose","action","beatId","directorIntent","subject","secondarySubjects","dialogueOwner","transition","duration","shotSize","cameraAngle","cameraMovement","relationToPrevious","characterIds","propIds"))shot.set(field,skeleton.path(field).deepCopy());
+            for(JsonNode change:detail.path("stateChanges")){String from=applyChange(end,change,path+".stateChanges");authorized.add(obj().put("path",text(change,"path")).put("from",from).put("to",text(change,"to")).put("reason",text(change,"reason")).put("atSeconds",change.path("atSeconds").asDouble()));}
+            ObjectNode shot=obj();for(String field:List.of("purpose","feltIntent","action","beatId","directorIntent","subject","secondarySubjects","dialogueOwner","transition","duration","shotSize","cameraAngle","cameraMovement","relationToPrevious","characterIds","propIds"))shot.set(field,skeleton.path(field).deepCopy());
             shot.put("shotPurpose",text(skeleton,"purpose"));
             shot.set("blocking",materializeBlocking(skeleton,detail.path("blocking"),start,path));
             for(String field:List.of("performancePlan","visibilityPlan","visualFocus","emotion","expression","eyeLine","focus","difficulty"))shot.set(field,detail.path(field).deepCopy());
@@ -317,6 +317,7 @@ public final class DirectorContract {
         ObjectNode last=obj();if(!shots.isEmpty()){JsonNode shot=shots.get(shots.size()-1);for(String field:List.of("blocking","cameraPlan","emotion","eyeLine","relationToPrevious"))last.set(field,shot.path(field).deepCopy());last.put("shotIndex",batchInput.path("shotSkeletons").path(batchInput.path("shotSkeletons").size()-1).path("shotIndex").asInt());}
         ObjectNode result=obj();result.set("shots",shots);result.set("finalContinuity",ledger);result.set("lastShotContinuity",last);return result;
     }
+
 
     private ObjectNode materializeReferenceViews(JsonNode skeleton,JsonNode selected,JsonNode start,JsonNode sceneState,String path){
         JsonNode characterViews=selected.path("characterViews"),propViews=selected.path("propViews");

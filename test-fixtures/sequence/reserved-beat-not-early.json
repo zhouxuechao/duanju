@@ -1,0 +1,13 @@
+{
+  "fixtureId": "reserved-beat-not-early",
+  "compiler": "SEEDANCE_SEQUENCE",
+  "taskType": "VIDEO",
+  "expectedSections": [
+    "SOURCE / LINEAGE",
+    "ACTUAL OPENING STATE",
+    "COMPLETED BEAT EXCLUSIONS",
+    "RESERVED FUTURE BEAT EXCLUSIONS"
+  ],
+  "invariant": "reserved beat not early",
+  "paidProviderAllowed": false
+}

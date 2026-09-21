@@ -38,19 +38,21 @@ public class ContinuityEngine {
             ObjectNode inheritedCharacters = inherited.putObject("characters");
             previous.path("characters").fields().forEachRemaining(e -> {
                 ObjectNode character = mapper.createObjectNode();
-                for (String field : List.of("identityId", "lookId")) if (e.getValue().has(field)) character.set(field, e.getValue().path(field));
+                for (String field : List.of("identityId", "lookId", "alive", "currentLocation", "currentGoal", "physicalCondition", "injuries", "emotionalState", "clothingState", "makeupState", "hairState", "carriedProps", "leftHandProp", "rightHandProp", "holding"))
+                    if (e.getValue().has(field)) character.set(field, e.getValue().path(field).deepCopy());
                 if (spatial) {
-                    for (String field : List.of("position", "holding", "lookDirection", "pose", "actionState"))
+                    for (String field : List.of("position", "lookDirection", "pose", "actionState"))
                         if (e.getValue().has(field) && ContinuityStatePolicy.inherits("characters."+e.getKey()+"."+field,shot.relationToPrevious())) character.set(field, e.getValue().path(field));
                 }
                 inheritedCharacters.set(e.getKey(), character);
             });
-            if (spatial && previous.path("props").isObject()) {
+            if (previous.path("props").isObject()) {
                 ObjectNode props=inherited.putObject("props");
                 previous.path("props").fields().forEachRemaining(prop->{
                     ObjectNode value=props.putObject(prop.getKey());
                     prop.getValue().fields().forEachRemaining(field->{
-                        if(ContinuityStatePolicy.inherits("props."+prop.getKey()+"."+field.getKey(),shot.relationToPrevious()))value.set(field.getKey(),field.getValue());
+                        boolean worldPlacement=Set.of("position","location").contains(field.getKey());
+                        if(!worldPlacement||spatial)value.set(field.getKey(),field.getValue().deepCopy());
                     });
                 });
             }
@@ -107,6 +109,8 @@ public class ContinuityEngine {
         ObjectNode start = deepMerge(mapper, inherited, shot.startState());
         start.put("locationId", shot.locationId());
         constraints.set("state", inherited);
+        for(String characterId:shot.characterIds())if(start.path("characters").path(characterId).has("alive")&&!start.path("characters").path(characterId).path("alive").asBoolean())
+            error(risks,"DEAD_CHARACTER_PRESENT","shot.startState.characters."+characterId+".alive","已死亡角色不能作为当前镜头中的正常出场人物");
         validateHolders(start, risks);
         if (shot.relationToPrevious() == ShotRelation.REVERSE_SHOT && sameComposition(request.path("previousShot"), raw))
             risks.add(new Risk("DUPLICATE_COMPOSITION", "WARNING", "shot.shotSize", "正反打应按分镜改变机位、视线或构图；不要复制上一戏剧画面"));
@@ -151,14 +155,21 @@ public class ContinuityEngine {
             String holding = text(e.getValue(), "holding");
             if (!holding.isBlank() && !"null".equals(holding) && !state.path("props").has(holding))
                 error(risks, "PROP_HOLDING_MISSING", "characters." + e.getKey() + ".holding", "人物持有的道具不存在于本镜头状态");
+            for(String hand:List.of("leftHandProp","rightHandProp")){
+                String prop=text(e.getValue(),hand);if(!prop.isBlank()&&!"null".equals(prop)&&!state.path("props").has(prop))
+                    error(risks,"PROP_HOLDING_MISSING","characters."+e.getKey()+"."+hand,"人物手持的道具不存在于本镜头状态");
+            }
+            for(JsonNode prop:e.getValue().path("carriedProps"))if(!state.path("props").has(prop.asText()))
+                error(risks,"PROP_HOLDING_MISSING","characters."+e.getKey()+".carriedProps","人物携带的道具不存在于本镜头状态");
         });
         state.path("props").fields().forEachRemaining(e -> {
-            String holder = text(e.getValue(), "holder");
+            String holder = text(e.getValue(), "carriedBy");if(holder.isBlank())holder=text(e.getValue(),"holder");
             if (!holder.isBlank() && !"null".equals(holder)) {
                 if (!state.path("characters").has(holder)) error(risks, "PROP_HOLDER_MISSING", "props." + e.getKey(), "持有道具的角色不存在于场景状态");
                 else {
                     String holding = text(state.path("characters").path(holder), "holding");
-                    if (!holding.isBlank() && !holding.equals(e.getKey())) error(risks, "PROP_HOLDER_CONFLICT", "props." + e.getKey(), "人物持物记录与道具 holder 不一致");
+                    String hand=text(e.getValue(),"heldByHand");String handProp="LEFT".equals(hand)?text(state.path("characters").path(holder),"leftHandProp"):"RIGHT".equals(hand)?text(state.path("characters").path(holder),"rightHandProp"):"";
+                    if ((!holding.isBlank() && !holding.equals(e.getKey()))||(!handProp.isBlank()&&!handProp.equals(e.getKey()))) error(risks, "PROP_HOLDER_CONFLICT", "props." + e.getKey(), "人物持物记录与道具持有人或手位不一致");
                 }
             }
         });

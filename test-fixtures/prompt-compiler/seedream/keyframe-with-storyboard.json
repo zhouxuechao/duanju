@@ -1,0 +1,12 @@
+{
+  "fixtureId": "keyframe-with-storyboard",
+  "compiler": "SEEDREAM",
+  "taskType": "KEYFRAME",
+  "expectedSections": [
+    "TASK / IMAGE PURPOSE",
+    "REFERENCE BINDINGS",
+    "CONTINUITY LOCK",
+    "DYNAMIC AVOID"
+  ],
+  "invariant": "keyframe with storyboard"
+}

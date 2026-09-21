@@ -19,7 +19,7 @@ import static com.yourapp.drama.persistence.ResourceKind.*;
 import static com.yourapp.drama.workflow.Documents.*;
 import static org.assertj.core.api.Assertions.assertThat;
 
-@SpringBootTest(properties="drama.render.ffmpeg=D:/project/aimanju/node_modules/ffmpeg-static/ffmpeg.exe")
+@SpringBootTest(properties={"drama.render.ffmpeg=frontend/node_modules/ffmpeg-static/ffmpeg.exe","drama.render.ffprobe=frontend/node_modules/ffprobe-static/bin/win32/x64/ffprobe.exe"})
 @ActiveProfiles("test")
 @Transactional
 class BenchmarkOneIntegrationTest {
@@ -32,7 +32,8 @@ class BenchmarkOneIntegrationTest {
     @Autowired AssetViewService assetViews;
 
     @Test void oneCharacterOneLocationSixShotsProduceEighteenSecondPreview() throws Exception {
-        Assumptions.assumeTrue(Files.isRegularFile(Path.of("D:/project/aimanju/node_modules/ffmpeg-static/ffmpeg.exe")));
+        assertThat(Path.of("frontend/node_modules/ffmpeg-static/ffmpeg.exe")).as("项目 FFmpeg 运行时").isRegularFile();
+        assertThat(Path.of("frontend/node_modules/ffprobe-static/bin/win32/x64/ffprobe.exe")).as("项目 ffprobe 运行时").isRegularFile();
         ObjectNode project=store.create(PROJECT,obj().put("name","Benchmark 1").put("idea","老人发现田埂上的红布").put("ratio","9:16"));
         ObjectNode episode=store.create(EPISODE,obj().put("projectId",id(project)).put("name","第一集"));
         ObjectNode scene=store.create(SCENE,obj().put("projectId",id(project)).put("episodeId",id(episode)).put("name","田埂").put("sceneNo",1).set("state",obj()));
@@ -60,8 +61,8 @@ class BenchmarkOneIntegrationTest {
         ObjectNode tts=post.tts(id(line),obj().put("requestKey","benchmark-voice"));assertThat(text(complete(tts),"status")).isEqualTo("SUCCESS");ObjectNode clip=store.list(AUDIO_CLIP,id(project),id(first)).getFirst();workflow.lock(AUDIO_CLIP,id(clip),obj());
         ObjectNode timelineRequest=obj().put("requestKey","benchmark-timeline");timelineRequest.set("soundDesign",post.soundDesign(id(episode),obj()));timelineRequest.putArray("soundItems").add(obj().put("track","BGM").put("sourceUrl",required(clip,"archiveUrl")).put("startMs",0).put("durationMs",18_000).put("volume",.12)).add(obj().put("track","SFX").put("sourceUrl",required(clip,"archiveUrl")).put("startMs",9_000).put("durationMs",800).put("volume",.45));
         ObjectNode timelineJob=post.timeline(id(episode),timelineRequest);ObjectNode completedTimeline=complete(timelineJob);assertThat(text(completedTimeline,"status")).as("timeline failure: "+text(completedTimeline,"failureReason")).isEqualTo("SUCCESS");ObjectNode timeline=store.list(TIMELINE,id(project),id(episode)).getFirst();
-        assertThat(timeline.path("durationMs").asLong()).isEqualTo(18_000);assertThat(store.list(TIMELINE_ITEM,id(project),id(timeline))).hasSize(9);assertThat(timeline.path("soundDesign").path("status").asText()).isEqualTo("PLAN_READY");workflow.lock(TIMELINE,id(timeline),obj());
-        ObjectNode render=post.render(id(timeline),obj().put("quality","PREVIEW").put("requestKey","benchmark-render"));ObjectNode finished=complete(render);assertThat(text(finished,"status")).isEqualTo("SUCCESS");String url=required(finished.path("outputSnapshot"),"videoUrl");try(var stream=media.open(url.substring("/api/media/".length()))){assertThat(stream.readAllBytes().length).isGreaterThan(10_000);}
+        assertThat(timeline.path("durationMs").asLong()).isEqualTo(18_000);assertThat(store.list(TIMELINE_ITEM,id(project),id(timeline))).hasSize(9);assertThat(timeline.path("soundDesign").path("status").asText()).isEqualTo("PLAN_READY");
+        ObjectNode render=post.render(id(timeline),obj().put("quality","PREVIEW").put("requestKey","benchmark-render"));ObjectNode finished=complete(render);assertThat(text(finished,"status")).isEqualTo("SUCCESS");ObjectNode qa=post.quality(id(timeline));assertThat(qa.path("passed").asBoolean()).isTrue();workflow.lock(TIMELINE,id(timeline),obj());String url=required(finished.path("outputSnapshot"),"videoUrl");try(var stream=media.open(url.substring("/api/media/".length()))){assertThat(stream.readAllBytes().length).isGreaterThan(10_000);}
     }
 
     private ObjectNode complete(ObjectNode submitted){

@@ -14,4 +14,5 @@ public class StoryDevelopmentController {
     @PutMapping("/documents/{id}") public ObjectNode edit(@PathVariable String id,@RequestBody ObjectNode body){return service.edit(id,body);}
     @PostMapping("/documents/{id}/confirm") public ObjectNode confirm(@PathVariable String id,@RequestBody ObjectNode body){return service.confirm(id,body);}
     @PostMapping("/documents/{id}/retry") public ObjectNode retry(@PathVariable String id){return service.retry(id);}
+    @PostMapping("/documents/{id}/rewrite") public ObjectNode rewrite(@PathVariable String id,@RequestBody ObjectNode body){return service.rewrite(id,body);}
 }

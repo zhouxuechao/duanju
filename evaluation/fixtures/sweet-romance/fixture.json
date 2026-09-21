@@ -1,0 +1,24 @@
+{
+  "fixtureId": "sweet-romance",
+  "idea": "互相看不顺眼的年轻人因意外开始假装情侣",
+  "episodeCount": 10,
+  "targetDuration": 100,
+  "distributionProfile": "GENERAL",
+  "seed": "regression-v1",
+  "storyProfile": {
+    "settingGenre": "URBAN",
+    "storyType": "SWEET_ROMANCE",
+    "audience": "FEMALE",
+    "tones": [
+      "甜",
+      "轻喜"
+    ],
+    "tropes": []
+  },
+  "expectedInvariants": {
+    "requiredRuleId": "TYPE_SWEET_ROMANCE",
+    "coreLoopMustContain": "接触",
+    "futureFactLeakageAllowed": false,
+    "literalTextComparison": false
+  }
+}

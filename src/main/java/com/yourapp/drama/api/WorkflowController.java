@@ -12,6 +12,10 @@ import com.yourapp.drama.workflow.QualityMetricsService;
 import com.yourapp.drama.workflow.AutomaticVisualReviewService;
 import com.yourapp.drama.workflow.AutomaticVideoReviewService;
 import com.yourapp.drama.workflow.VisualCalibrationService;
+import com.yourapp.drama.workflow.PipelinePreflightService;
+import com.yourapp.drama.workflow.PipelineRunService;
+import com.yourapp.drama.workflow.RuleExperimentService;
+import com.yourapp.drama.workflow.StoryRegressionService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -20,12 +24,19 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api")
 public class WorkflowController {
-    private final WorkflowService workflow;private final PostProductionService post;private final JobService jobs;private final JobEvents events;private final ProductionService production;private final String mode;private final DirectorContract directorContract;private final QualityMetricsService qualityMetrics;private final AutomaticVisualReviewService automaticVisualReview;private final AutomaticVideoReviewService automaticVideoReview;private final VisualCalibrationService calibration;
-    public WorkflowController(WorkflowService workflow,PostProductionService post,JobService jobs,JobEvents events,ProductionService production,DirectorContract directorContract,QualityMetricsService qualityMetrics,AutomaticVisualReviewService automaticVisualReview,AutomaticVideoReviewService automaticVideoReview,VisualCalibrationService calibration,@Value("${drama.provider.mode:mock}")String mode){this.workflow=workflow;this.post=post;this.jobs=jobs;this.events=events;this.production=production;this.directorContract=directorContract;this.qualityMetrics=qualityMetrics;this.automaticVisualReview=automaticVisualReview;this.automaticVideoReview=automaticVideoReview;this.calibration=calibration;this.mode=mode;}
+    private final WorkflowService workflow;private final PostProductionService post;private final JobService jobs;private final JobEvents events;private final ProductionService production;private final String mode;private final DirectorContract directorContract;private final QualityMetricsService qualityMetrics;private final AutomaticVisualReviewService automaticVisualReview;private final AutomaticVideoReviewService automaticVideoReview;private final VisualCalibrationService calibration;private final PipelinePreflightService preflight;private final PipelineRunService pipelineRuns;private final RuleExperimentService experiments;private final StoryRegressionService storyRegression;
+    public WorkflowController(WorkflowService workflow,PostProductionService post,JobService jobs,JobEvents events,ProductionService production,DirectorContract directorContract,QualityMetricsService qualityMetrics,AutomaticVisualReviewService automaticVisualReview,AutomaticVideoReviewService automaticVideoReview,VisualCalibrationService calibration,PipelinePreflightService preflight,PipelineRunService pipelineRuns,RuleExperimentService experiments,StoryRegressionService storyRegression,@Value("${drama.provider.mode:mock}")String mode){this.workflow=workflow;this.post=post;this.jobs=jobs;this.events=events;this.production=production;this.directorContract=directorContract;this.qualityMetrics=qualityMetrics;this.automaticVisualReview=automaticVisualReview;this.automaticVideoReview=automaticVideoReview;this.calibration=calibration;this.preflight=preflight;this.pipelineRuns=pipelineRuns;this.experiments=experiments;this.storyRegression=storyRegression;this.mode=mode;}
     private ObjectNode body(ObjectNode body){return body==null?JsonNodeFactory.instance.objectNode():body;}
     @GetMapping("/system") public Map<String,Object> system(){return Map.of("name","拾光 · AI 短剧工作室","version","0.1.0","providerMode",mode,"simulated",mode.equals("mock"),"requiresKeyframeQc",true,"providerUrlHandoff","DIRECT_ONLY");}
     @GetMapping("/projects/{id}/quality-metrics") public ObjectNode qualityMetrics(@PathVariable String id){return qualityMetrics.metrics(id);}
     @GetMapping("/projects/{id}/vlm-calibration") public ObjectNode vlmCalibration(@PathVariable String id){return calibration.metrics(id);}
+    @GetMapping("/projects/{id}/preflight") public ObjectNode preflight(@PathVariable String id,@RequestParam(defaultValue="MOCK")String mode){return preflight.review(id,mode);}
+    @PostMapping("/projects/{id}/pipeline-runs") public ObjectNode pipelineRun(@PathVariable String id,@RequestBody(required=false)ObjectNode b){return pipelineRuns.start(id,body(b));}
+    @PostMapping("/pipeline-runs/{id}/resume") public ObjectNode resumePipeline(@PathVariable String id){return pipelineRuns.resume(id);}
+    @GetMapping("/pipeline-runs/{id}") public ObjectNode pipelineRun(@PathVariable String id){return pipelineRuns.get(id);}
+    @PostMapping("/projects/{id}/rule-experiments") public ObjectNode experiment(@PathVariable String id,@RequestBody ObjectNode b){return experiments.create(id,b);}
+    @PostMapping("/system/story-regression") public ObjectNode storyRegression(){return storyRegression.run();}
+    @PutMapping("/rule-experiments/{id}") public ObjectNode recordExperiment(@PathVariable String id,@RequestBody ObjectNode b){return experiments.record(id,b);}
     @PostMapping("/projects/{id}/story")public ObjectNode story(@PathVariable String id,@RequestBody(required=false)ObjectNode b){return workflow.story(id,body(b));}
     @PostMapping("/scenes/{id}/plan")public ObjectNode plan(@PathVariable String id,@RequestBody(required=false)ObjectNode b){return workflow.plan(id,body(b));}
     @PostMapping("/shots/{id}/storyboard")public ObjectNode storyboard(@PathVariable String id,@RequestBody(required=false)ObjectNode b){return workflow.image(id,"STORYBOARD",body(b));}
@@ -48,7 +59,10 @@ public class WorkflowController {
     @PostMapping("/episodes/{id}/sound-design")public JsonNode soundDesign(@PathVariable String id,@RequestBody(required=false)ObjectNode b){return post.soundDesign(id,body(b));}
     @PostMapping("/episodes/{id}/timeline")public ObjectNode timeline(@PathVariable String id,@RequestBody(required=false)ObjectNode b){return post.timeline(id,body(b));}
     @PostMapping("/timelines/{id}/render")public ObjectNode render(@PathVariable String id,@RequestBody(required=false)ObjectNode b){return post.render(id,body(b));}
+    @PostMapping("/timelines/{id}/quality")public ObjectNode timelineQuality(@PathVariable String id){return post.quality(id);}
+    @PostMapping("/timelines/{id}/final-review")public ObjectNode finalReview(@PathVariable String id,@RequestBody(required=false)ObjectNode b){return post.finalReview(id,body(b));}
     @PostMapping("/jobs/{id}/retry")public ObjectNode retry(@PathVariable String id){return jobs.retry(id);}
+    @PostMapping("/jobs/{id}/reconcile")public ObjectNode reconcile(@PathVariable String id,@RequestBody ObjectNode b){return jobs.reconcile(id,b);}
     @PostMapping("/jobs/{id}/revalidate")public ObjectNode revalidate(@PathVariable String id){return jobs.revalidate(id);}
     @PostMapping("/jobs/{id}/cancel")public ObjectNode cancel(@PathVariable String id){return jobs.cancel(id);}
     @GetMapping(value="/events",produces="text/event-stream")public SseEmitter events(@RequestParam(required=false)String projectId){return events.subscribe(projectId);}

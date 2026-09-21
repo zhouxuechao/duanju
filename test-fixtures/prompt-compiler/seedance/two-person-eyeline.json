@@ -1,0 +1,12 @@
+{
+  "fixtureId": "two-person-eyeline",
+  "compiler": "SEEDANCE",
+  "taskType": "VIDEO",
+  "expectedSections": [
+    "SHOT INTENT / CARRIERS",
+    "SOURCE / LINEAGE",
+    "CURRENT ACTION / ENDPOINT",
+    "AUDIO POLICY"
+  ],
+  "invariant": "two person eyeline"
+}

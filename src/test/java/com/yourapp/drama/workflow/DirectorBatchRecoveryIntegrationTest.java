@@ -37,7 +37,9 @@ class DirectorBatchRecoveryIntegrationTest {
     private String projectId,sceneId;private final AtomicInteger planCalls=new AtomicInteger(),detailCalls=new AtomicInteger(),batch2Calls=new AtomicInteger();
 
     @BeforeEach void setup(){
-        ObjectNode project=store.create(PROJECT,obj().put("name","批次恢复").put("idea","农村夜间异响").put("dialect","MANDARIN").put("episodeCount",1));projectId=id(project);
+        ObjectNode projectInput=obj().put("name","批次恢复").put("idea","农村夜间异响").put("dialect","MANDARIN").put("episodeCount",1);
+        projectInput.set("sceneContinuityPolicy",obj().put("maxContinuationDepth",4).put("resetAtSceneBoundary",true).put("reanchorFromCanonical",true).put("reanchorOnIdentityDrift",true).put("reanchorOnLocationDrift",true));
+        ObjectNode project=store.create(PROJECT,projectInput);projectId=id(project);
         ObjectNode episode=store.create(EPISODE,obj().put("projectId",projectId).put("name","第一集").put("continuityHash","fixture-core").put("script","老人沿院墙寻找异响来源"));
         ObjectNode actor=store.create(CHARACTER,obj().put("projectId",projectId).put("characterKey","elder").put("name","周伯").put("provider","SEEDREAM").put("sourceType","IMAGE_REFERENCE").put("providerStatus","UNBOUND"));
         ObjectNode look=store.create(CHARACTER_LOOK,obj().put("projectId",projectId).put("characterId",id(actor)).put("name","蓝棉袄").put("description","旧蓝棉袄黑布鞋"));actor=store.update(CHARACTER,id(actor),revision(actor),actor.deepCopy().put("baseLookId",id(look)));
@@ -46,7 +48,7 @@ class DirectorBatchRecoveryIntegrationTest {
         ObjectNode script=store.create(STORY_DOCUMENT,obj().put("projectId",projectId).put("coreId",coreId).put("documentType","EPISODE_SCRIPT").put("reviewStatus","CONFIRMED").put("version",2).set("content",content));store.update(EPISODE,id(ep),revision(ep),ep.deepCopy().put("storyDocumentId",id(script)));
         sceneId=id(store.create(SCENE,obj().put("projectId",projectId).put("episodeId",id(episode)).put("name","院落追声").put("description","老人沿院墙寻找异响来源").put("duration",30)));
         when(llm.generate(any(),eq(JsonNode.class))).thenAnswer(invocation->{LlmGateway.StructuredRequest request=invocation.getArgument(0);assertThat(request.options()).doesNotContainKey("stage");ObjectNode input=(ObjectNode)mapper.readTree(request.userPrompt());String stage=input.path("stage").asText();JsonNode value;
-            if("DIRECTOR_PLAN".equals(stage)){planCalls.incrementAndGet();assertThat(input.path("sceneTargetDurationSeconds").asDouble()).isEqualTo(30);assertThat(input.path("scene").has("duration")).isFalse();assertThat(input.path("project").has("targetDuration")).isFalse();value=ReflectionTestUtils.invokeMethod(director,"demoPlan",input);}
+            if("DIRECTOR_PLAN".equals(stage)){planCalls.incrementAndGet();assertThat(input.path("sceneTargetDurationSeconds").asDouble()).isEqualTo(30);assertThat(input.path("scene").has("duration")).isFalse();assertThat(input.path("project").has("targetDuration")).isFalse();assertThat(input.path("episodeFormat").path("profileId").asText()).isEqualTo("GENERAL_MICRO");value=ReflectionTestUtils.invokeMethod(director,"demoPlan",input);}
             else {detailCalls.incrementAndGet();assertThat(input.path("shotSkeletons")).hasSize(1);int first=input.path("shotSkeletons").path(0).path("shotIndex").asInt();if(first==5&&batch2Calls.incrementAndGet()==1)throw new ProviderException("OUTPUT_TRUNCATED","第五镜输出截断","req-shot-5",200,false,false).withRawOutput("{\"shots\":[").withProviderDiagnostics("length",900,16384,17284);value=ReflectionTestUtils.invokeMethod(director,"demoDetail",input);}
             return new LlmGateway.StructuredResult<>(value,"fake-director","req-"+stage+"-"+(planCalls.get()+detailCalls.get()),value.toString(),true,new LlmGateway.ProviderUsage("stop",600,900,1500));});
     }
@@ -61,7 +63,13 @@ class DirectorBatchRecoveryIntegrationTest {
         for(int i=0;i<16&&store.list(SHOT,projectId,sceneId).isEmpty();i++)worker.tick();
         assertThat(planCalls.get()).isEqualTo(1);assertThat(batch2Calls.get()).isEqualTo(2);assertThat(store.get(GENERATION_JOB,id(batch1)).path("outputSnapshot")).isEqualTo(checkpoint);
         assertThat(detailJobs().stream().filter(j->"SUCCESS".equals(text(j,"status"))&&j.path("inputSnapshot").path("batchIndex").asInt()==1)).hasSize(1);
-        assertThat(store.list(SHOT,projectId,sceneId)).hasSize(10);assertThat(store.get(GENERATION_JOB,id(root)).path("outputSnapshot").path("detailsComplete").asBoolean()).isTrue();
+        List<ObjectNode> shots=store.list(SHOT,projectId,sceneId).stream().sorted(java.util.Comparator.comparingInt(s->s.path("shotNo").asInt())).toList();
+        assertThat(shots).hasSize(10);assertThat(store.get(GENERATION_JOB,id(root)).path("outputSnapshot").path("detailsComplete").asBoolean()).isTrue();
+        assertThat(text(shots.getFirst(),"sequenceRelation")).isEqualTo("SEQUENCE_FIRST_CLIP");
+        assertThat(text(shots.get(1),"sequenceRelation")).isEqualTo("SEAMLESS_CONTINUATION");
+        assertThat(text(shots.get(2),"sequenceRelation")).isEqualTo("INTENTIONAL_NEXT_SHOT");
+        for(ObjectNode shot:shots){String current=text(shot.path("currentBeat"),"beatId");List<String> completed=new java.util.ArrayList<>(),reserved=new java.util.ArrayList<>();shot.path("completedBeats").forEach(v->completed.add(v.asText()));shot.path("reservedFutureBeats").forEach(v->reserved.add(v.asText()));assertThat(completed).doesNotContain(current);assertThat(reserved).doesNotContain(current);}
+        assertThat(store.get(SCENE,sceneId).path("sceneContinuityPolicy").path("maxContinuationDepth").asInt()).isEqualTo(4);
     }
 
     @Test void completedMalformedPlanIsRejectedAndRetriedThroughTheStrictProviderContract(){

@@ -1,0 +1,13 @@
+{
+  "fixtureId": "deviation-two-steps-short",
+  "compiler": "SEEDANCE_SEQUENCE",
+  "taskType": "VIDEO",
+  "expectedSections": [
+    "SOURCE / LINEAGE",
+    "ACTUAL OPENING STATE",
+    "COMPLETED BEAT EXCLUSIONS",
+    "RESERVED FUTURE BEAT EXCLUSIONS"
+  ],
+  "invariant": "deviation two steps short",
+  "paidProviderAllowed": false
+}

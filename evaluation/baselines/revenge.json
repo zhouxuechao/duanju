@@ -1,0 +1,9 @@
+{
+  "baselineVersion": 1,
+  "storyType": "REVENGE",
+  "episodeFormatFamily": "MANJU",
+  "requiredRuleId": "TYPE_REVENGE",
+  "qualityContract": "STRUCTURE_AND_INVARIANTS",
+  "model": "OFFLINE_DETERMINISTIC",
+  "promptVersion": "story-regression-v1"
+}

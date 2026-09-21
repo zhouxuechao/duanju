@@ -31,15 +31,16 @@ public class GenerationWorker {
     private final CreativeJobs creative;
     private final PostProductionJobs post;
     private final AssetViewService assetViews;
+    private final MediaProbeService mediaProbe;
     public GenerationWorker(DocumentStore store,JobService jobs,WorkflowService workflow,ImageGenerator images,VideoGenerator videos,LlmGateway llm,
-                            MediaStorage storage,ProviderMediaFetcher fetcher,ObjectMapper mapper,CreativeJobs creative,PostProductionJobs post,AssetViewService assetViews,@Value("${drama.jobs.enabled:true}")boolean enabled){
-        this.store=store;this.jobs=jobs;this.workflow=workflow;this.images=images;this.videos=videos;this.llm=llm;this.storage=storage;this.fetcher=fetcher;this.mapper=mapper;this.creative=creative;this.post=post;this.assetViews=assetViews;this.enabled=enabled;
+                            MediaStorage storage,ProviderMediaFetcher fetcher,ObjectMapper mapper,CreativeJobs creative,PostProductionJobs post,AssetViewService assetViews,MediaProbeService mediaProbe,@Value("${drama.jobs.enabled:true}")boolean enabled){
+        this.store=store;this.jobs=jobs;this.workflow=workflow;this.images=images;this.videos=videos;this.llm=llm;this.storage=storage;this.fetcher=fetcher;this.mapper=mapper;this.creative=creative;this.post=post;this.assetViews=assetViews;this.mediaProbe=mediaProbe;this.enabled=enabled;
     }
     @EventListener(ApplicationReadyEvent.class) public void recover(){
         if(!enabled)return;
         for(ObjectNode job:store.list(GENERATION_JOB,null,null))if(text(job,"status").equals("RUNNING")){
             if(Set.of("VIDEO","LIPSYNC").contains(text(job,"type"))&&!text(job,"providerTaskId").isBlank())continue;
-            boolean uncertain=Set.of("VIDEO","KEYFRAME","STORYBOARD","ASSET_IMAGE","TTS","LIPSYNC","STORY","SCRIPT","DIRECTOR_PLAN","SHOT_DETAIL","KEYFRAME_QC","VIDEO_QC").contains(text(job,"type"));
+            boolean uncertain=Set.of("VIDEO","KEYFRAME","STORYBOARD","ASSET_IMAGE","TTS","LIPSYNC","STORY","SCRIPT","STORY_QA","DIRECTOR_PLAN","SHOT_DETAIL","KEYFRAME_QC","VIDEO_QC").contains(text(job,"type"));
             ObjectNode failed=jobs.fail(id(job),"PROCESS_INTERRUPTED",uncertain?"进程中断，服务商可能已接受请求；请核对控制台后恢复":"进程中断，可重试局部任务",!uncertain,uncertain);creative.syncDevelopmentFailure(failed);assetViews.syncFailure(failed);
         }
     }
@@ -87,7 +88,9 @@ public class GenerationWorker {
             if(result.expiresAt()!=null)asset.put("providerUrlExpiresAt",result.expiresAt().toString());
             if(result.simulated())asset.put("previewUrl","/demo/keyframe.svg");
             JsonNode plannedShot=input.path("context").path("shot");for(String field:List.of("directorPlanVersion","dramaticBeatVersion","shotPlanVersion"))if(plannedShot.has(field))asset.set(field,plannedShot.path(field).deepCopy());
+            for(String field:List.of("sequenceCompilerVersion","normalizedPromptHash","referenceBindingsHash","referenceAuthorityFingerprint","continuitySnapshotHash","sequenceStateFingerprint","providerCapabilitiesVersion"))if(input.has(field))asset.set(field,input.path(field).deepCopy());
             asset.set("assetViewIds",input.path("assetViewIds").deepCopy());asset.set("assetReferences",input.path("assetReferences").deepCopy());
+            if(kind==KEYFRAME&&input.path("storyboardReference").isObject())asset.set("storyboardReference",input.path("storyboardReference").deepCopy());
             asset.set("generationInputSnapshot",input.deepCopy());
             if(input.has("regeneratedFromId"))asset.set("regeneratedFromId",input.path("regeneratedFromId"));
             ObjectNode saved=store.create(kind,asset);
@@ -115,12 +118,15 @@ public class GenerationWorker {
         // The exact String returned by Seedream is the first frame. No storage call occurs on this path.
         List<VideoGenerator.Reference> references=new ArrayList<>();for(JsonNode ref:input.path("references"))references.add(new VideoGenerator.Reference(required(ref,"type"),required(ref,"url"),required(ref,"role")));
         VideoGenerator.Submission submission=videos.submit(new VideoGenerator.VideoRequest(required(input,"prompt"),lipsync?null:url,references,map(input.path("providerOptions"))));
+        jobs.mutate(id(job),j->j.put("providerTaskId",submission.taskId()).put("providerRequestId",submission.requestId()).put("providerAcceptedAt",Instant.now().toString()).put("simulated",submission.simulated()));
         try{
             store.transaction(()->{
                 ObjectNode take=obj().put("projectId",project(job)).put("shotId",required(job,"shotId")).put("takeNo",input.path("takeNo").asInt(1))
                     .put("provider","VOLCENGINE").put("sourceKeyframeId",id(frame)).put("sourceProviderUrlSnapshot",required(frame,"providerUrl"))
                     .put("promptVersionId",required(input,"promptVersionId")).put("generationJobId",id(job)).put("providerRequestId",submission.requestId()).put("providerTaskId",submission.taskId())
                     .put("providerStatus","QUEUED").put("qcStatus","PENDING").put("selected",false).put("locked",false).put("simulated",submission.simulated());
+                for(String field:List.of("parentTakeId","continuationDepth","reanchorReason","sequenceStrategy","sequenceRelation","sequenceCompilerVersion","normalizedPromptHash","referenceBindingsHash","referenceAuthorityFingerprint","continuitySnapshotHash","sequenceStateFingerprint","providerCapabilitiesVersion"))if(input.has(field))take.set(field,input.path(field).deepCopy());
+                if(input.path("retake").isObject())take.set("retakeAudit",input.path("retake").deepCopy());
                 if(lipsync)take.put("variantType","LIPSYNC").put("sourceVideoTakeId",required(input,"sourceTakeId"));
                 take.set("inputSnapshot",input.deepCopy());take.set("assetViewIds",frame.path("assetViewIds").deepCopy());take.set("assetReferences",frame.path("assetReferences").deepCopy()); ObjectNode saved=store.create(VIDEO_TAKE,take);
                 if(!lipsync){ObjectNode current=store.getForUpdate(KEYFRAME,id(frame));store.update(KEYFRAME,id(current),revision(current),current.deepCopy().put("handoffStatus","HANDED_OFF").put("handedOffAt",Instant.now().toString()));}
@@ -187,8 +193,9 @@ public class GenerationWorker {
         if(input.path("simulated").asBoolean())archive=kind==KEYFRAME?"/demo/keyframe.svg":kind==VIDEO_TAKE?"/demo/take.mp4":"/demo/audio.wav";
         else try(InputStream source=fetcher.open(required(input,"providerUrl"))){String suffix=kind==KEYFRAME?".png":kind==VIDEO_TAKE?".mp4":".mp3";String contentType=kind==KEYFRAME?"image/png":kind==VIDEO_TAKE?"video/mp4":"audio/mpeg";archive=storage.put(kind.path()+"/"+targetId+suffix,source,contentType);}
         catch(IOException e){throw new UncheckedIOException(e);}
-        String finalArchive=archive;
-        store.transaction(()->{ObjectNode latest=store.getForUpdate(kind,targetId);store.update(kind,targetId,revision(latest),latest.deepCopy().put("archiveUrl",finalArchive).put("archiveStatus","SUCCEEDED"));jobs.succeed(id(job),obj().put("archiveUrl",finalArchive));return null;});
+        ObjectNode metadata=null;if(kind==VIDEO_TAKE&&!input.path("simulated").asBoolean()){if(!archive.startsWith("/api/media/"))throw new WorkflowException("ARCHIVE_URL_INVALID","归档地址无法用于媒体探测");try(InputStream saved=storage.open(archive.substring("/api/media/".length()))){metadata=mediaProbe.probe(saved,".mp4");}catch(IOException e){throw new UncheckedIOException(e);}}
+        String finalArchive=archive;ObjectNode finalMetadata=metadata;
+        store.transaction(()->{ObjectNode latest=store.getForUpdate(kind,targetId),next=latest.deepCopy().put("archiveUrl",finalArchive).put("archiveStatus","SUCCEEDED");if(finalMetadata!=null){next.setAll(finalMetadata);next.put("mediaProbeStatus","SUCCEEDED");}store.update(kind,targetId,revision(latest),next);ObjectNode result=obj().put("archiveUrl",finalArchive);if(finalMetadata!=null)result.set("mediaMetadata",finalMetadata);jobs.succeed(id(job),result);return null;});
     }
     private void failed(ObjectNode job,String code,String reason,boolean retryable,boolean uncertain){
         ObjectNode saved=jobs.fail(id(job),code,redact(reason),retryable,uncertain);

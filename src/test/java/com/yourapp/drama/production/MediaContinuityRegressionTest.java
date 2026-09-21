@@ -14,7 +14,9 @@ class MediaContinuityRegressionTest {
         ObjectNode request = (ObjectNode) mapper.readTree("""
             {"shot":{"shotId":"shot","duration":3,"relationToPrevious":"MATCH_CUT","difficulty":"B",
               "action":"帽顶先出现在门缝，接着面孔随着同一次前倾进入画面。","shotSize":"MEDIUM","cameraAngle":"EYE_LEVEL","cameraMovement":"STATIC",
-              "characterIds":["actor"],"propIds":["bell"],"locationId":"yard","authorizedChanges":[],
+              "characterIds":["actor"],"propIds":["bell"],"locationId":"yard","authorizedChanges":[
+                {"path":"props.bell.position","reason":"同一次前倾动作中，人物把铃从腰侧抬到胸前"},
+                {"path":"props.bell.state","reason":"人物完成摇铃动作后让铃停止发声"}],
               "startState":{"characters":{"actor":{"identityId":"actor","lookId":"look","position":"门东侧","holding":"bell","lookDirection":"门缝"}},
                 "props":{"bell":{"holder":"actor","position":"右手胸前","state":"停止响铃"}}},
               "cameraPlan":{"position":"门北侧","height":"1.5米","distance":"2米","lensMm":50,"horizontalAngle":"南向","verticalAngle":"水平","subjectPlacement":"左侧","focusPoint":"眼睛","depthOfField":"浅","lightingDirection":"东窗"}},
@@ -138,7 +140,7 @@ class MediaContinuityRegressionTest {
         n=0;for(var view:request.path("assets").path("locations").get(0).path("approvedViews"))((ObjectNode)view).put("id","yard-role-view-"+(n++)).put("providerUrl","https://example.com/yard.png");
         n=0;for(var view:request.path("assets").path("props").get(0).path("approvedViews"))((ObjectNode)view).put("id","bell-role-view-"+(n++)).put("providerUrl","https://example.com/bell.png");
         var compiled=new PromptCompiler(mapper,new ContinuityEngine(mapper)).compileImage(request);
-        assertThat(compiled.compilerVersion()).isEqualTo("3.7.0");
+        assertThat(compiled.compilerVersion()).isEqualTo("4.0.0");
         assertThat(compiled.prompt()).contains("当前机位透视主参考","俯视空间辅助，仅用于世界坐标定位，不可照抄为当前画面");
         assertThat(compiled.references()).extracting(ref->ref.path("role").asText())
             .containsSubsequence("LOCATION","LOCATION_LAYOUT");
@@ -153,7 +155,7 @@ class MediaContinuityRegressionTest {
         n=0;for(var view:request.path("assets").path("locations").get(0).path("approvedViews"))((ObjectNode)view).put("id","yard-priority-"+(n++)).put("providerUrl","https://example.com/yard.png");
         n=0;for(var view:request.path("assets").path("props").get(0).path("approvedViews"))((ObjectNode)view).put("id","bell-priority-"+(n++)).put("providerUrl","https://example.com/bell.png");
         var compiled=new PromptCompiler(mapper,new ContinuityEngine(mapper)).compileImage(request);
-        assertThat(compiled.compilerVersion()).isEqualTo("3.7.0");
+        assertThat(compiled.compilerVersion()).isEqualTo("4.0.0");
         assertThat(compiled.references()).extracting(ref->ref.path("role").asText())
             .containsExactly("PROP","LOCATION","LOCATION_LAYOUT","CHARACTER_LOOK");
         assertThat(compiled.prompt()).contains("图1=","道具形制参考");

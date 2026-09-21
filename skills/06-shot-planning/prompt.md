@@ -21,3 +21,5 @@ PerformancePlan 只安排本镜能完成的原子动作，actionUnits 通常为 
 referenceViews 不输出或复写任何资产 ID。characterViews 按本镜骨架 characterIds 的既定顺序逐项选视角，locationView 只选当前场景视角，propViews 按 propIds 的既定顺序逐项选视角；服务端会把这些选择映射为已确认的 lookId、locationId 和 propId。不要返回 URL，也不要把整套多视图塞进一个镜头。
 
 JSON Schema 已定义字段、枚举、长度和数量边界；不要在字段里复述规则、写分析过程或导演论文。输出前检查时长、镜头编号、节拍引用、轴线、状态增量、持物归属、对白来源和参考视角。
+
+序列生成补充合同：DIRECTOR_PLAN 的每个 shotSkeleton.feltIntent 必须写观众在本镜结束时应该感到、注意或理解什么，并由可见表演、构图、摄影或光线承载，禁止“高级、震撼、电影感”等空泛评价。SHOT_DETAIL 的每条 stateChanges 必须包含发生时刻 atSeconds；每镜只完成当前节拍，不重复已完成动作，也不提前表演未来节拍。

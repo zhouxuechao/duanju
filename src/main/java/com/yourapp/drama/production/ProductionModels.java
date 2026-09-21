@@ -8,7 +8,7 @@ import java.util.Set;
 /** Provider-independent production contracts. Narrative text never substitutes for a Shot. */
 public final class ProductionModels {
     private ProductionModels() {}
-    public enum Strategy { INDEPENDENT_CUT, CONTINUATION, MOTION_REFERENCE }
+    public enum Strategy { INDEPENDENT_CUT, CONTINUATION, REANCHOR_AFTER_DRIFT, MOTION_REFERENCE }
     public record Shot(String shotId, String purpose, double duration, List<String> characterIds,
                        String locationId, List<String> propIds, String shotSize, String cameraAngle,
                        String cameraMovement, String action, String visualFocus, String emotion,

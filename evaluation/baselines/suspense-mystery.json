@@ -1,0 +1,9 @@
+{
+  "baselineVersion": 1,
+  "storyType": "SUSPENSE_MYSTERY",
+  "episodeFormatFamily": "LONG",
+  "requiredRuleId": "TYPE_SUSPENSE_MYSTERY",
+  "qualityContract": "STRUCTURE_AND_INVARIANTS",
+  "model": "OFFLINE_DETERMINISTIC",
+  "promptVersion": "story-regression-v1"
+}

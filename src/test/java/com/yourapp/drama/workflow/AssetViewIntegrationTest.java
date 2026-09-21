@@ -43,7 +43,7 @@ class AssetViewIntegrationTest {
 
     @Test void createsSeparatePlansAndOnlyThreeMastersWithoutDuplicates(){
         assertThat(assets.generate(projectId,obj()).path("views")).hasSize(12);
-        assertThat(store.list(GENERATION_JOB,projectId,null)).hasSize(3).allMatch(j->"ASSET_IMAGE".equals(text(j,"type"))&&j.path("maxAttempts").asInt()==1);
+        assertThat(store.list(GENERATION_JOB,projectId,null)).hasSize(3).allSatisfy(j->{assertThat(text(j,"type")).isEqualTo("ASSET_IMAGE");assertThat(j.path("maxAttempts").asInt()).isEqualTo(1);assertThat(j.path("inputSnapshot").path("imageTaskType").asText()).isEqualTo("ASSET_REFERENCE");assertThat(j.path("inputSnapshot").path("compilerVersion").asText()).isEqualTo("4.0.0-asset-reference");assertThat(j.path("inputSnapshot").path("normalizedPromptHash").asText()).hasSize(64);assertThat(j.path("inputSnapshot").path("referenceBindingsHash").asText()).hasSize(64);assertThat(j.path("inputSnapshot").path("providerCapabilitiesVersion").asText()).isNotBlank();});
         assets.generate(projectId,obj());assertThat(store.list(GENERATION_JOB,projectId,null)).hasSize(3);
         assertThat(assets.approvedReferences(projectId,coreId,lookId)).isEmpty();
         assertThatThrownBy(()->assets.requireReady(projectId,coreId,List.of(lookId))).isInstanceOf(WorkflowException.class);
@@ -74,6 +74,18 @@ class AssetViewIntegrationTest {
         assertThat(next.path("setVersion").asInt()).isEqualTo(2);assertThat(next.path("master").asBoolean()).isTrue();
         assertThat(store.get(ASSET_VIEW,id(master)).path("stale").asBoolean()).isTrue();
         assertThat(next.path("sourceSnapshot").path("asset").path("description").asText()).isEqualTo("换成红棉袄");
+    }
+
+    @Test void narrativeBibleEditDoesNotInvalidateVisualReferenceHash(){
+        generateLook();
+        ObjectNode master=run(current(lookId,"FRONT"));
+        String characterId=text(store.get(CHARACTER_LOOK,lookId),"characterId");
+        ObjectNode actor=store.get(CHARACTER,characterId);
+        ObjectNode changed=actor.deepCopy();
+        changed.set("narrativeBible",obj().put("want","找到失踪的邻居").put("secret","曾经见过来信"));
+        store.update(CHARACTER,characterId,revision(actor),changed);
+
+        assertThatCode(()->approve(master)).doesNotThrowAnyException();
     }
 
     @Test void uncertainProviderRequestIsPreservedAndCannotBeRepeated(){

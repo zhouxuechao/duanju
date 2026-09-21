@@ -1,0 +1,15 @@
+{
+  "tracks": [
+    "VIDEO",
+    "DIALOGUE",
+    "BGM",
+    "SFX"
+  ],
+  "allowedTransitions": [
+    "CUT",
+    "MATCH_CUT",
+    "CROSS_DISSOLVE",
+    "FADE_TO_BLACK"
+  ],
+  "previewBeforeLock": true
+}

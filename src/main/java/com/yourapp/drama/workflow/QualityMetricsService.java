@@ -44,13 +44,15 @@ public class QualityMetricsService {
             String status=text(job,"status"),code=text(job,"failureCode");boolean reachedProvider="SUCCESS".equals(status)||!text(job,"providerRequestId").isBlank()||code.startsWith("HTTP_")||code.contains("TIMEOUT");
             if(reachedProvider){providerAttempts++;if("FAILED".equals(status))providerFailures++;}
         }
-        return obj().put("reviewedShots",reviewedShots).put("reviewedAttempts",reviewedAttempts)
+        double totalCost=0,wastedCost=0;Map<String,Double> costByStage=new TreeMap<>();for(ObjectNode cost:store.list(COST_RECORD,projectId,null)){double amount=cost.path("actualCost").asDouble(cost.path("estimatedCost").asDouble());totalCost+=amount;wastedCost+=cost.path("wastedCost").asDouble();costByStage.merge(text(cost,"taskType"),amount,Double::sum);}
+        Map<String,Integer> feedbackReasons=new TreeMap<>();Map<String,Integer> reworkByPrompt=new TreeMap<>();for(ObjectNode feedback:store.list(HUMAN_EDIT_FEEDBACK,projectId,null)){feedback.path("reasonCodes").forEach(reason->feedbackReasons.merge(reason.asText(),1,Integer::sum));String prompt=text(feedback,"promptVersionId");if(!prompt.isBlank())reworkByPrompt.merge(prompt,1,Integer::sum);}
+        ObjectNode result=obj().put("reviewedShots",reviewedShots).put("reviewedAttempts",reviewedAttempts)
             .put("firstPassRate",rate(firstPass,reviewedShots)).put("finalPassRate",rate(accepted,byShot.size()))
             .put("averageAttemptsPerKeyframe",rate(attempts,byShot.size())).put("manualInterventionRate",rate(manualShots.size(),reviewedShots))
             .put("identityFailureRate",rate(identity,reviewedAttempts)).put("clothingFailureRate",rate(clothing,reviewedAttempts))
             .put("locationFailureRate",rate(location,reviewedAttempts)).put("propFailureRate",rate(prop,reviewedAttempts)).put("spatialFailureRate",rate(spatial,reviewedAttempts))
             .put("compositionFailureRate",rate(composition,reviewedAttempts)).put("providerOutputQualityFailureRate",rate(providerOutput,reviewedAttempts))
-            .put("providerFailureRate",rate(providerFailures,providerAttempts));
+            .put("providerFailureRate",rate(providerFailures,providerAttempts)).put("totalCost",totalCost).put("wastedCost",wastedCost).put("currency","CNY");result.set("costByStage",com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.pojoNode(costByStage));result.set("humanEditReasons",com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.pojoNode(feedbackReasons));result.set("reworkByPromptVersion",com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.pojoNode(reworkByPrompt));return result;
     }
     private double rate(int value,int total){return total==0?0:(double)value/total;}
 }

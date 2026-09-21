@@ -1,0 +1,6 @@
+{
+  "identityStable": true,
+  "propOwnerStableUntilExplicitChange": true,
+  "continuousUsesPreviousObservedState": true,
+  "futureFactsHidden": true
+}
