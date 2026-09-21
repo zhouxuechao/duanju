@@ -48,6 +48,7 @@ public class WorkflowController {
     @PostMapping("/keyframes/{id}/repair")public ObjectNode repair(@PathVariable String id,@RequestBody(required=false)ObjectNode b){return workflow.repairKeyframe(id,body(b));}
     @PostMapping("/keyframes/{id}/automatic-review")public ObjectNode automaticReview(@PathVariable String id,@RequestBody ObjectNode b){return automaticVisualReview.review(id,b);}
     @PostMapping("/video-takes/{id}/automatic-review")public ObjectNode automaticVideoReview(@PathVariable String id,@RequestBody(required=false)ObjectNode b){return automaticVideoReview.review(id,body(b));}
+    @PostMapping("/keyframes/{id}/video-preview")public ObjectNode videoPreview(@PathVariable String id,@RequestBody(required=false)ObjectNode b){return workflow.videoPreview(id,body(b));}
     @PostMapping("/keyframes/{id}/video")public ObjectNode video(@PathVariable String id,@RequestBody(required=false)ObjectNode b){return workflow.video(id,body(b));}
     @PostMapping("/{kind}/{id}/review")public ObjectNode review(@PathVariable String kind,@PathVariable String id,@RequestBody ObjectNode b){return workflow.review(ResourceKind.fromPath(kind),id,b);}
     @PostMapping("/{kind}/{id}/lock")public ObjectNode lock(@PathVariable String kind,@PathVariable String id,@RequestBody(required=false)ObjectNode b){return workflow.lock(ResourceKind.fromPath(kind),id,body(b));}

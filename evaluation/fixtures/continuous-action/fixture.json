@@ -1,0 +1,9 @@
+{
+  "fixtureId":"continuous-action",
+  "idea":"没有战斗经验的护林员在山火中连续转移三名伤员并学会承担指挥责任",
+  "episodeCount":8,
+  "targetDuration":90,
+  "distributionProfile":"GENERAL",
+  "storyProfile":{"settingGenre":"DISASTER","storyType":"GROWTH","audience":"GENERAL","tones":["紧迫","克制"],"tropes":["RESCUE"]},
+  "expectedInvariants":{"requiredRuleId":"TYPE_GROWTH","coreLoopMustContain":"缺陷","coreLoopMustNotContain":"误差或身份错位","futureFactLeakageAllowed":false}
+}

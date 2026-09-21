@@ -10,6 +10,7 @@ import static com.yourapp.drama.workflow.Documents.text;
 final class StoryDevelopmentDemo {
     static ObjectNode generate(JsonNode input) {
         if ("STORY_QA".equals(text(input, "phase"))) return quality();
+        if ("STORY_BRIEF".equals(text(input, "phase"))) return storyBrief(input.path("project"));
         if ("PREMISE".equals(text(input, "phase"))) return premise(input.path("project"));
         JsonNode project = input.path("project");
         JsonNode format = input.path("episodeFormat");
@@ -17,6 +18,19 @@ final class StoryDevelopmentDemo {
         if ("CORE".equals(text(input, "phase"))) return core(project);
         if ("OUTLINE_BATCH".equals(text(input, "phase"))) return outlines(input, format, seconds);
         return script(input, format, seconds);
+    }
+
+    private static ObjectNode storyBrief(JsonNode project){
+        String idea=project.path("idea").asText("主角追查一条改变命运的线索");
+        ObjectNode result=obj().put("originalIdea",idea).put("goal","查清关键线索并作出有代价的选择")
+                .put("coreConflict","主角追查真相，对手为保护自身目标持续阻挠")
+                .put("failureCost","主角会失去重要关系、信用或保护他人的机会")
+                .put("informationGap","观众、主角和对手掌握不同层级的信息")
+                .put("endingDirection","主角以主动选择兑现真相和情绪承诺");
+        result.set("protagonist",obj().put("name","待由故事圣经命名").put("identity","承受当前困境的人").put("goal","查清线索并保护重要的人"));
+        result.set("opponent",obj().put("name","待由故事圣经命名").put("identity","有独立利益的阻挠者").put("goal","让关键事实继续被隐藏"));
+        result.putArray("hardConstraints").add("集数="+project.path("episodeCount").asInt(1)).add("单集秒数="+project.path("targetDuration").asDouble(24));
+        result.putArray("mustKeep").add(idea);result.putArray("mustNotChange").add("用户明确的人物、题材、篇幅和结局约束");return result;
     }
 
     private static ObjectNode premise(JsonNode project) {
@@ -86,8 +100,17 @@ final class StoryDevelopmentDemo {
                 .put("description", "靛蓝棉布外套、深灰长裤、黑布鞋，袖口磨白"));
         core.putArray("characters").add(person);
         ObjectNode location = obj().put("locationKey", "yard").put("name", "村口院子").put("description", "石墙围合的院子，南门通向土路");
-        location.set("locationBible", obj().put("layout", "南门、北侧屋檐、东侧水井")
-                .put("spatialAnchors", "门与井相隔三米").put("lighting", "西侧落日照亮院子"));
+        ObjectNode locationBible=obj().put("layout","长方形石墙院落，南门、北侧屋檐、东侧水井");
+        locationBible.set("coordinateSystem",obj().put("origin","院落中心地面").put("northAxis","朝北侧屋檐为北").put("eastAxis","朝水井为东").put("verticalAxis","垂直地面向上"));
+        locationBible.set("dimensions",obj().put("width","东西八米").put("depth","南北十米").put("height","围墙三米"));
+        locationBible.putArray("surfaces").add(obj().put("surfaceId","GROUND").put("name","院落地面").put("kind","GROUND").put("worldOrientation","HORIZONTAL").put("bounds","东西八米、南北十米").put("material","青石").put("appearance","灰黑、有细小裂缝"))
+                .add(obj().put("surfaceId","SOUTH_WALL").put("name","南墙").put("kind","WALL").put("worldOrientation","SOUTH").put("bounds","宽八米、高三米").put("material","旧石砖").put("appearance","中部嵌木门"));
+        locationBible.putArray("fixedFeatures").add(obj().put("featureId","SOUTH_GATE").put("name","南门").put("kind","DOOR").put("supportSurfaceId","SOUTH_WALL").put("worldPosition","南墙正中").put("size","宽两米、高二点四米").put("state","关闭").put("appearance","旧双扇木门"))
+                .add(obj().put("featureId","EAST_WELL").put("name","水井").put("kind","WELL").put("supportSurfaceId","GROUND").put("worldPosition","原点以东三米").put("size","直径一米、高零点八米").put("state","井盖半掩").put("appearance","青石井圈"));
+        locationBible.putArray("spatialRelations").add(obj().put("subjectId","SOUTH_GATE").put("relation","SOUTHWEST_OF").put("objectId","EAST_WELL").put("distance","约五米"));
+        locationBible.putArray("lightSources").add(obj().put("lightId","WEST_SUN").put("kind","SUN").put("worldPosition","西侧天空").put("direction","由西向东").put("colorTemperature","暖色夕阳").put("appearance","低角度斜射"));
+        locationBible.putArray("visualInvariants").add("南门始终位于南墙正中").add("水井始终位于院落东侧");locationBible.putArray("prohibitedElements").add("牌位");
+        location.set("locationBible",locationBible);
         core.putArray("locations").add(location);
         ObjectNode prop = obj().put("propKey", "key").put("name", "旧钥匙").put("description", "带圆环的锈铁钥匙").put("state", "周伯持有，完好");
         prop.set("propBible", obj().put("appearance", "铁灰色、齿部有两道缺口").put("scale", "长六厘米").put("ownership", "周伯右侧衣袋"));

@@ -144,7 +144,7 @@ class ShotPlanVersionIntegrationTest {
         assets.invalidateAsset(projectId,locationId);ObjectNode request=obj();request.putArray("assetIds").add(locationId);assets.generate(projectId,request);
         for(ObjectNode job:store.list(GENERATION_JOB,projectId,null))if("ASSET_IMAGE".equals(text(job,"type"))&&"QUEUED".equals(text(job,"status")))jobs.cancel(id(job));
         List<ObjectNode> current=store.list(ASSET_VIEW,projectId,locationId).stream().filter(v->!v.path("stale").asBoolean()).toList();String master=id(current.stream().filter(v->v.path("master").asBoolean()).findFirst().orElseThrow());
-        for(ObjectNode view:current){ObjectNode approved=view.deepCopy().put("status","APPROVED").put("approved",true).put("providerUrl","https://fixture.invalid/"+id(view)+".png");if(!view.path("master").asBoolean())approved.putArray("referenceViewIds").add(master);store.update(ASSET_VIEW,id(view),revision(view),approved);}
+        for(ObjectNode view:current){ObjectNode approved=view.deepCopy().put("status","APPROVED").put("approved",true).put("providerUrl","https://fixture.invalid/"+id(view)+".png").put("compilerVersion","4.2.0-location-topology");if(!view.path("master").asBoolean())approved.putArray("referenceViewIds").add(master);store.update(ASSET_VIEW,id(view),revision(view),approved);}
     }
     private void assertPersistedSceneState(List<ObjectNode> shots){
         assertThat(shots).isNotEmpty().allSatisfy(shot->{

@@ -36,7 +36,7 @@
         "skills/vendor/short-drama-factory"
       ],
       "source": "HUMAN_MAINTAINED",
-      "fingerprint": "3199546e60dd6c92716d185a42aefefc0d01a57ce795021607cf908cb45339e8",
+      "fingerprint": "e07a8f314f54663b0edad4a55336b7c3e8f7222d794db83cb2db23399e8fce2f",
       "agent": "StoryAgent",
       "goal": "把创意整理为可版本化的故事圣经",
       "inputs": [
@@ -170,7 +170,7 @@
       "schemaPath": "",
       "rulePackDependencies": [],
       "source": "HUMAN_MAINTAINED",
-      "fingerprint": "b801d3575eb60b6a492d781f82f52daa266277e097135b264da9bbb6bd2f7943",
+      "fingerprint": "b9ec1dae9b6b694ebf62425faeb6c6fa823f96db520485d23099bdcbaad131b2",
       "agent": "DirectorAgent",
       "goal": "把场景拆成原子镜头",
       "inputs": [
@@ -244,7 +244,7 @@
       "schemaPath": "",
       "rulePackDependencies": [],
       "source": "HUMAN_MAINTAINED",
-      "fingerprint": "6faa74bf6717d288271321b759d0ada6d2fc3d12d293ae21720230e1b205a5c6",
+      "fingerprint": "6f809edbfd76146c4d18454e4788ef7383643675a2e0f742d128ca10e1606f51",
       "agent": "StoryAgent",
       "goal": "设计人物身份锚点和基础定妆",
       "inputs": [
@@ -271,7 +271,7 @@
       "schemaPath": "",
       "rulePackDependencies": [],
       "source": "HUMAN_MAINTAINED",
-      "fingerprint": "8304ec2c1dd9a8afd914fa7c53d59cb785f39c2291e3d5bf81a4c1eb718c8703",
+      "fingerprint": "f27d2b28563100b30a723ba9bbc5013210f163b80ff4b4a892ffbdb8c1e4899f",
       "agent": "StoryAgent",
       "goal": "设计地点圣经和可复用视觉锚点",
       "inputs": [

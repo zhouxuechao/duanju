@@ -27,4 +27,16 @@ class LocationStateResolverTest {
         assertThat(states.resolve(id(project),id(location),50).path("state").asText()).isEqualTo("燃烧中");
         assertThat(states.resolve(id(project),id(location),80).path("state").asText()).isEqualTo("废墟");
     }
+    @Test void locationStateCarriesStableWorldSpaceAnchorsIntoShotContext() {
+        ObjectNode project=store.create(PROJECT,obj().put("name","空间锚点").put("idea","柜台内外关系"));
+        ObjectNode location=store.create(LOCATION,obj().put("projectId",id(project)).put("name","柜台"));
+        ObjectNode state=obj().put("projectId",id(project)).put("locationId",id(location)).put("state","营业中").put("validFromStoryTime",0);
+        state.putArray("spatialAnchors").add(obj().put("subject","CHAR_A").put("anchorObject","COUNTER_1").put("relation","OUTSIDE").put("facing","INWARD").put("distance","NEAR").put("side","FRONT_LEFT"));
+        store.create(LOCATION_STATE,state);
+
+        JsonNode resolved=states.resolve(id(project),id(location),10);
+
+        assertThat(resolved.path("spatialAnchors")).hasSize(1);
+        assertThat(resolved.path("spatialAnchors").path(0).path("relation").asText()).isEqualTo("OUTSIDE");
+    }
 }

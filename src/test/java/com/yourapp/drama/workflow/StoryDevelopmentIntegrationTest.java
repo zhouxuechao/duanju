@@ -56,22 +56,57 @@ class StoryDevelopmentIntegrationTest {
     }
 
     @Test
+    void storyBriefIsPersistedReviewedAndConfirmedBeforePremiseGate() {
+        ObjectNode brief = development.start(projectId, obj());
+        assertThat(text(brief, "documentType")).isEqualTo("STORY_BRIEF");
+        assertThat(text(brief, "reviewStatus")).isEqualTo("GENERATING");
+
+        worker.tick();
+        brief = store.get(STORY_DOCUMENT, id(brief));
+        assertThat(text(brief, "reviewStatus")).isEqualTo("REVIEW");
+        assertThat(text(brief.path("content"), "originalIdea")).contains("雨夜");
+
+        ObjectNode accepted = development.confirm(id(brief), obj().put("revision", revision(brief)));
+        assertThat(text(accepted, "reviewStatus")).isEqualTo("CONFIRMED");
+        ObjectNode core = store.list(STORY_DOCUMENT, projectId, null).stream()
+                .filter(doc -> "CORE".equals(text(doc, "documentType"))).findFirst().orElseThrow();
+        assertThat(core.path("storyBriefSnapshot")).isEqualTo(accepted.path("content"));
+        assertThat(text(core, "reviewStatus")).isEqualTo("PREMISE_ANALYSIS");
+        assertThat(text(store.get(GENERATION_JOB, required(core, "generationJobId")).path("inputSnapshot"), "phase"))
+                .isEqualTo("PREMISE");
+    }
+
+    @Test
+    void repeatedStoryBriefConfirmationDoesNotSubmitPremiseTwice() {
+        ObjectNode brief = development.start(projectId, obj());
+        worker.tick();
+        brief = store.get(STORY_DOCUMENT, id(brief));
+
+        ObjectNode confirmed = development.confirm(id(brief), obj().put("revision", revision(brief)));
+        int jobsAfterFirstConfirmation = store.list(GENERATION_JOB, projectId, null).size();
+        development.confirm(id(confirmed), obj().put("revision", revision(confirmed)));
+
+        assertThat(store.list(GENERATION_JOB, projectId, null)).hasSize(jobsAfterFirstConfirmation);
+    }
+
+    @Test
     void premiseGatePersistsCapacityRiskBeforeCoreGeneration() {
         ObjectNode project = store.create(PROJECT, obj().put("name", "长篇前提门禁").put("idea", "主角找到一封信").put("episodeCount", 80).put("targetDuration", 100).put("ratio", "9:16"));
-        ObjectNode core = development.start(id(project), obj());
-        worker.tick();
-        core = store.get(STORY_DOCUMENT, id(core));
+        ObjectNode brief = development.start(id(project), obj()); worker.tick(); brief=store.get(STORY_DOCUMENT,id(brief));
+        development.confirm(id(brief),obj().put("revision",revision(brief))); worker.tick();
+        ObjectNode core = store.list(STORY_DOCUMENT,id(project),null).stream().filter(d->"CORE".equals(text(d,"documentType"))).findFirst().orElseThrow();
         assertThat(core.path("premiseAnalysis").path("viable").asBoolean()).isFalse();
         assertThat(core.path("premiseAnalysis").path("risks")).isNotEmpty();
         assertThat(text(core, "reviewStatus")).isEqualTo("PREMISE_REVIEW_REQUIRED");
-        assertThat(store.list(GENERATION_JOB, id(project), null)).hasSize(1);
+        assertThat(store.list(GENERATION_JOB, id(project), null)).hasSize(2);
         assertThat(core.path("premiseValidation").path("passed").asBoolean()).isFalse();
     }
 
     @Test
     void forceContinueRequiresReasonAndRecordsAuditableOverrideBeforeCore() {
         ObjectNode project = store.create(PROJECT, obj().put("name", "长篇前提门禁").put("idea", "主角找到一封信").put("episodeCount", 80).put("targetDuration", 100).put("ratio", "9:16"));
-        ObjectNode core = development.start(id(project), obj()); worker.tick(); core = store.get(STORY_DOCUMENT, id(core));
+        ObjectNode brief=development.start(id(project),obj());worker.tick();brief=store.get(STORY_DOCUMENT,id(brief));development.confirm(id(brief),obj().put("revision",revision(brief)));worker.tick();
+        ObjectNode core=store.list(STORY_DOCUMENT,id(project),null).stream().filter(d->"CORE".equals(text(d,"documentType"))).findFirst().orElseThrow();
 
         ObjectNode blocked = core;
         assertThatThrownBy(() -> development.reviewPremise(id(blocked), obj().put("action", "FORCE_CONTINUE").put("overrideBy", "tester")))
@@ -155,7 +190,7 @@ class StoryDevelopmentIntegrationTest {
     void everyStoryRequestCarriesResolvedFormatAndTraceableRulePack() {
         generateCore();
         ArgumentCaptor<LlmGateway.StructuredRequest> requests = ArgumentCaptor.forClass(LlmGateway.StructuredRequest.class);
-        verify(llm, times(2)).generate(requests.capture(), eq(JsonNode.class));
+        verify(llm, times(3)).generate(requests.capture(), eq(JsonNode.class));
         String input = requests.getAllValues().stream().map(LlmGateway.StructuredRequest::userPrompt).filter(value -> value.contains("\"phase\":\"CORE\"")).findFirst().orElseThrow();
         assertThat(input).contains("episodeFormat", "GENERAL_MICRO", "rulePack", "fingerprint", "BASE_CORE");
         assertThat(input).contains("premiseAnalysis");
@@ -349,7 +384,7 @@ class StoryDevelopmentIntegrationTest {
         assertThat(store.get(STORY_DOCUMENT, id(script)).path("stale").asBoolean()).isTrue();
     }
 
-    private ObjectNode generateCore() { ObjectNode draft = development.start(projectId, obj()); worker.tick(); worker.tick(); return store.get(STORY_DOCUMENT, id(draft)); }
+    private ObjectNode generateCore() { ObjectNode brief=development.start(projectId,obj());worker.tick();brief=store.get(STORY_DOCUMENT,id(brief));development.confirm(id(brief),obj().put("revision",revision(brief)));worker.tick();worker.tick();return store.list(STORY_DOCUMENT,projectId,null).stream().filter(d->"CORE".equals(text(d,"documentType"))).findFirst().orElseThrow(); }
     private ObjectNode confirmAndGenerate(ObjectNode core, int size) { ObjectNode c = core; if (!"CONFIRMED".equals(text(c, "reviewStatus"))) c = development.confirm(id(c), obj().put("revision", revision(c)).put("batchSize", size)); ObjectNode b = latest("OUTLINE_BATCH", 1); worker.tick(); return store.get(STORY_DOCUMENT, id(b)); }
     private ObjectNode confirm(ObjectNode doc) { ObjectNode c = development.confirm(id(doc), obj().put("revision", revision(doc))); worker.tick(); return c; }
     private ObjectNode latest(String type, int number) { return store.list(STORY_DOCUMENT, projectId, null).stream().filter(d -> type.equals(text(d, "documentType")) && (type.equals("OUTLINE_BATCH") ? d.path("batchNo").asInt() == number : d.path("episodeNo").asInt() == number)).findFirst().orElseThrow(); }
@@ -358,7 +393,8 @@ class StoryDevelopmentIntegrationTest {
         JsonNode input = mapper.readTree(request.userPrompt());
         String phase = input.path("phase").asText();
         JsonNode value;
-        if ("PREMISE".equals(phase)) value = premise(input.path("project").path("episodeCount").asInt());
+        if ("STORY_BRIEF".equals(phase)) value = storyBrief(input.path("project"));
+        else if ("PREMISE".equals(phase)) value = premise(input.path("project").path("episodeCount").asInt());
         else if ("CORE".equals(phase)) value = coreContent("雨夜寻信");
         else if ("OUTLINE_BATCH".equals(phase)) { int start = input.path("startEpisode").asInt(); int end = input.path("endEpisode").asInt(); ObjectNode out = obj(); ArrayNode eps = out.putArray("episodes"); String previous = input.path("sourceSnapshot").path("requiredStartState").asText("start"); for (int i=start;i<=end;i++) { String next = "state-"+i; eps.add(card(i, previous, next)); previous=next; } value=out; }
         else if ("STORY_QA".equals(phase)) value = qa();
@@ -373,13 +409,15 @@ class StoryDevelopmentIntegrationTest {
         c.putArray("worldRules").add("现实都市，事件遵守同一时间线");c.set("seasonArc",obj().put("opening","雨夜收到错投信").put("development","沿线索追查").put("majorTurn","可信的人被证据指向").put("climax","必须公开信件承担代价").put("ending","真相公开，人物完成选择"));
         ObjectNode unit=obj().put("unitId","UNIT_01").put("startEpisode",1).put("endEpisode",10).put("title","雨夜寻信").put("goal","找到收信人").put("mainConflict","追查与阻挠").put("antagonistPressure","线索持续被销毁").put("emotionGoal","从期待推进到紧张兑现").put("reveal","信件来自失踪者").put("payoff","找到关键收件记录").put("climax","林舟决定公开信件").put("endHook","真正收信人出现");unit.set("unitTransformation",obj().put("protagonist","从回避风险到主动承担").put("relationships","从独查到信任伙伴").put("mainConflict","从找人升级为保护真相").put("audienceKnowledge","确认信件关联失踪案").put("nextStageReason","真相仍有幕后者"));c.putArray("unitArcs").add(unit);
         ObjectNode character=obj().put("characterKey","c1").put("name","林舟").put("description","谨慎的快递员");ObjectNode nb=obj().put("storyRole","主角").put("want","送达失踪者的信").put("need","学会承担选择").put("fear","连累朋友").put("weakness","过度谨慎").put("secret","曾见过寄信人").put("motivation","弥补一次错投").put("decisionPattern","先核对证据再行动").put("speechStyle","短句，回避夸张判断");nb.set("arc",obj().put("start","独自追查").put("end","主动信任伙伴"));nb.withObject("arc").putArray("turningPoints").add("伙伴因他受伤");nb.putArray("behaviorRules").add("不凭猜测指控");nb.putArray("relationships").add("与伙伴从防备到互信");character.set("narrativeBible",nb);character.set("identityTraits",obj().put("age","30").put("face","清瘦").put("hair","黑短发").put("body","偏瘦").put("voiceDialect","普通话"));character.set("looks",arr(obj().put("lookKey","look1").put("name","雨衣").put("description","深蓝雨衣")));c.putArray("characters").add(character);
-        ObjectNode location=obj().put("locationKey","l1").put("name","旧街").put("description","狭窄的旧街");location.set("locationBible",obj().put("layout","南北向街巷").put("spatialAnchors","红色邮筒").put("lighting","冷色路灯"));c.putArray("locations").add(location);ObjectNode prop=obj().put("propKey","p1").put("name","信封").put("description","未拆的信封").put("state","完好");prop.set("propBible",obj().put("appearance","米白色").put("scale","手掌大小").put("ownership","林舟"));c.putArray("props").add(prop);c.putArray("foreshadowingRules").add("信封日期先出现后解释");c.putArray("continuityRules").add("人物、地点、道具状态逐集继承");return c;
+        ObjectNode location=obj().put("locationKey","l1").put("name","旧街").put("description","狭窄的旧街");location.set("locationBible",locationBible());c.putArray("locations").add(location);ObjectNode prop=obj().put("propKey","p1").put("name","信封").put("description","未拆的信封").put("state","完好");prop.set("propBible",obj().put("appearance","米白色").put("scale","手掌大小").put("ownership","林舟"));c.putArray("props").add(prop);c.putArray("foreshadowingRules").add("信封日期先出现后解释");c.putArray("continuityRules").add("人物、地点、道具状态逐集继承");return c;
     }
     private ObjectNode card(int no, String start, String end) { ObjectNode card=obj().put("episodeNo",no).put("title","第"+no+"集").put("episodeFunction","推进信件来源").put("episodeGoal","确认一条可行动线索").put("hook","信封日期与失踪日冲突").put("mainConflict","林舟要查记录但记录正在被删除").put("newInformation","收件记录指向旧街").put("characterDecision","林舟决定保存副本").put("escalation","阻挠者开始跟踪林舟").put("payoff","林舟拿到一页记录").put("cliffhanger","记录上出现熟人名字").put("summary","线索继续并改变嫌疑方向").put("startState",start).put("endState",end).put("episodeFormatId","GENERAL_MICRO").put("beatMode","SINGLE_ROUND").put("estimatedDurationSec",20);card.putArray("characterKeys").add("c1");card.putArray("locationKeys").add("l1");card.putArray("propKeys").add("p1");card.set("foreshadowing",obj());card.withObject("foreshadowing").putArray("plant");card.withObject("foreshadowing").putArray("advance").add("信封日期");card.withObject("foreshadowing").putArray("resolve");card.putArray("beats").add(beat("HOOK",0,3)).add(beat("DECISION",3,20));card.putArray("progressionEvents").add(obj().put("atSec",10).put("type","NEW_INFORMATION").put("description","得到收件记录"));card.putArray("scenePlan").add(scene("雨巷","发现线索",20));return card; }
     private ObjectNode beat(String id,double start,double end){return obj().put("beatId",id).put("purpose",id.equals("HOOK")?"建立观看问题":"推动选择并兑现").put("startSec",start).put("endSec",end);}
     private ObjectNode scene(String name,String description,double duration){return obj().put("name",name).put("description",description).put("startSec",0).put("endSec",duration).put("duration",duration);}
     private ObjectNode premise(int episodeCount){ObjectNode p=obj().put("viable",episodeCount<=30).put("coreConflict","林舟追查信件而阻挠者试图销毁证据").put("protagonistGoal","找到收信人并查清失踪原因").put("opposition","掌握记录且有自身目标的阻挠者").put("audiencePromise","每条线索都改变人物选择和嫌疑方向").put("whyNotResolveImmediately","证据分散且对手会根据调查行动调整策略");p.set("expansionPotential",obj().put("conflictDepth","阻挠逐级升级").put("characterDepth","主角需要克服过度谨慎").put("relationshipDepth","伙伴关系因风险变化").put("reversalPotential","旧线索会获得新解释").put("informationDepth","角色拥有不同知识边界"));p.putArray("risks");if(episodeCount>30)p.withArray("risks").add("目标集数超过原始冲突容量，需要多个不同阶段目标");p.putArray("questionsForCore").add("每个 Unit 改变什么状态？");return p;}
+    private ObjectNode storyBrief(JsonNode project){ObjectNode b=obj().put("originalIdea",project.path("idea").asText()).put("goal","找到失踪信件的收件人").put("coreConflict","追查者要保全信件，阻挠者要销毁它").put("failureCost","朋友会因调查受到伤害").put("informationGap","观众先看到有人转移信件").put("endingDirection","主角公开信件并承担后果");b.set("protagonist",obj().put("name","林舟").put("identity","谨慎的快递员").put("goal","找到收件人"));b.set("opponent",obj().put("name","阻挠者").put("identity","掌握记录的人").put("goal","销毁投递记录"));b.putArray("hardConstraints").add("单集20秒");b.putArray("mustKeep").add("雨夜");b.putArray("mustNotChange").add("主角主动选择结局");return b;}
     private ObjectNode qa(){ObjectNode qa=obj().put("passed",true).put("watchReason","线索迫使主角作出有代价的选择").put("nextEpisodeReason","熟人名字改变嫌疑方向").put("rewriteRequired",false);ObjectNode dimensions=qa.putObject("dimensions");for(String key:List.of("hook","progression","conflict","characterConsistency","genreFit","continuity","payoff","cliffhanger","narrativeNecessity","dialogueNaturalness"))dimensions.put(key,85);ObjectNode delta=qa.putObject("episodeDelta");for(String key:List.of("factsChanged","relationshipsChanged","goalsChanged","knowledgeChanged","riskChanged","resourcesChanged"))delta.putArray(key);delta.withArray("knowledgeChanged").add("林舟确认收件记录指向旧街");qa.putArray("blockingIssues");qa.putArray("issues");qa.putArray("rewriteInstructions");return qa;}
+    private ObjectNode locationBible(){ObjectNode b=obj().put("layout","南北向街巷");b.set("coordinateSystem",obj().put("origin","街巷中点").put("northAxis","沿街向北").put("eastAxis","垂直街道向东").put("verticalAxis","垂直路面向上"));b.set("dimensions",obj().put("width","四米").put("depth","五十米").put("height","两侧建筑约九米"));b.putArray("surfaces").add(obj().put("surfaceId","ROAD").put("name","路面").put("kind","GROUND").put("worldOrientation","HORIZONTAL").put("bounds","宽四米、南北延伸五十米").put("material","旧石板").put("appearance","潮湿发暗"));b.putArray("fixedFeatures").add(obj().put("featureId","POSTBOX").put("name","红色邮筒").put("kind","POSTBOX").put("supportSurfaceId","ROAD").put("worldPosition","原点以北五米、东侧路缘").put("size","高一点二米").put("state","关闭").put("appearance","红漆剥落"));b.putArray("spatialRelations").add(obj().put("subjectId","POSTBOX").put("relation","NORTH_OF").put("objectId","ROAD").put("distance","距原点五米"));b.putArray("lightSources").add(obj().put("lightId","LAMP_1").put("kind","STREET_LAMP").put("worldPosition","原点北侧六米").put("direction","向下").put("colorTemperature","冷白").put("appearance","旧路灯"));b.putArray("visualInvariants").add("邮筒始终位于东侧路缘");b.putArray("prohibitedElements").add("现代广告大屏");return b;}
     private ArrayNode arr(JsonNode n) { return JsonNodeFactory.instance.arrayNode().add(n); }
 }
 

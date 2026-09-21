@@ -1,0 +1,9 @@
+{
+  "fixtureId":"rebirth-revenge",
+  "idea":"女主回到签署陷阱合同前，用前世记忆寻找当时已经存在的证据完成复仇",
+  "episodeCount":30,
+  "targetDuration":90,
+  "distributionProfile":"GENERAL",
+  "storyProfile":{"settingGenre":"URBAN","storyType":"REVENGE","audience":"FEMALE","tones":["紧张","复仇"],"tropes":["REBIRTH"]},
+  "expectedInvariants":{"requiredRuleId":"TYPE_REVENGE","coreLoopMustContain":"受害或失去","coreLoopMustNotContain":"关系升级→情绪兑现","futureFactLeakageAllowed":false}
+}

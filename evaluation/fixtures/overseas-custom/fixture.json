@@ -1,0 +1,9 @@
+{
+  "fixtureId":"overseas-custom",
+  "idea":"三名室友在海外小城经营餐车，因翻译误会卷入一场社区选举",
+  "episodeCount":16,
+  "targetDuration":135,
+  "distributionProfile":"OVERSEAS",
+  "storyProfile":{"settingGenre":"OVERSEAS_URBAN","storyType":"COMEDY","audience":"GENERAL","tones":["轻喜"],"tropes":["CULTURE_CLASH"]},
+  "expectedInvariants":{"requiredRuleId":"TYPE_COMEDY","coreLoopMustContain":"目标","coreLoopMustNotContain":"隐藏身份→误判","futureFactLeakageAllowed":false}
+}

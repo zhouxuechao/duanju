@@ -1,0 +1,9 @@
+{
+  "fixtureId":"complex-ensemble-space",
+  "idea":"八名家族成员在祖宅两层空间同时寻找遗嘱，站队随证据转移而变化",
+  "episodeCount":20,
+  "targetDuration":180,
+  "distributionProfile":"GENERAL",
+  "storyProfile":{"settingGenre":"FAMILY","storyType":"FAMILY_ETHICS","audience":"GENERAL","tones":["压迫","悬疑"],"tropes":["ENSEMBLE"]},
+  "expectedInvariants":{"requiredRuleId":"TYPE_FAMILY_ETHICS","coreLoopMustContain":"责任或利益","coreLoopMustNotContain":"无限开挂","requiredBeatMode":"DOUBLE_ROUND","futureFactLeakageAllowed":false}
+}

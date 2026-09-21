@@ -35,6 +35,7 @@ public class ProductionService {
     public JsonNode compileImage(JsonNode request) { return value(prompts.compileImage(request)); }
     public String imageCompilerVersion(){return PromptCompiler.IMAGE_COMPILER_VERSION;}
     public JsonNode compileVideo(JsonNode request) { return value(prompts.compileVideo(request)); }
+    public JsonNode prepareVideo(JsonNode request) { return prompts.prepareVideo(request); }
     public JsonNode routeVideo(JsonNode request) { return prompts.routeVideo(request); }
     public JsonNode imageCapabilities(){return capabilities.image();}
     public JsonNode videoCapabilities(){return capabilities.video();}
@@ -157,12 +158,13 @@ public class ProductionService {
             if (!Set.of("VIDEO", "DIALOGUE", "AMBIENCE", "SFX", "BGM").contains(track)) { error(risks, "INVALID_TRACK", "items.track", "仅支持 VIDEO、DIALOGUE、AMBIENCE、SFX、BGM"); continue; }
             boolean qc = item.path("qcPassed").asBoolean(true);
             if (!qc) error(risks, "MEDIA_NOT_APPROVED", media, "时间线只能使用已通过 QC 的成片素材");
-            double volume=item.path("volume").asDouble(1);
+            double volume=item.path("volume").asDouble(1),playbackRate=item.path("playbackRate").asDouble(1);
             if (!Double.isFinite(volume) || volume < 0 || volume > 4) { error(risks,"INVALID_VOLUME",media,"volume 必须在 0 至 4 之间"); continue; }
+            if(!Double.isFinite(playbackRate)||playbackRate<.9||playbackRate>1.1||("VIDEO".equals(track)&&Math.abs(playbackRate-1)>.0001)){error(risks,"INVALID_PLAYBACK_RATE",media,"音频 playbackRate 必须在 0.9 至 1.1 之间，视频不允许在此阶段变速");continue;}
             String transition=item.path("transition").asText("CUT").toUpperCase(Locale.ROOT);long transitionDuration=item.path("transitionDurationMs").asLong("CROSS_DISSOLVE".equals(transition)?300:0),fadeIn=item.path("fadeInMs").asLong("BGM".equals(track)?500:"AMBIENCE".equals(track)?250:0),fadeOut=item.path("fadeOutMs").asLong("BGM".equals(track)?800:"AMBIENCE".equals(track)?400:0);
             if(!Set.of("CUT","MATCH_CUT","CROSS_DISSOLVE","FADE_TO_BLACK").contains(transition))error(risks,"INVALID_TRANSITION",media,"转场只支持 CUT、MATCH_CUT、CROSS_DISSOLVE、FADE_TO_BLACK");
             if(fadeIn<0||fadeOut<0||fadeIn+fadeOut>=duration)error(risks,"INVALID_AUDIO_FADE",media,"音频淡入淡出必须非负，且总时长要短于素材片段");
-            parsed.add(new TrackItem(track, path.toString(), start, sourceStart, duration, volume,transition,transitionDuration,fadeIn,fadeOut));
+            parsed.add(new TrackItem(track, path.toString(), start, sourceStart, duration, volume,playbackRate,transition,transitionDuration,fadeIn,fadeOut));
         }
         for (String track : List.of("VIDEO", "DIALOGUE", "AMBIENCE", "SFX", "BGM")) {
             List<TrackItem> same = parsed.stream().filter(i -> i.track().equals(track)).sorted(Comparator.comparingLong(TrackItem::start)).toList();
@@ -188,9 +190,10 @@ public class ProductionService {
         List<Integer> videos = new ArrayList<>(), audio = new ArrayList<>();
         for (int i = 0; i < parsed.size(); i++) {
             TrackItem item = parsed.get(i);
-            String trim="start="+seconds(item.sourceStart())+":duration="+seconds(item.duration());
+            long sourceDuration=item.track().equals("VIDEO")?item.duration():Math.round(item.duration()*item.playbackRate());
+            String trim="start="+seconds(item.sourceStart())+":duration="+seconds(sourceDuration);
             if (item.track().equals("VIDEO")) { videos.add(i); graph.append('[').append(i).append(":v]trim=").append(trim).append(",setpts=PTS-STARTPTS,scale=").append(width).append(':').append(height).append(":force_original_aspect_ratio=decrease,pad=").append(width).append(':').append(height).append(":(ow-iw)/2:(oh-ih)/2:black,fps=").append(fps).append(",setsar=1,settb=AVTB,format=").append(pixelFormat).append("[v").append(i).append("]; "); }
-            else { audio.add(i); graph.append('[').append(i).append(":a]atrim=").append(trim).append(",asetpts=PTS-STARTPTS");if(item.fadeIn()>0)graph.append(",afade=t=in:st=0:d=").append(decimal(item.fadeIn()/1000d));if(item.fadeOut()>0)graph.append(",afade=t=out:st=").append(decimal((item.duration()-item.fadeOut())/1000d)).append(":d=").append(decimal(item.fadeOut()/1000d));graph.append(",adelay=").append(item.start()).append('|').append(item.start()).append(",volume=").append(item.volume()).append("[a").append(i).append("]; "); }
+            else { audio.add(i); graph.append('[').append(i).append(":a]atrim=").append(trim).append(",asetpts=PTS-STARTPTS");if(Math.abs(item.playbackRate()-1)>.0001)graph.append(",atempo=").append(decimal(item.playbackRate()));if(item.fadeIn()>0)graph.append(",afade=t=in:st=0:d=").append(decimal(item.fadeIn()/1000d));if(item.fadeOut()>0)graph.append(",afade=t=out:st=").append(decimal((item.duration()-item.fadeOut())/1000d)).append(":d=").append(decimal(item.fadeOut()/1000d));graph.append(",adelay=").append(item.start()).append('|').append(item.start()).append(",volume=").append(item.volume()).append("[a").append(i).append("]; "); }
         }
         if (!videos.isEmpty()) {String current="v"+videos.getFirst();double assembled=parsed.get(videos.getFirst()).duration()/1000d;for(int n=1;n<videos.size();n++){int inputIndex=videos.get(n);TrackItem item=parsed.get(inputIndex);String next="va"+n;if("CROSS_DISSOLVE".equals(item.transition())){double cross=item.transitionDuration()/1000d,offset=assembled-cross;graph.append('[').append(current).append("][v").append(inputIndex).append("]xfade=transition=fade:duration=").append(decimal(cross)).append(":offset=").append(decimal(offset)).append('[').append(next).append("]; ");assembled+=item.duration()/1000d-cross;}else if("FADE_TO_BLACK".equals(item.transition())){double fade=Math.min(.25,Math.min(assembled,item.duration()/1000d)/4),fadeStart=Math.max(0,assembled-fade);String out="vfo"+n,in="vfi"+n;graph.append('[').append(current).append("]fade=t=out:st=").append(decimal(fadeStart)).append(":d=").append(decimal(fade)).append('[').append(out).append("]; [v").append(inputIndex).append("]fade=t=in:st=0:d=").append(decimal(fade)).append('[').append(in).append("]; [").append(out).append("][").append(in).append("]concat=n=2:v=1:a=0[").append(next).append("]; ");assembled+=item.duration()/1000d;}else{graph.append('[').append(current).append("][v").append(inputIndex).append("]concat=n=2:v=1:a=0[").append(next).append("]; ");assembled+=item.duration()/1000d;}current=next;}graph.append('[').append(current).append("]null[vconcat]; ");}
         if (!audio.isEmpty()) {
@@ -252,5 +255,5 @@ public class ProductionService {
     private record Candidate(double score, JsonNode entry) {}
     private record Cue(String id, String display, long start, long end) {}
     private String decimal(double value){return java.math.BigDecimal.valueOf(value).stripTrailingZeros().toPlainString();}
-    private record TrackItem(String track, String path, long start, long sourceStart, long duration, double volume,String transition,long transitionDuration,long fadeIn,long fadeOut) {}
+    private record TrackItem(String track, String path, long start, long sourceStart, long duration, double volume,double playbackRate,String transition,long transitionDuration,long fadeIn,long fadeOut) {}
 }

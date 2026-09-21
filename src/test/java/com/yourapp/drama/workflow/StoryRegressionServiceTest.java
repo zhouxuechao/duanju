@@ -8,13 +8,15 @@ import java.nio.file.Path;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class StoryRegressionServiceTest {
-    @Test void fiveDistinctStoryTypesKeepTheirOwnStructuralContracts(){
+    @Test void tenProductionFixturesKeepStoryTypeAndEpisodeFormatContractsIsolated(){
         var service=new StoryRegressionService(new ObjectMapper(),new StoryProfilePolicy(),new EpisodeFormatResolver(),new ScreenwritingRuleResolver());
         var report=service.run(Path.of("evaluation"));
         assertThat(report.path("status").asText()).isEqualTo("PASS");
-        assertThat(report.path("fixtureCount").asInt()).isEqualTo(5);
-        assertThat(report.path("results")).extracting(v->v.path("storyType").asText()).containsExactlyInAnyOrder("IDENTITY_REVERSAL","REVENGE","SWEET_ROMANCE","SUSPENSE_MYSTERY","COMEDY");
-        assertThat(report.path("results")).extracting(v->v.path("current").path("episodeFormatFamily").asText()).containsExactlyInAnyOrder("MICRO","MANJU","STANDARD","LONG","CUSTOM");
+        assertThat(report.path("fixtureCount").asInt()).isEqualTo(10);
+        assertThat(report.path("results")).extracting(v->v.path("fixtureId").asText()).containsExactlyInAnyOrder(
+            "identity-reversal","sweet-romance","suspense-mystery","revenge","comedy",
+            "modern-counterattack","rebirth-revenge","complex-ensemble-space","continuous-action","overseas-custom");
+        assertThat(report.path("results")).extracting(v->v.path("current").path("episodeFormatFamily").asText()).contains("MICRO","STANDARD","LONG","CUSTOM");
         assertThat(report.path("results")).allSatisfy(v->{assertThat(v.path("passed").asBoolean()).isTrue();assertThat(v.path("current").path("coreLoop").asText()).isNotBlank();});
     }
 

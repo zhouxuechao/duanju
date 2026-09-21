@@ -14,7 +14,8 @@ import static com.yourapp.drama.production.ProductionModels.*;
 public class ContinuityEngine {
     private final ObjectMapper mapper;
     private final ShotComplexityValidator complexity=new ShotComplexityValidator();
-    public ContinuityEngine(ObjectMapper mapper) { this.mapper = mapper; }
+    private final SpatialAnchor spatialAnchors;
+    public ContinuityEngine(ObjectMapper mapper) { this.mapper = mapper;this.spatialAnchors=new SpatialAnchor(mapper); }
 
     public ContinuityPlan plan(JsonNode request) {
         Shot shot = shot(request, mapper);
@@ -33,7 +34,7 @@ public class ContinuityEngine {
         List<String> allowed = new ArrayList<>(List.of("framing", "cameraAngle", "cameraMovement", "expression", "composition"));
         if (!spatial) allowed.addAll(List.of("position", "pose", "time", "lighting", "location"));
         if (previous.isObject()) {
-            for (String field : List.of("time", "lighting", "locationId", "spatialRelations"))
+            for (String field : List.of("time", "lighting", "locationId", "spatialRelations", "spatialAnchors"))
                 if (spatial && previous.has(field)) inherited.set(field, previous.path(field).deepCopy());
             ObjectNode inheritedCharacters = inherited.putObject("characters");
             previous.path("characters").fields().forEachRemaining(e -> {
@@ -107,6 +108,8 @@ public class ContinuityEngine {
 
         compareInherited(inherited, shot.startState(), "shot.startState", raw.path("authorizedChanges"), risks);
         ObjectNode start = deepMerge(mapper, inherited, shot.startState());
+        JsonNode currentAnchors=raw.path("blocking").path("spatialAnchors");
+        if(currentAnchors.isArray())try{start.set("spatialAnchors",mapper.valueToTree(spatialAnchors.resolve(previous.path("spatialAnchors"),currentAnchors,spatial)));}catch(IllegalArgumentException failure){error(risks,"SPATIAL_ANCHOR_WORLD_RELATION_CHANGED","shot.blocking.spatialAnchors",failure.getMessage());}
         start.put("locationId", shot.locationId());
         constraints.set("state", inherited);
         for(String characterId:shot.characterIds())if(start.path("characters").path(characterId).has("alive")&&!start.path("characters").path(characterId).path("alive").asBoolean())

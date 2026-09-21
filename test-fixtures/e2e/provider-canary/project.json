@@ -2,11 +2,11 @@
   "scenarioId": "provider-canary",
   "name": "真实服务商最低成本连通性",
   "episodeCount": 1,
-  "targetDuration": 4,
+  "targetDuration": 12,
   "requirements": {
     "realTextRequests": 1,
     "realImageRequests": 1,
-    "realVideoRequests": 1,
+    "realVideoRequests": 3,
     "realAudioRequests": 1,
     "maxCostCny": 5,
     "noAutomaticRetry": true

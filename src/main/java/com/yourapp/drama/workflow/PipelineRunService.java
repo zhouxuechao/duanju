@@ -18,7 +18,8 @@ import static com.yourapp.drama.workflow.Documents.*;
 
 @Service
 public class PipelineRunService {
-    private static final List<String> STAGES=List.of("PREFLIGHT","CORE","OUTLINE","SCRIPT","SCENE","SHOT_PLAN","KEYFRAME","VIDEO","TTS","TIMELINE","PREVIEW","FINAL_QC");
+    /** Public production stages. Story/Director/Image keep their own durable sub-artifacts internally. */
+    private static final List<String> STAGES=List.of("PREFLIGHT","STORY","DIRECTOR","IMAGE","VIDEO","AUDIO","TIMELINE","PREVIEW","CREATIVE_QA","FINAL");
     private final DocumentStore store;
     private final PipelinePreflightService preflight;
     private final ObjectMapper mapper;
@@ -87,7 +88,7 @@ public class PipelineRunService {
         throw new WorkflowException("PIPELINE_STEP_LIMIT","故事阶段超过安全步数");
     }
 
-    private int storyOrder(ObjectNode document){return switch(text(document,"documentType")){case "CORE"->0;case "OUTLINE_BATCH"->1;case "EPISODE_SCRIPT"->2;default->3;};}
+    private int storyOrder(ObjectNode document){return switch(text(document,"documentType")){case "STORY_BRIEF"->0;case "CORE"->1;case "OUTLINE_BATCH"->2;case "EPISODE_SCRIPT"->3;default->4;};}
 
     private void driveAssetViews(String projectId){
         if(store.list(ASSET_VIEW,projectId,null).stream().noneMatch(v->!v.path("stale").asBoolean()))assetViews.generate(projectId,obj());
@@ -164,7 +165,7 @@ public class PipelineRunService {
             ObjectNode qa=post.quality(id(timeline));if(!qa.path("passed").asBoolean())throw new WorkflowException("QA_BLOCKING","时间线质检未通过："+qa.path("failureCodes"));
             timeline=workflow.lock(TIMELINE,id(timeline),obj());
             if(text(timeline,"finalUrl").isBlank()){complete(post.render(id(timeline),obj().put("quality","FINAL").put("requestKey","pipeline-final-"+id(timeline))));timeline=store.get(TIMELINE,id(timeline));}
-            if(!"PASSED".equals(text(timeline,"finalQaStatus"))){ObjectNode review=obj().put("decision","PASS").put("reviewer","FREE_PIPELINE").put("notes","模拟媒体合同与技术指标验收通过");for(String metric:List.of("storyAccuracy","visualQuality","motionContinuity","voiceConsistency","audioSync","subtitleAccuracy","editingRhythm"))review.put(metric,5);post.finalReview(id(timeline),review);}
+            if(!"PASSED".equals(text(timeline,"finalQaStatus"))){ObjectNode review=obj().put("decision","PASS").put("reviewer","FREE_PIPELINE").put("notes","模拟媒体合同、连续性和叙事节点验收通过");for(String metric:List.of("characterConsistency","propContinuity","positionContinuity","actionContinuity","editingRhythm","dialogueQuality","bgmFit","sfxAccuracy","subtitleAccuracy","hook","midHook","cliffhanger"))review.put(metric,5);post.finalReview(id(timeline),review);}
         }
     }
 
@@ -211,20 +212,24 @@ public class PipelineRunService {
         List<ObjectNode> docs=store.list(STORY_DOCUMENT,projectId,null),episodes=store.list(EPISODE,projectId,null),scenes=store.list(SCENE,projectId,null),shots=store.list(SHOT,projectId,null);
         Map<String,StageEvaluation> values=new LinkedHashMap<>();
         values.put("PREFLIGHT",evaluation(pf.path("ready").asBoolean(),"PREFLIGHT_BLOCKED","配置或工具自检存在阻塞项","CONFIG",pf,List.of()));
-        values.put("CORE",resources(docs.stream().filter(d->"CORE".equals(text(d,"documentType"))&&!d.path("stale").asBoolean()).toList(),d->"CONFIRMED".equals(text(d,"reviewStatus")),"CORE_NOT_CONFIRMED","整季核心尚未确认"));
-        values.put("OUTLINE",resources(docs.stream().filter(d->"OUTLINE_BATCH".equals(text(d,"documentType"))&&!d.path("stale").asBoolean()).toList(),d->"CONFIRMED".equals(text(d,"reviewStatus")),"OUTLINE_NOT_CONFIRMED","分批集纲尚未全部确认"));
-        values.put("SCRIPT",resources(docs.stream().filter(d->"EPISODE_SCRIPT".equals(text(d,"documentType"))&&!d.path("stale").asBoolean()).toList(),d->"CONFIRMED".equals(text(d,"reviewStatus")),"SCRIPT_NOT_CONFIRMED","单集剧本尚未全部确认"));
-        values.put("SCENE",resources(scenes,d->true,"SCENE_MISSING","尚未形成场景"));
-        values.put("SHOT_PLAN",resources(shots,d->!d.path("stale").asBoolean(),"SHOT_PLAN_MISSING","尚未形成有效镜头计划"));
-        values.put("KEYFRAME",resourcesForShots(projectId,shots,KEYFRAME,"KEYFRAME_NOT_LOCKED","镜头缺少已质检并锁定的关键帧"));
+        List<ObjectNode> currentDocs=docs.stream().filter(d->!d.path("stale").asBoolean()).toList();
+        boolean story=!episodes.isEmpty()&&!scenes.isEmpty()&&List.of("STORY_BRIEF","CORE","OUTLINE_BATCH","EPISODE_SCRIPT").stream().allMatch(type->currentDocs.stream().anyMatch(d->type.equals(text(d,"documentType"))&&"CONFIRMED".equals(text(d,"reviewStatus"))));
+        values.put("STORY",evaluation(story,"STORY_INCOMPLETE","创作需求、核心、集纲、单集剧本或场景尚未确认完成","DATA",mapper.valueToTree(currentDocs),artifacts(currentDocs)));
+        values.put("DIRECTOR",resources(shots,d->!d.path("stale").asBoolean(),"DIRECTOR_INCOMPLETE","尚未形成有效导演镜头计划"));
+        List<ObjectNode> storyboardArtifacts=store.list(STORYBOARD,projectId,null);
+        StageEvaluation boards=resources(storyboardArtifacts,b->b.path("selected").asBoolean()&&b.path("locked").asBoolean()&&"PASSED".equals(text(b,"qcStatus")),"STORYBOARD_NOT_LOCKED","项目缺少已质检并锁定的构图故事板");
+        StageEvaluation keyframes=resourcesForShots(projectId,shots,KEYFRAME,"KEYFRAME_NOT_LOCKED","镜头缺少已质检并锁定的关键帧");
+        ArrayNode imageArtifacts=mapper.createArrayNode();imageArtifacts.addAll(boards.artifacts);imageArtifacts.addAll(keyframes.artifacts);
+        values.put("IMAGE",evaluation(boards.success&&keyframes.success,"IMAGE_INCOMPLETE","故事板或关键帧尚未全部质检并锁定","DATA",imageArtifacts,mapper.convertValue(imageArtifacts,new com.fasterxml.jackson.core.type.TypeReference<List<String>>(){})));
         values.put("VIDEO",resourcesForShots(projectId,shots,VIDEO_TAKE,"VIDEO_NOT_LOCKED","镜头缺少已质检并锁定的视频"));
         List<ObjectNode> dialogue=store.list(DIALOGUE_LINE,projectId,null),audio=store.list(AUDIO_CLIP,projectId,null);
         boolean tts=!dialogue.isEmpty()&&dialogue.stream().allMatch(line->audio.stream().anyMatch(a->id(line).equals(text(a,"dialogueLineId"))&&a.path("locked").asBoolean()));
-        values.put("TTS",evaluation(tts,"TTS_INCOMPLETE","对白尚未全部生成并锁定配音","DATA",mapper.valueToTree(dialogue),artifacts(audio)));
+        values.put("AUDIO",evaluation(tts,"AUDIO_INCOMPLETE","对白尚未全部生成并锁定配音","DATA",mapper.valueToTree(dialogue),artifacts(audio)));
         List<ObjectNode> timelines=store.list(TIMELINE,projectId,null);
         values.put("TIMELINE",resources(timelines,t->true,"TIMELINE_MISSING","尚未生成时间线"));
         values.put("PREVIEW",resources(timelines,t->!text(t,"previewUrl").isBlank()&&!t.path("previewStale").asBoolean(),"PREVIEW_MISSING","当前剪辑版本尚未生成有效预览"));
-        values.put("FINAL_QC",resources(timelines,t->!text(t,"finalUrl").isBlank()&&t.path("finalTechnicalQa").path("passed").asBoolean()&&"PASSED".equals(text(t,"finalQaStatus")),"FINAL_QC_PENDING","终片技术与人工验收尚未全部通过"));
+        values.put("CREATIVE_QA",resources(timelines,t->"PASSED".equals(text(t,"finalQaStatus"))&&"PASS".equals(text(t.path("finalCreativeQa"),"decision")),"CREATIVE_QA_PENDING","终片创作验收尚未通过"));
+        values.put("FINAL",resources(timelines,t->!text(t,"finalUrl").isBlank()&&t.path("finalTechnicalQa").path("passed").asBoolean(),"FINAL_NOT_READY","终片尚未完成或技术质检未通过"));
         return values;
     }
 

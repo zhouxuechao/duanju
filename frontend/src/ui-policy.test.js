@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   canAcceptObservedDeviation, canConfirmStory, canResumePipeline, keyframePrimaryAction,
-  premiseReviewActions, reconciliationChoices, timelinePreviewLabel
+  pipelineStageLabel, premiseReviewActions, reconciliationChoices, timelinePreviewLabel
 } from './ui-policy.js'
 
 describe('production UI gates', () => {
@@ -38,5 +38,10 @@ describe('production UI gates', () => {
     expect(timelinePreviewLabel({ previewStale: false, previewUrl: '/current.mp4' })).toBe('重新生成预览')
     expect(canResumePipeline({ id: 'run-1', status: 'WAITING', resumeFromStage: 'VIDEO' })).toBe(true)
     expect(canResumePipeline({ id: 'run-1', status: 'SUCCESS' })).toBe(false)
+  })
+
+  it('presents canonical pipeline stages in production language', () => {
+    expect(['STORY','DIRECTOR','IMAGE','VIDEO','AUDIO','TIMELINE','PREVIEW','CREATIVE_QA','FINAL'].map(pipelineStageLabel))
+      .toEqual(['故事','导演','画面','视频','声音','剪辑','预览','创作质检','成片'])
   })
 })

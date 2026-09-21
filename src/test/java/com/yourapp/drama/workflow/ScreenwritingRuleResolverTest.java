@@ -46,4 +46,17 @@ class ScreenwritingRuleResolverTest {
         ObjectNode pack=resolver.resolve("SCRIPT",profile,format,"HONGGUO_STANDARD");
         assertThat(pack.path("upstreamSources").findValuesAsText("path")).contains("references/hongguo-beat-sheet.md");
     }
+
+    @Test void runtimePackContainsMarkdownAndFingerprintTracksBasePromptContent(){
+        ObjectNode profile=obj().put("storyType","SUSPENSE");profile.putArray("tropes").add("HIDDEN_IDENTITY");
+        ObjectNode format=new EpisodeFormatResolver().resolve(obj().put("targetDuration",24).put("distributionProfile","GENERAL"));
+
+        ObjectNode first=resolver.resolve("EPISODE_SCRIPT",profile,format,"GENERAL","base prompt A","DEEPSEEK_WRITER");
+        ObjectNode second=resolver.resolve("EPISODE_SCRIPT",profile,format,"GENERAL","base prompt B","DEEPSEEK_WRITER");
+
+        assertThat(first.path("content").asText()).contains("对白", "连续");
+        assertThat(first.path("loadedRules").isArray()).isTrue();
+        assertThat(first.path("loadedRules").path(0).path("contentHash").asText()).hasSize(64);
+        assertThat(first.path("fingerprint").asText()).isNotEqualTo(second.path("fingerprint").asText());
+    }
 }

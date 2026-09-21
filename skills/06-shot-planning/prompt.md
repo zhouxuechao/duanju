@@ -10,6 +10,8 @@ DIRECTOR_PLAN 先确定一条场景主表演轴。每镜 basicBlocking.axis 必�
 
 Blocking 的世界位置、人物起始位置、朝向、画面方向、主表演轴、门窗和关键物件位置由服务端从骨架与 currentState 注入。SHOT_DETAIL 的 blocking 只为本镜可见人物填写 characterId、framePosition 和 eyeLineTarget，不复述或改写世界状态。previousShotContinuity 是边界约束，镜头须继承其动作阶段和情绪。
 
+DIRECTOR_PLAN 的 basicBlocking.spatialAnchors 必须把每个关键主体与固定物、人物或道具之间的世界关系写成结构化锚点：subject、anchorObject、relation、facing、distance、side 六项缺一不可。连续镜头继承世界关系；换机位只允许改变画面投影，不能把 LEFT_OF 变成 RIGHT_OF、把相对墙面变成同一墙面，除非剧本中存在可见移动并被状态变化授权。SCREEN_LEFT、SCREEN_RIGHT 等画面侧别不得冒充世界方位。
+
 CameraPlan 必须可执行：明确机位位置、相机高度、主体距离、固定 lensPreset、水平朝向、俯仰角、主体画面位置、对焦点、景深、光线方向、运镜路径和速度。SHOT_DETAIL 只从 Schema 的焦段预设中选择，服务端会物化为数值 lensMm。机位变化服务于信息揭示、动作或情绪，不写“高级、电影感、国际级”等空泛评价。
 
 景深只控制清晰范围，不改变空间拓扑。即使背景虚化，CameraPlan 与 blocking 也必须保持每个固定设施的所属承载面、数量，以及设施之间的同面、对立、相邻、前后和内外关系，禁止把分属不同承载面的设施合并或用虚化掩盖布局矛盾。

@@ -19,6 +19,9 @@ import static com.yourapp.drama.workflow.Documents.*;
 /** Independent, reviewed reference sets. Dramatic keyframes never become identity anchors. */
 @Service
 public class AssetViewService {
+    private static final String ASSET_COMPILER_VERSION="4.0.0-asset-reference";
+    private static final String CHARACTER_COMPILER_VERSION="4.1.0-character-turnaround";
+    private static final String LOCATION_COMPILER_VERSION="4.2.0-location-topology";
     private final DocumentStore store;
     private final JobService jobs;
     private final ImageGenerator images;
@@ -39,7 +42,11 @@ public class AssetViewService {
         if(assets.isEmpty())throw new WorkflowException("ASSETS_REQUIRED","请先确认整季核心故事，生成角色定妆、场景和道具设定");
         ObjectNode result=obj();ArrayNode list=result.putArray("views");
         for(ObjectNode asset:assets){List<ObjectNode> existing=currentViews(projectId,id(core),id(asset));
-            if(!existing.isEmpty()){existing.forEach(list::add);continue;}
+            if(!existing.isEmpty()&&existing.stream().allMatch(this::compilerCurrent)){existing.forEach(list::add);continue;}
+            if(!existing.isEmpty()){
+                Set<String> invalidIds=new HashSet<>();for(ObjectNode old:existing){invalidIds.add(id(old));cancel(old);store.update(ASSET_VIEW,id(old),revision(old),old.deepCopy().put("stale",true).put("approved",false).put("status","STALE").put("staleReason","REFERENCE_COMPILER_CHANGED"));}
+                invalidateDependents(projectId,invalidIds);
+            }
             String kind=asset.hasNonNull("characterId")?"CHARACTER_LOOK":asset.hasNonNull("locationKey")?"LOCATION":"PROP";
             int version=store.list(ASSET_VIEW,projectId,id(asset)).stream().mapToInt(v->v.path("setVersion").asInt()).max().orElse(0)+1;
             List<ObjectNode> set=createSet(asset,kind,version,source(asset,kind));
@@ -87,7 +94,7 @@ public class AssetViewService {
             if(Set.of("QUEUED","RUNNING","RETRY_WAIT").contains(text(job,"status")))throw new WorkflowException("GENERATION_ACTIVE","这张参考图仍在生成中");
         }
         ObjectNode asset=asset(old);ObjectNode snapshot=source(asset,text(old,"assetKind"));
-        boolean resetAll=old.path("master").asBoolean()||!hash(snapshot).equals(text(old,"sourceHash"));
+        boolean resetAll=old.path("master").asBoolean()||!hash(snapshot).equals(text(old,"sourceHash"))||!compilerCurrent(old);
         List<ObjectNode> previous=store.list(ASSET_VIEW,project(old),text(old,"assetId")).stream().filter(v->v.path("setVersion").asInt()==old.path("setVersion").asInt()).toList();
         for(ObjectNode other:previous)if(!text(other,"generationJobId").isBlank()&&"RUNNING".equals(text(store.get(GENERATION_JOB,text(other,"generationJobId")),"status")))
             throw new WorkflowException("GENERATION_ACTIVE","本套素材还有视图正在生成，请等待后再替换版本，避免重复付费");
@@ -101,7 +108,7 @@ public class AssetViewService {
             if(text(v,"view").equals(text(old,"view"))){replacement=v;continue;}
             Optional<ObjectNode> prior=previous.stream().filter(p->text(p,"view").equals(text(v,"view"))).findFirst();
             if(prior.isPresent()&&prior.get().path("approved").asBoolean()){
-                ObjectNode copy=v.deepCopy();for(String field:List.of("providerUrl","providerUrlExpiresAt","providerRequestId","archiveUrl","archiveKey","archiveContentType","archiveStatus","simulated","model","approvedAt"))if(prior.get().has(field))copy.set(field,prior.get().get(field));
+                ObjectNode copy=v.deepCopy();for(String field:List.of("providerUrl","providerUrlExpiresAt","providerRequestId","archiveUrl","archiveKey","archiveContentType","archiveStatus","simulated","model","approvedAt","compilerVersion","normalizedPromptHash","referenceBindingsHash","referenceAuthorityFingerprint","continuitySnapshotHash","providerCapabilitiesVersion"))if(prior.get().has(field))copy.set(field,prior.get().get(field));
                 copy.put("approved",true).put("status","APPROVED").put("reusedFromViewId",id(prior.get()));
                 if(!copy.path("master").asBoolean())copy.putArray("referenceViewIds").add(newMasterId);
                 store.update(ASSET_VIEW,id(v),revision(v),copy);
@@ -156,7 +163,7 @@ public class AssetViewService {
 
     public List<ObjectNode> approvedReferences(String projectId,String coreId,String assetId){
         List<ObjectNode> views=currentViews(projectId,coreId,assetId);
-        if(views.isEmpty()||views.size()!=viewsFor(text(views.getFirst(),"assetKind")).size()||views.stream().anyMatch(v->!v.path("approved").asBoolean()||!isCurrent(v)))return List.of();
+        if(views.isEmpty()||views.size()!=viewsFor(text(views.getFirst(),"assetKind")).size()||views.stream().anyMatch(v->!v.path("approved").asBoolean()||!isCurrent(v)||!compilerCurrent(v)))return List.of();
         return views;
     }
     public void requireReady(String projectId,String coreId,List<String> assetIds){for(String assetId:new LinkedHashSet<>(assetIds))if(approvedReferences(projectId,coreId,assetId).isEmpty())throw new WorkflowException("ASSET_VIEWS_REVIEW_REQUIRED","本镜头使用的素材多视图尚未全部确认，或素材设定已更新；请先完成素材审查");}
@@ -187,26 +194,54 @@ public class AssetViewService {
         }else if(!baselineLook(current).isBlank()){
             ObjectNode baseline=currentViews(project(current),text(current,"coreId"),baselineLook(current)).stream().filter(v->v.path("master").asBoolean()&&v.path("approved").asBoolean()).findFirst().orElseThrow(()->new WorkflowException("IDENTITY_ANCHOR_REQUIRED","请先确认这个演员的基础定妆主图，后续服装才能保持同一张脸"));references.add(id(baseline));
         }
-        String compiledPrompt=prompt(current,!references.isEmpty());ArrayNode bindings=JsonNodeFactory.instance.arrayNode();for(JsonNode referenceId:references){ObjectNode reference=store.get(ASSET_VIEW,referenceId.asText());ObjectNode binding=obj().put("referenceId",id(reference)).put("sourceResourceId",text(reference,"assetId")).put("sourceVersion",reference.path("setVersion").asInt()).put("role","ASSET_IDENTITY_REFERENCE").put("authorityPriority",100).put("instructions","只控制同一素材的身份、几何、材质和纹理，不转移姿势、背景或相机");binding.putArray("controls").add("assetIdentity").add("geometry").add("material").add("texture");binding.putArray("mustNotTransfer").add("pose").add("background").add("camera");bindings.add(binding);}
-        String bindingHash=hash(bindings);ObjectNode input=obj().put("assetViewId",id(current)).put("coreId",text(current,"coreId")).put("sourceHash",text(current,"sourceHash")).put("imageTaskType","ASSET_REFERENCE").put("compilerVersion","4.0.0-asset-reference").put("normalizedPromptHash",hash(TextNode.valueOf(compiledPrompt.replaceAll("\\s+"," ").trim()))).put("referenceBindingsHash",bindingHash).put("referenceAuthorityFingerprint",bindingHash).put("continuitySnapshotHash",text(current,"sourceHash")).put("providerCapabilitiesVersion",ProviderCapabilityRegistry.VERSION).put("prompt",compiledPrompt);input.set("sourceSnapshot",current.path("sourceSnapshot").deepCopy());input.set("referenceViewIds",references);input.set("referenceBindings",bindings);
-        if("LOCATION".equals(text(current,"assetKind")))input.set("viewCamera",locationCamera(text(current,"view")));
+        String compiledPrompt=prompt(current,references);ArrayNode bindings=JsonNodeFactory.instance.arrayNode();for(JsonNode referenceId:references)bindings.add(referenceBinding(current,store.get(ASSET_VIEW,referenceId.asText())));
+        String bindingHash=hash(bindings);ObjectNode input=obj().put("assetViewId",id(current)).put("coreId",text(current,"coreId")).put("sourceHash",text(current,"sourceHash")).put("imageTaskType","ASSET_REFERENCE").put("compilerVersion",compilerVersion(current)).put("normalizedPromptHash",hash(TextNode.valueOf(compiledPrompt.replaceAll("\\s+"," ").trim()))).put("referenceBindingsHash",bindingHash).put("referenceAuthorityFingerprint",bindingHash).put("continuitySnapshotHash",text(current,"sourceHash")).put("providerCapabilitiesVersion",ProviderCapabilityRegistry.VERSION).put("prompt",compiledPrompt);input.set("sourceSnapshot",current.path("sourceSnapshot").deepCopy());input.set("referenceViewIds",references);input.set("referenceBindings",bindings);
+        if("LOCATION".equals(text(current,"assetKind"))){input.set("viewCamera",locationCamera(text(current,"view")));input.set("locationTopology",locationTopology(current.path("sourceSnapshot")));}
+        if("CHARACTER_LOOK".equals(text(current,"assetKind")))input.set("viewCamera",characterCamera(text(current,"view")));
         ObjectNode job=jobs.enqueue(project(current),null,"ASSET_IMAGE",input,"asset-view:"+id(current));jobs.mutate(id(job),j->j.put("maxAttempts",1));
         ObjectNode next=current.deepCopy().put("status","GENERATING").put("generationJobId",id(job));next.set("referenceViewIds",references.deepCopy());return store.update(ASSET_VIEW,id(current),revision(current),next);
     }
     private boolean masterCanStart(ObjectNode view){String base=baselineLook(view);return base.isBlank()||currentViews(project(view),text(view,"coreId"),base).stream().anyMatch(v->v.path("master").asBoolean()&&v.path("approved").asBoolean()&&isCurrent(v));}
     private String baselineLook(ObjectNode view){if(!"CHARACTER_LOOK".equals(text(view,"assetKind")))return "";String base=text(store.get(CHARACTER,required(view,"characterId")),"baseLookId");return base.equals(text(view,"assetId"))?"":base;}
-    private String prompt(ObjectNode view,boolean references){
+    private ObjectNode referenceBinding(ObjectNode target,ObjectNode reference){
+        ObjectNode binding=obj().put("referenceId",id(reference)).put("sourceResourceId",text(reference,"assetId")).put("sourceVersion",reference.path("setVersion").asInt()).put("authorityPriority",100);
+        ArrayNode controls=binding.putArray("controls"),mustNotTransfer=binding.putArray("mustNotTransfer");
+        if("LOCATION".equals(text(target,"assetKind"))){
+            binding.put("role","LOCATION_TOPOLOGY_REFERENCE").put("instructions","继承同一地点的世界空间拓扑、承载面归属、固定设施几何、材质与光源世界位置；只按 viewCamera 改变透视、遮挡和画面投影");
+            controls.add("worldTopology").add("surfaceAssignments").add("fixedFeatureGeometry").add("material").add("lightingAnchors");
+            mustNotTransfer.add("camera").add("projection").add("occlusion").add("layoutViewRendering");
+        }else{
+            binding.put("role","ASSET_IDENTITY_REFERENCE").put("instructions","只控制同一素材的身份、几何、材质和纹理，不转移姿势、背景或相机");
+            controls.add("assetIdentity").add("geometry").add("material").add("texture");
+            mustNotTransfer.add("pose").add("background").add("camera");
+        }
+        return binding;
+    }
+    private String prompt(ObjectNode view,ArrayNode referenceIds){
         String angle=switch(text(view,"view")){case "FRONT"->"正面，按世界坐标的正前方";case "LEFT"->"左侧面，沿人物/物件左侧世界轴线观察";case "RIGHT"->"右侧面，沿人物右侧世界轴线观察";case "BACK"->"背面，沿背部世界轴线观察";case "LAYOUT"->"正上方俯视平面布局，标出入口、出口和固定地标相对位置";case "REVERSE"->"与正面机位相对的反向空间视角，不能翻转布局";case "SIDE"->"场景侧向视角，沿固定空间轴线保留深度";case "SCALE"->"道具比例视角，完整物件旁放无文字一米比例杆";default->throw new IllegalArgumentException("未知参考视角");};
         if("LOCATION".equals(text(view,"assetKind")))angle=locationCamera(text(view,"view")).toString();
+        if("CHARACTER_LOOK".equals(text(view,"assetKind")))angle=characterCamera(text(view,"view")).toString();
         String skill=loadPrompt(view.path("assetKind").asText());
-        String metadata="\\n本次执行参数（供模型理解，不要在图片中显示，也不要返回 JSON）：assetKind="+text(view,"assetKind")+"；assetId="+text(view,"assetId")+"；view="+text(view,"view")+"；sourceSnapshot="+view.path("sourceSnapshot")+"；referenceViewIds="+view.path("referenceViewIds")+"。\\n";
-        String anchor=switch(text(view,"assetKind")){case "CHARACTER_LOOK"->"这是角色身份与定妆参考图。角色身份锚点与服装定妆分开：不得把手持道具、场景、剧情动作或临时姿势固化到人物主图；基础身份主图只确认脸、发型、体态和比例，服装主图只在此身份上确认本套衣服。";case "LOCATION"->"这是空场景参考图。所有入口、出口、门窗、道路、井、树和固定地标按同一世界坐标保留；门窗必须保持同一开关状态；不同视角只能改变相机位置，不能旋转、镜像或移动建筑。";default->"这是单件道具参考图。保持轮廓、尺寸比例、材质、重量感、颜色、纹理、刻痕、磨损和当前状态；不要出现手、人、第二件同类道具或文字。";};
-        String refs=references?"输入参考图是已经确认的同一素材锚点；严格保持身份、几何、材质和纹理，只改变观察视角。":"这是本套多视图的主参考，生成后需人工确认后才能成为其它视角锚点。";
+        String metadata="\\n本次执行参数（供模型理解，不要在图片中显示，也不要返回 JSON）：assetKind="+text(view,"assetKind")+"；assetId="+text(view,"assetId")+"；view="+text(view,"view")+"；sourceSnapshot="+view.path("sourceSnapshot")+"；referenceViewIds="+referenceIds+"。\\n";
+        String anchor=switch(text(view,"assetKind")){case "CHARACTER_LOOK"->"这是角色身份与定妆参考图。角色身份锚点与服装定妆分开：不得把手持道具、场景、剧情动作或临时姿势固化到人物主图；基础身份主图只确认脸、发型、体态和比例，服装主图只在此身份上确认本套衣服。人物保持同一世界朝向，只移动相机；脸侧、耳朵、肩膀、手和不对称特征必须服从 viewCamera。固定配饰不得换边，例如左肩到右胯的背带在四视图中始终连接同一身体锚点，不能按画面斜线照抄。";case "LOCATION"->"这是空场景参考图。locationBible 是唯一空间真相：逐个核对 surfaces 的承载面，以及每个 fixedFeatures.featureId 的 supportSurfaceId、worldPosition、size、state、appearance；不得遗漏、增添、复制或换面。prohibitedElements 中的内容不得出现。所有入口、出口、门窗、道路、井、树和固定地标按同一世界坐标保留；门窗必须保持同一开关状态；不同视角只能改变相机位置，不能旋转、镜像或移动建筑。";default->"这是单件道具参考图。保持轮廓、尺寸比例、材质、重量感、颜色、纹理、刻痕、磨损和当前状态；不要出现手、人、第二件同类道具或文字。";};
+        String refs=!referenceIds.isEmpty()?"输入参考图是已经确认的同一素材锚点；严格保持身份、几何、材质和纹理，只改变观察视角。":"这是本套多视图的主参考，生成后需人工确认后才能成为其它视角锚点。";
         return skill+metadata+"本视角："+angle+"。"+anchor+refs+"。只生成一张单视角制作参考图，不要拼图、四宫格、重复主体、文字水印或 JSON。";
     }
     private ObjectNode locationCamera(String view){
         return LocationViewProjection.describe(view);
     }
+    private ObjectNode characterCamera(String view){
+        ObjectNode camera=obj().put("view",view).put("subjectWorldForward","FIXED").put("subjectPose","UNCHANGED");
+        return switch(view){
+            case "FRONT"->camera.put("cameraPosition","SUBJECT_FRONT").put("cameraAzimuthDegrees",0).put("visibleFaceSide","FRONT").put("noseScreenDirection","TOWARD_CAMERA").put("nearBodySide","BOTH");
+            case "LEFT"->camera.put("cameraPosition","SUBJECT_LEFT").put("cameraAzimuthDegrees",-90).put("visibleFaceSide","SUBJECT_LEFT").put("noseScreenDirection","FRAME_RIGHT").put("nearBodySide","SUBJECT_LEFT");
+            case "RIGHT"->camera.put("cameraPosition","SUBJECT_RIGHT").put("cameraAzimuthDegrees",90).put("visibleFaceSide","SUBJECT_RIGHT").put("noseScreenDirection","FRAME_LEFT").put("nearBodySide","SUBJECT_RIGHT");
+            case "BACK"->camera.put("cameraPosition","SUBJECT_BACK").put("cameraAzimuthDegrees",180).put("visibleFaceSide","NONE").put("noseScreenDirection","AWAY_FROM_CAMERA").put("nearBodySide","BACK");
+            default->throw new IllegalArgumentException("未知人物参考视角");
+        };
+    }
+    private String compilerVersion(ObjectNode view){return switch(text(view,"assetKind")){case "CHARACTER_LOOK"->CHARACTER_COMPILER_VERSION;case "LOCATION"->LOCATION_COMPILER_VERSION;default->ASSET_COMPILER_VERSION;};}
+    private boolean compilerCurrent(ObjectNode view){return !view.hasNonNull("providerUrl")||compilerVersion(view).equals(text(view,"compilerVersion"));}
     private String loadPrompt(String kind){
         String folder=switch(kind){case "CHARACTER_LOOK"->"09-character-design";case "LOCATION"->"10-location-design";case "PROP"->"11-prop-design";default->throw new IllegalArgumentException("未知素材类型："+kind);};
         try(var stream=new org.springframework.core.io.ClassPathResource("development-skills/"+folder+"/prompt.md").getInputStream()){return new String(stream.readAllBytes(),java.nio.charset.StandardCharsets.UTF_8);}
@@ -224,10 +259,16 @@ public class AssetViewService {
             result.set("asset",visualFields(asset,List.of("id","characterId","lookKey","name","description","visualPrompt","clothing","accessories")));
             ObjectNode character=store.get(CHARACTER,required(asset,"characterId"));
             result.set("character",visualFields(character,List.of("id","characterKey","name","visualIdentity","identityTraits","baseLookId")));
-        }else if("LOCATION".equals(kind))result.set("asset",visualFields(asset,List.of("id","locationKey","name","description","locationBible","visualIdentity")));
+        }else if("LOCATION".equals(kind)){result.set("asset",visualFields(asset,List.of("id","locationKey","name","description","locationBible","visualIdentity")));locationTopology(result);}
         else if("PROP".equals(kind))result.set("asset",visualFields(asset,List.of("id","propKey","name","description","propBible","visualIdentity","state")));
         else throw new IllegalArgumentException("未知素材类型："+kind);
         return result;
+    }
+    private JsonNode locationTopology(JsonNode snapshot){
+        JsonNode bible=snapshot.path("asset").path("locationBible");
+        for(String field:List.of("coordinateSystem","dimensions","surfaces","fixedFeatures","spatialRelations","lightSources","visualInvariants","prohibitedElements"))
+            if(!bible.has(field))throw new WorkflowException("LOCATION_TOPOLOGY_REQUIRED","场景圣经缺少结构化空间字段 "+field+"；请先重新生成并确认整季核心故事，不能让图片模型自行猜测场景布局");
+        return bible.deepCopy();
     }
     private ObjectNode visualFields(ObjectNode source,List<String> fields){ObjectNode result=obj();for(String field:fields)if(source.has(field))result.set(field,source.get(field).deepCopy());return result;}
     private ObjectNode description(ObjectNode value){ObjectNode result=value.deepCopy();METADATA.forEach(result::remove);return result;}

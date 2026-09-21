@@ -1,0 +1,1 @@
+Creative instructions belong in the text prompt. Provider API parameters such as model, ratio, resolution, duration, watermark, seed, service tier, and lock mode belong only in the request parameter object.

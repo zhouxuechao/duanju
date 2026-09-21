@@ -33,3 +33,8 @@ export function timelinePreviewLabel(timeline) {
 export function canResumePipeline(run) {
   return Boolean(run?.id && run.status === 'WAITING' && run.resumeFromStage)
 }
+
+export function pipelineStageLabel(stage) {
+  return ({ PREFLIGHT: '生产准备', STORY: '故事', DIRECTOR: '导演', IMAGE: '画面', VIDEO: '视频',
+    AUDIO: '声音', TIMELINE: '剪辑', PREVIEW: '预览', CREATIVE_QA: '创作质检', FINAL: '成片' })[stage] || stage
+}

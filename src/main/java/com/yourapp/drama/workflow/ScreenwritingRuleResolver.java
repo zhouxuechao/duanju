@@ -4,18 +4,29 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.yourapp.drama.production.RulePackAssembler;
+import com.yourapp.drama.production.RulePackBudgeter;
+import com.yourapp.drama.production.RulePackFingerprint;
+import com.yourapp.drama.production.RulePackResolver;
+import com.yourapp.drama.production.RuntimeRulePackLoader;
+import com.yourapp.drama.production.CasePatternRetriever;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HexFormat;
-import java.util.Locale;
-import java.util.Map;
-import java.util.LinkedHashMap;
+import java.util.*;
 
 /** Builds a traceable rule pack from data dimensions, without genre-specific execution branches. */
 @Component
 public class ScreenwritingRuleResolver {
+    public static final String STORY_COMPILER_VERSION = "story-prompt-compiler-v3";
+    private static final int RULE_BUDGET_CHARS = 48_000;
+    private final RulePackResolver runtimeResolver = new RulePackResolver(new RuntimeRulePackLoader());
+    private final RulePackAssembler assembler = new RulePackAssembler();
+    private final RulePackBudgeter budgeter = new RulePackBudgeter();
+    private final RulePackFingerprint fingerprint = new RulePackFingerprint();
+    private final CasePatternRetriever casePatterns = new CasePatternRetriever();
     private static final Map<String, String> TYPE_RULES = Map.ofEntries(
             Map.entry("GROWTH", "TYPE_GROWTH"), Map.entry("SUSPENSE", "TYPE_SUSPENSE"),
             Map.entry("ROMANCE", "TYPE_ROMANCE"), Map.entry("REVENGE", "TYPE_REVENGE"),
@@ -25,6 +36,11 @@ public class ScreenwritingRuleResolver {
     private static final Map<String, ObjectNode> STORY_TYPES = storyTypes();
 
     public ObjectNode resolve(String phase, JsonNode storyProfile, JsonNode episodeFormat, String distributionProfile) {
+        return resolve(phase, storyProfile, episodeFormat, distributionProfile, "", "DEEPSEEK_WRITER");
+    }
+
+    public ObjectNode resolve(String phase, JsonNode storyProfile, JsonNode episodeFormat, String distributionProfile,
+                              String basePromptContent, String modelProfile) {
         String normalizedPhase = normalize(phase, "STORY");
         String storyType = normalize(storyProfile.path("storyType").asText(), "OTHER");
         String family = normalize(episodeFormat.path("family").asText(), "CUSTOM");
@@ -37,33 +53,37 @@ public class ScreenwritingRuleResolver {
         if (!"GENERAL".equals(distribution)) add(rules, "DIST_" + distribution, "DISTRIBUTION", distribution);
         for (JsonNode trope : storyProfile.path("tropes")) add(rules, "TROPE_" + normalize(trope.asText(), "OTHER"), "TROPE", trope.asText());
 
-        StringBuilder identity = new StringBuilder(normalizedPhase);
-        rules.forEach(rule -> identity.append('|').append(rule.path("ruleId").asText()));
+        List<String> tropes = new ArrayList<>();
+        storyProfile.path("tropes").forEach(value -> tropes.add(value.asText()));
+        var selectedPacks = runtimeResolver.story(normalizedPhase, canonicalType, tropes, distribution);
+        var assembled = assembler.assemble(selectedPacks);
+        var budgeted = budgeter.fit(assembled, RULE_BUDGET_CHARS);
+        Map<String,String> commits = new TreeMap<>(assembled.upstreamCommits());
+        String resolvedFingerprint = fingerprint.compute(new RulePackFingerprint.Context(
+                basePromptContent, selectedPacks, canonicalType, episodeFormat.path("profileId").asText(family),
+                distribution, modelProfile, commits, STORY_COMPILER_VERSION));
         ObjectNode result = Documents.obj().put("phase", normalizedPhase).put("storyType", storyType)
                 .put("episodeFormatId", episodeFormat.path("profileId").asText()).put("distributionProfile", distribution)
-                .put("fingerprint", sha256(identity.toString()));
+                .put("fingerprint", resolvedFingerprint).put("compilerVersion", STORY_COMPILER_VERSION)
+                .put("content", budgeted.content()).put("contentChars", budgeted.content().length())
+                .put("budgetChars", RULE_BUDGET_CHARS).put("coreExceededBudget", budgeted.coreExceededBudget());
         result.set("rules", rules);
         result.set("storyTypeRule", STORY_TYPES.getOrDefault(storyType,
                 STORY_TYPES.getOrDefault(alias(storyType), STORY_TYPES.get("OTHER"))).deepCopy());
-        ArrayNode sources = JsonNodeFactory.instance.arrayNode();
-        addSource(sources, "references/screenplay-compliance-rules.md", "所有创作阶段的剧作合规底线");
-        if ("CORE".equals(normalizedPhase)) {
-            addSource(sources, "references/character-bible.md", "人物叙事圣经");
-            addSource(sources, "references/emotion-flow-roundtrip.md", "情绪契约与单元推进");
-        } else if ("OUTLINE".equals(normalizedPhase) || "OUTLINE_BATCH".equals(normalizedPhase)) {
-            addSource(sources, "references/golden-3s-hook-library.md", "按功能选择开场钩子");
-            addSource(sources, "references/cliffhanger-master-formulas.md", "按新增问题设计断章");
-            addSource(sources, "references/emotion-flow-roundtrip.md", "单元和单集情绪推进");
-            addSource(sources, "templates/episode-format.md", "按篇幅组织节拍");
-        } else if ("SCRIPT".equals(normalizedPhase) || "EPISODE_SCRIPT".equals(normalizedPhase) || "STORY_QA".equals(normalizedPhase)) {
-            addSource(sources, "references/dialogue-doctor-anti-ai.md", "对白自然度与人物语言指纹");
-            addSource(sources, "references/golden-3s-hook-library.md", "开场观看问题");
-            addSource(sources, "references/cliffhanger-master-formulas.md", "集尾观看动力");
-            addSource(sources, "templates/episode-format.md", "正文节拍和长篇双回合");
+        ArrayNode selectedPatterns=result.putArray("casePatterns");String audience=storyProfile.path("audience").asText("GENERAL"),tone=storyProfile.path("tones").path(0).asText("");
+        for(var pattern:casePatterns.retrieve(canonicalType,tropes,audience,tone,family,3))selectedPatterns.add(Documents.obj().put("patternId",pattern.id()).put("structure",pattern.structure()).put("rhythm",pattern.rhythm()).put("informationGap",pattern.informationGap()).put("payoffMode",pattern.payoffMode()).put("plotCopied",false));
+        ArrayNode sources = JsonNodeFactory.instance.arrayNode(), loaded = JsonNodeFactory.instance.arrayNode(), dropped = JsonNodeFactory.instance.arrayNode();
+        for (RuntimeRulePackLoader.RuleFragment rule : budgeted.included()) {
+            sources.add(Documents.obj().put("path", rule.sourcePath()).put("purpose", rule.namespace()+"/"+rule.ruleId())
+                    .put("sourceRepo",rule.sourceRepo()).put("upstreamCommit",rule.upstreamCommit()));
+            loaded.add(Documents.obj().put("ruleId",rule.ruleId()).put("namespace",rule.namespace().name())
+                    .put("contentHash",rule.contentHash()).put("priority",rule.priority()).put("sourceRepo",rule.sourceRepo())
+                    .put("upstreamCommit",rule.upstreamCommit()).put("sourcePath",rule.sourcePath()));
         }
-        if (distribution.startsWith("HONGGUO"))
-            addSource(sources, "references/hongguo-beat-sheet.md", "仅此发行配置启用的平台节拍");
+        budgeted.droppedRuleIds().forEach(dropped::add);
         result.set("upstreamSources", sources);
+        ObjectNode commitNode=Documents.obj();commits.forEach(commitNode::put);
+        result.set("loadedRules",loaded);result.set("droppedRuleIds",dropped);result.set("upstreamCommits",commitNode);
         return result;
     }
 

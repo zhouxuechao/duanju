@@ -3,6 +3,8 @@ package com.yourapp.drama.provider.volcengine;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.yourapp.drama.model.VideoGenerator;
 import com.yourapp.drama.model.ProviderException;
+import com.yourapp.drama.production.ProviderCapabilityRegistry;
+import com.yourapp.drama.production.VideoModelProfile;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -13,12 +15,25 @@ import java.util.Set;
 public final class VolcengineVideoGenerator implements VideoGenerator {
     private final ArkHttpClient http;
     private final VolcengineProperties properties;
+    private final ProviderCapabilityRegistry capabilities;
     public VolcengineVideoGenerator(ArkHttpClient http, VolcengineProperties properties) {
-        this.http = http; this.properties = properties;
+        this(http,properties,new ProviderCapabilityRegistry());
     }
+    public VolcengineVideoGenerator(ArkHttpClient http, VolcengineProperties properties,ProviderCapabilityRegistry capabilities) {this.http=http;this.properties=properties;this.capabilities=capabilities;}
     @Override public Submission submit(VideoRequest request) {
+        Map<String,Object> body=requestBody(request);
+        ArkHttpClient.Response response = http.exchange("POST", "/contents/generations/tasks", body, true);
+        String id = ArkHttpClient.text(response.json().path("id"));
+        if (id == null || !id.matches("[A-Za-z0-9_-]{1,200}"))
+            throw new ProviderException("MISSING_TASK_ID", "提交未返回可查询的任务 ID；请核对模型后台，勿重复付费提交", response.requestId(), 200, false, true);
+        return new Submission(id, response.requestId(), false);
+    }
+    /** Exact sanitized provider payload used for audit evidence before a billable submit. */
+    public Map<String,Object> requestBodySnapshot(VideoRequest request){return Map.copyOf(requestBody(request));}
+    private Map<String,Object> requestBody(VideoRequest request){
         ProviderInputs.prompt(request.prompt());
         boolean firstFrame = request.firstFrameUrl() != null && !request.firstFrameUrl().isBlank();
+        validateLimits(request,firstFrame);
         boolean fullModal = request.references().stream().anyMatch(r -> r.role() != null && r.role().startsWith("reference_"));
         if (fullModal && (firstFrame || request.references().stream().anyMatch(r -> "first_frame".equals(r.role()) || "last_frame".equals(r.role()))))
             throw ProviderException.invalid("REFERENCE_ROUTE_CONFLICT", "首尾帧路线与全模态参考路线不能同时提交；请选择独立首帧或把关键帧作为 reference_image");
@@ -42,11 +57,7 @@ public final class VolcengineVideoGenerator implements VideoGenerator {
             content.add(media(ref.type(), ref.url(), ref.role()));
         }
         body.put("content", content);
-        ArkHttpClient.Response response = http.exchange("POST", "/contents/generations/tasks", body, true);
-        String id = ArkHttpClient.text(response.json().path("id"));
-        if (id == null || !id.matches("[A-Za-z0-9_-]{1,200}"))
-            throw new ProviderException("MISSING_TASK_ID", "提交未返回可查询的任务 ID；请核对模型后台，勿重复付费提交", response.requestId(), 200, false, true);
-        return new Submission(id, response.requestId(), false);
+        return body;
     }
     @Override public VideoTask poll(String taskId) {
         ProviderInputs.taskId(taskId);
@@ -74,13 +85,10 @@ public final class VolcengineVideoGenerator implements VideoGenerator {
         http.exchange("DELETE", "/contents/generations/tasks/" + taskId, null, false);
     }
     private Map<String, Object> media(String type, String url, String role) { return Map.of("type", type, type, Map.of("url", url), "role", role); }
+    private void validateLimits(VideoRequest request,boolean firstFrame){VideoModelProfile.ReferenceLimits limits=capabilities.profile(properties.getVideoModel()).hardLimits();int images=firstFrame?1:0,videos=0,audios=0;for(Reference ref:request.references())switch(ref.type()){case "image_url"->images++;case "video_url"->videos++;case "audio_url"->audios++;default->{}}int total=images+videos+audios;if(images>limits.images()||videos>limits.videos()||audios>limits.audios()||total>limits.total())throw ProviderException.invalid("REFERENCE_LIMIT_EXCEEDED","REFERENCE_LIMIT_EXCEEDED: 当前模型引用数量超过硬限制 images="+images+", videos="+videos+", audios="+audios+", total="+total);}
     private int providerDuration(double requested,boolean firstFrame) {
         int rounded=(int)Math.ceil(requested);
-        // The current Seedance 2.5 I2V route rejects four-second submissions;
-        // preserve short atomic shots by producing the smallest accepted clip
-        // and trim it back to the authored duration during composition.
-        if(firstFrame&&properties.getVideoModel().startsWith("doubao-seedance-2-5")&&rounded<5)return 5;
-        return properties.getVideoSupportedDurations().stream().sorted().filter(v->v>=rounded).findFirst()
-                .orElse(properties.getVideoSupportedDurations().stream().mapToInt(Integer::intValue).max().orElse(rounded));
+        List<Integer> supported=capabilities.profile(properties.getVideoModel()).supportedDurations();
+        return supported.stream().sorted().filter(v->v>=rounded).findFirst().orElse(supported.stream().mapToInt(Integer::intValue).max().orElse(rounded));
     }
 }

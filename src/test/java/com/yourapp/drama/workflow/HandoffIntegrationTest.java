@@ -23,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.dao.DataIntegrityViolationException;
 import java.io.ByteArrayInputStream;
 import java.time.Instant;
+import java.util.List;
 import static com.yourapp.drama.persistence.ResourceKind.*;
 import static com.yourapp.drama.workflow.Documents.*;
 import static org.assertj.core.api.Assertions.*;
@@ -73,12 +74,27 @@ class HandoffIntegrationTest {
         verifyNoInteractions(storage,fetcher);
         ObjectNode take=store.list(VIDEO_TAKE,projectId,shotId).getFirst();
         assertThat(text(take,"sourceProviderUrlSnapshot")).isEqualTo(ORIGINAL);assertThat(text(take,"sequenceCompilerVersion")).isEqualTo("4.0.0-sequence");assertThat(text(take,"sequenceRelation")).isEqualTo("SEQUENCE_FIRST_CLIP");assertThat(take.path("sequenceStateFingerprint").asText()).hasSize(64);assertThat(text(store.get(KEYFRAME,id(frame)),"handoffStatus")).isEqualTo("HANDED_OFF");
+        for(String field:List.of("modelId","modelProfileVersion","taskType","lockMode","route","activatedMaterials","excludedMaterials","referenceMapping","referenceAuthority","referenceBudget","providerParameters","prompt","rulePackFingerprint"))assertThat(take.has(field)).as(field).isTrue();
         worker.tick();
         assertThat(text(store.get(GENERATION_JOB,id(job)),"status")).isEqualTo("SUCCESS");
         assertThat(text(store.get(VIDEO_TAKE,id(take)),"videoUrl")).endsWith("result.mp4");
         verify(storage).put(startsWith("keyframes/"),any(),eq("image/png"));
         assertThat(text(store.get(KEYFRAME,id(frame)),"providerUrl")).isEqualTo(ORIGINAL);
         assertThat(text(store.get(KEYFRAME,id(frame)),"archiveUrl")).isEqualTo("/api/media/archive.png");
+    }
+    @Test void videoRequestPreviewDoesNotSubmitOrEnqueueAndNeverExposesSecrets(){
+        ObjectNode frame=generateFrame();workflow.review(KEYFRAME,id(frame),obj().put("passed",true));workflow.lock(KEYFRAME,id(frame),obj().put("generateVideo",false));
+        int jobsBefore=store.list(GENERATION_JOB,projectId,null).size();
+
+        ObjectNode preview=workflow.videoPreview(id(frame),obj());
+
+        assertThat(preview.path("modelId").asText()).isNotBlank();
+        assertThat(preview.path("route").asText()).isEqualTo("NATIVE_FIRST_FRAME");
+        assertThat(preview.path("referenceMapping")).isNotEmpty();
+        assertThat(preview.path("providerParameters").path("generate_audio").asBoolean()).isFalse();
+        assertThat(preview.toString().toLowerCase()).doesNotContain("authorization","api_key","apikey","secret");
+        assertThat(store.list(GENERATION_JOB,projectId,null)).hasSize(jobsBefore);
+        verify(videos,never()).submit(any());
     }
     @Test void videoTakeKeepsProviderRequestIdSeparateFromTaskId(){
         ObjectNode frame=generateFrame();workflow.review(KEYFRAME,id(frame),obj().put("passed",true));workflow.lock(KEYFRAME,id(frame),obj().put("generateVideo",false));
@@ -87,6 +103,36 @@ class HandoffIntegrationTest {
 
         assertThat(text(take,"providerRequestId")).isEqualTo("request-1");
         assertThat(text(take,"providerTaskId")).isEqualTo("video-task-1");
+    }
+    @Test void fullModalReferenceStillArchivesTheSourceKeyframeProviderUrl(){
+        ObjectNode current=store.get(SHOT,shotId),earlier=current.deepCopy();
+        for(String field:List.of("id","revision","createdAt","updatedAt"))earlier.remove(field);
+        earlier.put("shotNo",1).put("relationToPrevious","ESTABLISHING");
+        ObjectNode previousShot=store.create(SHOT,earlier);
+        ObjectNode previousFrame=store.create(KEYFRAME,obj().put("projectId",projectId).put("shotId",id(previousShot))
+            .put("provider","VOLCENGINE").put("providerUrl","https://image.volces.com/previous.png").put("version",1));
+        ObjectNode previousTake=obj().put("projectId",projectId).put("shotId",id(previousShot)).put("videoUrl","https://video.volces.com/previous.mp4")
+            .put("sourceKeyframeId",id(previousFrame)).put("sourceProviderUrlSnapshot","https://image.volces.com/previous.png")
+            .put("providerStatus","SUCCEEDED").put("qcStatus","PASSED").put("selected",true).put("locked",true).put("continuationDepth",0);
+        previousTake.set("observedState",obj().put("locationId",text(earlier,"locationId")));
+        store.create(VIDEO_TAKE,previousTake);
+        store.update(SHOT,shotId,revision(current),current.deepCopy().put("shotNo",2).put("relationToPrevious","CONTINUOUS").put("sequenceRelation","SEAMLESS_CONTINUATION"));
+        ObjectNode frame=generateFrame();workflow.review(KEYFRAME,id(frame),obj().put("passed",true));workflow.lock(KEYFRAME,id(frame),obj().put("generateVideo",false));
+
+        ObjectNode job=workflow.video(id(frame),obj().put("requestKey","full-modal-archive-source"));
+        assertThat(text(job.path("inputSnapshot"),"videoRequestRoute")).isEqualTo("FULL_MODAL_REFERENCE");
+        assertThat(job.path("inputSnapshot").has("firstFrameProviderUrl")).isFalse();
+        worker.tick();
+
+        verify(videos).submit(argThat(request->request.firstFrameUrl()==null));
+        ObjectNode archive=store.list(GENERATION_JOB,projectId,null).stream()
+            .filter(candidate->"ARCHIVE".equals(text(candidate,"type"))&&id(frame).equals(text(candidate.path("inputSnapshot"),"targetId")))
+            .findFirst().orElseThrow();
+        assertThat(text(archive.path("inputSnapshot"),"providerUrl")).isEqualTo(ORIGINAL);
+        worker.tick();
+        assertThat(text(store.get(GENERATION_JOB,id(archive)),"status")).isEqualTo("SUCCESS");
+        assertThat(text(store.get(KEYFRAME,id(frame)),"archiveUrl")).isEqualTo("/api/media/archive.png");
+        verify(fetcher).open(ORIGINAL);
     }
     @Test void videoInputSnapshotKeepsCompactKeyframeProvenanceWithoutRecursiveGenerationContext(){
         ObjectNode frame=generateFrame();

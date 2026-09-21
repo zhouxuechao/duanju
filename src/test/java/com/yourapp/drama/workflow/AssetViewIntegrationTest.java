@@ -1,5 +1,7 @@
 package com.yourapp.drama.workflow;
 
+import com.fasterxml.jackson.databind.JsonNode;
+
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.yourapp.drama.job.JobService;
 import com.yourapp.drama.model.ImageGenerator;
@@ -36,14 +38,25 @@ class AssetViewIntegrationTest {
         ObjectNode actor=store.create(CHARACTER,obj().put("projectId",projectId).put("storyBibleId",coreId).put("name","周伯").put("description","七十岁，瘦削，左颊有斑").put("provider","SEEDREAM").put("sourceType","IMAGE_REFERENCE").put("providerStatus","UNBOUND"));
         lookId=id(store.create(CHARACTER_LOOK,obj().put("projectId",projectId).put("storyBibleId",coreId).put("characterId",id(actor)).put("name","蓝布棉袄").put("description","洗白蓝布棉袄、黑布鞋")));
         store.update(CHARACTER,id(actor),revision(actor),actor.deepCopy().put("baseLookId",lookId));
-        locationId=id(store.create(LOCATION,obj().put("projectId",projectId).put("storyBibleId",coreId).put("locationKey","yard").put("name","祠堂院落").put("description","北门南井，东侧有槐树")));
+        ObjectNode location=obj().put("projectId",projectId).put("storyBibleId",coreId).put("locationKey","yard").put("name","祠堂院落").put("description","北门南井，东侧有槐树");
+        ObjectNode bible=obj().put("layout","长方形院落，北为正门，南侧水井，东侧槐树");
+        bible.set("coordinateSystem",obj().put("origin","院落中心地面").put("northAxis","朝北门为北").put("eastAxis","朝槐树为东").put("verticalAxis","垂直地面向上"));
+        bible.set("dimensions",obj().put("width","东西八米").put("depth","南北十米").put("height","围墙三米"));
+        bible.putArray("surfaces").add(obj().put("surfaceId","GROUND").put("name","青石地面").put("kind","GROUND").put("worldOrientation","HORIZONTAL").put("bounds","东西八米、南北十米").put("material","旧青石").put("appearance","灰黑、缝隙有青苔"))
+                .add(obj().put("surfaceId","NORTH_WALL").put("name","北墙").put("kind","WALL").put("worldOrientation","NORTH").put("bounds","宽八米、高三米").put("material","灰砖").put("appearance","中部设木门"));
+        bible.putArray("fixedFeatures").add(obj().put("featureId","NORTH_GATE").put("name","北门").put("kind","DOOR").put("supportSurfaceId","NORTH_WALL").put("worldPosition","北墙正中").put("size","宽两米、高二点四米").put("state","关闭").put("appearance","褪色双扇木门"))
+                .add(obj().put("featureId","SOUTH_WELL").put("name","水井").put("kind","WELL").put("supportSurfaceId","GROUND").put("worldPosition","原点以南三米").put("size","直径一米、高零点八米").put("state","井盖半掩").put("appearance","青石井圈"));
+        bible.putArray("spatialRelations").add(obj().put("subjectId","NORTH_GATE").put("relation","NORTH_OF").put("objectId","SOUTH_WELL").put("distance","约八米"));
+        bible.putArray("lightSources").add(obj().put("lightId","WEST_SUN").put("kind","SUN").put("worldPosition","西侧天空").put("direction","由西向东").put("colorTemperature","暖色夕阳").put("appearance","低角度斜射"));
+        bible.putArray("visualInvariants").add("北门始终位于北墙正中").add("水井始终位于院落南半部");bible.putArray("prohibitedElements").add("牌位");
+        location.set("locationBible",bible);locationId=id(store.create(LOCATION,location));
         propId=id(store.create(PROP,obj().put("projectId",projectId).put("storyBibleId",coreId).put("propKey","bell").put("name","铜铃").put("description","拇指大的缺口铜铃")));
         when(images.generate(any())).thenAnswer(call->new ImageGenerator.ImageResult("https://mock.volcengine.invalid/"+UUID.randomUUID()+".png",Instant.now().plusSeconds(3600),"image-request-"+UUID.randomUUID(),"mock-seedream",true));
     }
 
     @Test void createsSeparatePlansAndOnlyThreeMastersWithoutDuplicates(){
         assertThat(assets.generate(projectId,obj()).path("views")).hasSize(12);
-        assertThat(store.list(GENERATION_JOB,projectId,null)).hasSize(3).allSatisfy(j->{assertThat(text(j,"type")).isEqualTo("ASSET_IMAGE");assertThat(j.path("maxAttempts").asInt()).isEqualTo(1);assertThat(j.path("inputSnapshot").path("imageTaskType").asText()).isEqualTo("ASSET_REFERENCE");assertThat(j.path("inputSnapshot").path("compilerVersion").asText()).isEqualTo("4.0.0-asset-reference");assertThat(j.path("inputSnapshot").path("normalizedPromptHash").asText()).hasSize(64);assertThat(j.path("inputSnapshot").path("referenceBindingsHash").asText()).hasSize(64);assertThat(j.path("inputSnapshot").path("providerCapabilitiesVersion").asText()).isNotBlank();});
+        assertThat(store.list(GENERATION_JOB,projectId,null)).hasSize(3).allSatisfy(j->{assertThat(text(j,"type")).isEqualTo("ASSET_IMAGE");assertThat(j.path("maxAttempts").asInt()).isEqualTo(1);assertThat(j.path("inputSnapshot").path("imageTaskType").asText()).isEqualTo("ASSET_REFERENCE");assertThat(j.path("inputSnapshot").path("compilerVersion").asText()).isIn("4.0.0-asset-reference","4.1.0-character-turnaround","4.2.0-location-topology");assertThat(j.path("inputSnapshot").path("normalizedPromptHash").asText()).hasSize(64);assertThat(j.path("inputSnapshot").path("referenceBindingsHash").asText()).hasSize(64);assertThat(j.path("inputSnapshot").path("providerCapabilitiesVersion").asText()).isNotBlank();});
         assets.generate(projectId,obj());assertThat(store.list(GENERATION_JOB,projectId,null)).hasSize(3);
         assertThat(assets.approvedReferences(projectId,coreId,lookId)).isEmpty();
         assertThatThrownBy(()->assets.requireReady(projectId,coreId,List.of(lookId))).isInstanceOf(WorkflowException.class);
@@ -142,6 +155,34 @@ class AssetViewIntegrationTest {
     }
 
     private void generateLook(){ObjectNode request=obj();request.putArray("assetIds").add(lookId);assets.generate(projectId,request);}
+    @Test void characterSideViewsUseOpposedStructuredCameraContracts(){
+        generateLook();approve(run(current(lookId,"FRONT")));
+        ObjectNode left=store.get(GENERATION_JOB,required(current(lookId,"LEFT"),"generationJobId"));
+        ObjectNode right=store.get(GENERATION_JOB,required(current(lookId,"RIGHT"),"generationJobId"));
+        JsonNode leftCamera=left.path("inputSnapshot").path("viewCamera"),rightCamera=right.path("inputSnapshot").path("viewCamera");
+
+        assertThat(leftCamera.path("cameraAzimuthDegrees").asInt()).isEqualTo(-90);
+        assertThat(rightCamera.path("cameraAzimuthDegrees").asInt()).isEqualTo(90);
+        assertThat(leftCamera.path("visibleFaceSide").asText()).isEqualTo("SUBJECT_LEFT");
+        assertThat(rightCamera.path("visibleFaceSide").asText()).isEqualTo("SUBJECT_RIGHT");
+        assertThat(leftCamera.path("noseScreenDirection").asText()).isEqualTo("FRAME_RIGHT");
+        assertThat(rightCamera.path("noseScreenDirection").asText()).isEqualTo("FRAME_LEFT");
+        assertThat(left.path("inputSnapshot").path("prompt").asText()).contains("人物保持同一世界朝向，只移动相机","左肩到右胯");
+        assertThat(right.path("inputSnapshot").path("prompt").asText()).contains("人物保持同一世界朝向，只移动相机","左肩到右胯");
+    }
+    @Test void ambiguousLegacyCharacterTurnaroundCannotRemainProductionReady(){
+        generateLook();approve(run(current(lookId,"FRONT")));
+        for(String angle:List.of("LEFT","RIGHT","BACK"))approve(run(current(lookId,angle)));
+        ObjectNode oldRight=current(lookId,"RIGHT");
+        store.update(ASSET_VIEW,id(oldRight),revision(oldRight),oldRight.deepCopy().put("compilerVersion","4.0.0-asset-reference"));
+
+        assertThat(assets.approvedReferences(projectId,coreId,lookId)).isEmpty();
+        ObjectNode request=obj();request.putArray("assetIds").add(lookId);assets.generate(projectId,request);
+
+        assertThat(store.get(ASSET_VIEW,id(oldRight)).path("stale").asBoolean()).isTrue();
+        assertThat(current(lookId,"FRONT").path("setVersion").asInt()).isEqualTo(2);
+        assertThat(text(current(lookId,"FRONT"),"status")).isEqualTo("GENERATING");
+    }
     @Test void locationChildrenUseDistinctWorldCameraContractsInsteadOfCopyingLayoutProjection(){
         ObjectNode request=obj();request.putArray("assetIds").add(locationId);assets.generate(projectId,request);
         ObjectNode master=run(current(locationId,"LAYOUT"));approve(master);
@@ -151,7 +192,27 @@ class AssetViewIntegrationTest {
         assertThat(reverse.path("inputSnapshot").path("viewCamera").path("headingDegrees").asInt()).isEqualTo(0);
         assertThat(front.path("inputSnapshot").path("viewCamera").path("screenLeft").asText()).isEqualTo("东");
         assertThat(reverse.path("inputSnapshot").path("viewCamera").path("screenLeft").asText()).isEqualTo("西");
-        assertThat(front.path("inputSnapshot").path("prompt").asText()).contains("真实透视","离地1.5米","开关状态");
+        JsonNode input=front.path("inputSnapshot"),binding=input.path("referenceBindings").get(0);
+        assertThat(input.path("compilerVersion").asText()).isEqualTo("4.2.0-location-topology");
+        assertThat(input.path("locationTopology").path("fixedFeatures")).hasSize(2);
+        assertThat(binding.path("role").asText()).isEqualTo("LOCATION_TOPOLOGY_REFERENCE");
+        assertThat(binding.path("controls")).extracting(JsonNode::asText).contains("worldTopology","surfaceAssignments","fixedFeatureGeometry","lightingAnchors");
+        assertThat(binding.path("mustNotTransfer")).extracting(JsonNode::asText).doesNotContain("background");
+        assertThat(input.path("prompt").asText()).contains("真实透视","离地1.5米","featureId","不得遗漏、增添、复制或换面");
+    }
+    @Test void legacyLocationCompilerCannotRemainProductionReady(){
+        ObjectNode request=obj();request.putArray("assetIds").add(locationId);assets.generate(projectId,request);
+        approve(run(current(locationId,"LAYOUT")));
+        for(String angle:List.of("FRONT","REVERSE","SIDE"))approve(run(current(locationId,angle)));
+        ObjectNode oldSide=current(locationId,"SIDE");
+        store.update(ASSET_VIEW,id(oldSide),revision(oldSide),oldSide.deepCopy().put("compilerVersion","4.0.0-asset-reference"));
+
+        assertThat(assets.approvedReferences(projectId,coreId,locationId)).isEmpty();
+        assets.generate(projectId,request);
+
+        assertThat(store.get(ASSET_VIEW,id(oldSide)).path("stale").asBoolean()).isTrue();
+        assertThat(current(locationId,"LAYOUT").path("setVersion").asInt()).isEqualTo(2);
+        assertThat(text(current(locationId,"LAYOUT"),"status")).isEqualTo("GENERATING");
     }
     private ObjectNode current(String assetId,String angle){return store.list(ASSET_VIEW,projectId,assetId).stream().filter(v->!v.path("stale").asBoolean()&&angle.equals(text(v,"view"))).findFirst().orElseThrow();}
     private ObjectNode approve(ObjectNode view){return assets.approve(id(view),obj().put("revision",revision(view)));}

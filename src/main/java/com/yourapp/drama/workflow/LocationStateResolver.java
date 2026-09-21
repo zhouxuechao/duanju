@@ -21,7 +21,7 @@ public class LocationStateResolver {
             if (selected == null || number(state,"validFromStoryTime") > number(selected,"validFromStoryTime")) selected = state;
         }
         if (selected != null) {
-            for (String field : List.of("id","state","description","timeOfDay","weather","lighting","doorWindowState","environmentDamage","keyObjectPositions","validFromStoryTime","validToStoryTime","sourceSceneId","sourceShotId"))
+            for (String field : List.of("id","state","description","timeOfDay","weather","lighting","doorWindowState","environmentDamage","keyObjectPositions","spatialAnchors","validFromStoryTime","validToStoryTime","sourceSceneId","sourceShotId"))
                 if (selected.has(field)) result.set(field, selected.get(field).deepCopy());
         }
         return result;

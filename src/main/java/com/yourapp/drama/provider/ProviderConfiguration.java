@@ -38,7 +38,7 @@ public class ProviderConfiguration {
     @Bean @ConditionalOnProperty(name="drama.provider.mode", havingValue="volcengine")
     ImageGenerator volcengineImage(ArkHttpClient client, VolcengineProperties p) { return new VolcengineImageGenerator(client, p); }
     @Bean @ConditionalOnProperty(name="drama.provider.mode", havingValue="volcengine")
-    VideoGenerator volcengineVideo(ArkHttpClient client, VolcengineProperties p) { return new VolcengineVideoGenerator(client, p); }
+    VideoGenerator volcengineVideo(ArkHttpClient client, VolcengineProperties p,ProviderCapabilityRegistry capabilities) { return new VolcengineVideoGenerator(client, p,capabilities); }
     @Bean @ConditionalOnProperty(name="drama.quality.visual-reviewer",havingValue="volcengine")
     VisualQualityReviewer volcengineVisualQualityReviewer(ArkHttpClient client,VolcengineProperties p,StructuredJson schema,ObjectMapper mapper,VisualQualityProtocol protocol){
         return new VolcengineVisualQualityReviewer(client,p,schema,mapper,protocol);

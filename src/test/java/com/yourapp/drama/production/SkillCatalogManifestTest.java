@@ -31,4 +31,16 @@ class SkillCatalogManifestTest {
         String generator=Files.readString(Path.of("scripts/generate_skill_pack.py"));
         assertThat(generator).contains("manifest.json").doesNotContain("write_text(prompt").doesNotContain("SKILLS = [");
     }
+
+    @Test void validatorUsesManifestCardinalityInsteadOfTheLegacyCatalogConstant() throws Exception {
+        JsonNode manifest=mapper.readTree(Path.of("skills/manifest.json").toFile());
+        String validator=Files.readString(Path.of("scripts/validate_skill_pack.py"));
+
+        assertThat(validator).contains("manifest.json").contains("duplicate fingerprint")
+            .doesNotContain("CATALOG =").doesNotContain("!= 27");
+        Process process=new ProcessBuilder("python","scripts/validate_skill_pack.py").redirectErrorStream(true).start();
+        String output=new String(process.getInputStream().readAllBytes(),java.nio.charset.StandardCharsets.UTF_8);
+        assertThat(process.waitFor()).as(output).isZero();
+        assertThat(output).contains("validated "+manifest.path("skills").size()+" skills");
+    }
 }

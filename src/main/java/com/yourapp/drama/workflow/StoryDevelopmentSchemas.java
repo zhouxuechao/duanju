@@ -17,6 +17,7 @@ public final class StoryDevelopmentSchemas {
     private static ObjectNode integer(int min, int max) { return Documents.obj().put("type", "integer").put("minimum", min).put("maximum", max); }
     private static ObjectNode array(JsonNode item, int min, int max) { return (ObjectNode) Documents.obj().put("type", "array").put("minItems", min).put("maxItems", max).set("items", item); }
     private static ObjectNode strings(int min, int max) { return array(text(), min, max); }
+    private static ObjectNode looseObject() { return Documents.obj().put("type","object").put("additionalProperties",true); }
 
     private static ObjectNode object(Object... pairs) {
         Map<String, JsonNode> required = new LinkedHashMap<>();
@@ -36,6 +37,14 @@ public final class StoryDevelopmentSchemas {
     private static ObjectNode storyProfile() {
         return object("settingGenre", text(), "storyType", text(), "tropes", strings(0, 12), "audience", text(),
                 "tones", strings(0, 8), "intensity", text(), "sourceMode", text());
+    }
+
+    public static ObjectNode storyBrief() {
+        ObjectNode person = object("name", text(), "identity", text(), "goal", text());
+        return object("originalIdea", text(), "hardConstraints", strings(0, 20),
+                "protagonist", person, "opponent", person, "goal", text(), "coreConflict", text(),
+                "failureCost", text(), "informationGap", text(), "endingDirection", text(),
+                "mustKeep", strings(0, 20), "mustNotChange", strings(0, 20));
     }
 
     public static ObjectNode premise() {
@@ -58,8 +67,11 @@ public final class StoryDevelopmentSchemas {
     }
 
     public static ObjectNode core() {
-        ObjectNode emotion = object("corePromise", text(), "primaryEmotion", text(), "secondaryEmotion", text(),
-                "audienceExpectation", text(), "payoffPattern", text(), "forbiddenPatterns", strings(1, 12));
+        ObjectNode satisfaction = object("negativeEmotion", text(), "amplifiers", strings(1, 8), "informationGap", text(),
+                "payoff", text(), "payoffDelayEpisodes", integer(0, 1000));
+        Map<String,JsonNode> emotionRequired=new LinkedHashMap<>();emotionRequired.put("corePromise",text());emotionRequired.put("primaryEmotion",text());
+        emotionRequired.put("secondaryEmotion",text());emotionRequired.put("audienceExpectation",text());emotionRequired.put("payoffPattern",text());emotionRequired.put("forbiddenPatterns",strings(1,12));
+        ObjectNode emotion = object(emotionRequired, Map.of("satisfactionContract", satisfaction));
         ObjectNode engine = object("coreConflict", text(), "protagonistGoal", text(), "oppositionGoal", text(),
                 "stakes", text(), "mainPayoff", text(), "escalationAxes", strings(2, 10), "reversalStrategy", text());
         ObjectNode season = object("opening", text(), "development", text(), "majorTurn", text(), "climax", text(), "ending", text());
@@ -71,8 +83,20 @@ public final class StoryDevelopmentSchemas {
         ObjectNode look = object("lookKey", text(), "name", text(), "description", text());
         ObjectNode person = object("characterKey", text(), "name", text(), "description", text(), "narrativeBible", narrative,
                 "identityTraits", identity, "looks", array(look, 1, 10));
-        ObjectNode place = object("locationKey", text(), "name", text(), "description", text(),
-                "locationBible", object("layout", text(), "spatialAnchors", text(), "lighting", text()));
+        ObjectNode coordinateSystem = object("origin", text(), "northAxis", text(), "eastAxis", text(), "verticalAxis", text());
+        ObjectNode dimensions = object("width", text(), "depth", text(), "height", text());
+        ObjectNode surface = object("surfaceId", text(), "name", text(), "kind", text(), "worldOrientation", text(),
+                "bounds", text(), "material", text(), "appearance", text());
+        ObjectNode feature = object("featureId", text(), "name", text(), "kind", text(), "supportSurfaceId", text(),
+                "worldPosition", text(), "size", text(), "state", text(), "appearance", text());
+        ObjectNode relation = object("subjectId", text(), "relation", text(), "objectId", text(), "distance", text());
+        ObjectNode light = object("lightId", text(), "kind", text(), "worldPosition", text(), "direction", text(),
+                "colorTemperature", text(), "appearance", text());
+        ObjectNode locationBible = object("layout", text(), "coordinateSystem", coordinateSystem, "dimensions", dimensions,
+                "surfaces", array(surface, 1, 30), "fixedFeatures", array(feature, 1, 60),
+                "spatialRelations", array(relation, 1, 100), "lightSources", array(light, 1, 20),
+                "visualInvariants", strings(1, 20), "prohibitedElements", strings(0, 30));
+        ObjectNode place = object("locationKey", text(), "name", text(), "description", text(), "locationBible", locationBible);
         ObjectNode prop = object("propKey", text(), "name", text(), "description", text(), "state", text(),
                 "propBible", object("appearance", text(), "scale", text(), "ownership", text()));
         return object("title", text(), "logline", text(), "storyProfile", storyProfile(), "emotionContract", emotion,
@@ -119,11 +143,16 @@ public final class StoryDevelopmentSchemas {
         required.put("script", text().put("minLength", 80)); required.put("targetDurationSec", number(1, 1800));
         required.put("characterKeys", strings(0, 30)); required.put("locationKeys", strings(0, 30)); required.put("propKeys", strings(0, 30));
         required.put("beatBoundaries", array(beat(), 2, 24)); required.put("scenes", array(scene(), 1, 20));
-        return object(required, Map.of("midHook", midHook()));
+        ObjectNode evidence = object("evidenceId", text(), "type", text(), "formedAt", number(0, 1000000), "verified", bool(),
+                "tampered", bool(), "obtainedBy", strings(0, 30), "knownBy", strings(0, 30), "holder", text(), "supportsFacts", strings(0, 30));
+        return object(required, Map.of("midHook", midHook(), "evidenceLedger", array(evidence,0,100),
+                "storyFacts", looseObject(), "characterKnowledge", looseObject(),
+                "relationships", array(text(),0,100), "unrevealedSecrets", strings(0,100)));
     }
 
     public static ObjectNode forDocument(JsonNode doc) {
         return switch (Documents.text(doc, "documentType")) {
+            case "STORY_BRIEF" -> storyBrief();
             case "CORE" -> core();
             case "OUTLINE_BATCH" -> batch(doc.path("startEpisode").asInt(), doc.path("endEpisode").asInt());
             case "EPISODE_SCRIPT" -> script();

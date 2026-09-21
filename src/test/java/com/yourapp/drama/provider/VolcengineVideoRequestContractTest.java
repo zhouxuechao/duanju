@@ -25,7 +25,7 @@ class VolcengineVideoRequestContractTest {
     private HttpServer server;
     private final ObjectMapper mapper = new ObjectMapper();
     private final AtomicReference<JsonNode> captured = new AtomicReference<>();
-    private VideoGenerator generator;
+    private VolcengineVideoGenerator generator;
 
     @BeforeEach void start() throws Exception {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -61,9 +61,20 @@ class VolcengineVideoRequestContractTest {
     }
 
     @Test void firstFrameRouteDoesNotSendReferenceVideo() {
-        generator.submit(new VideoGenerator.VideoRequest("cut", "https://media.example.com/keyframe.png", List.of(), Map.of("duration", 5)));
+        VideoGenerator.VideoRequest request=new VideoGenerator.VideoRequest("cut", "https://media.example.com/keyframe.png", List.of(), Map.of("duration", 5));
+        JsonNode requestSnapshot=mapper.valueToTree(generator.requestBodySnapshot(request));
+        generator.submit(request);
         JsonNode content = captured.get().path("content");
         assertThat(content.toString()).contains("first_frame", "keyframe.png");
         assertThat(content.toString()).doesNotContain("reference_video");
+        assertThat(requestSnapshot).isEqualTo(captured.get());
+    }
+
+    @Test void adapterRejectsModelProfileHardReferenceLimitBeforeHttpSubmission() {
+        java.util.ArrayList<VideoGenerator.Reference> refs=new java.util.ArrayList<>();
+        for(int i=0;i<30;i++)refs.add(new VideoGenerator.Reference("image_url","https://media.example.com/ref-"+i+".png","reference_image"));
+        assertThatThrownBy(()->generator.submit(new VideoGenerator.VideoRequest("cut","https://media.example.com/start.png",refs,Map.of("duration",5))))
+                .isInstanceOf(com.yourapp.drama.model.ProviderException.class).hasMessageContaining("REFERENCE_LIMIT_EXCEEDED");
+        assertThat(captured.get()).isNull();
     }
 }

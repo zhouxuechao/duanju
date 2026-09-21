@@ -12,6 +12,6 @@
 - seasonArc 的 opening/development/majorTurn/climax/ending 必须改变局面，不能只是同义改写。
 - UnitArc 是剧情阶段，不是技术批次。根据 episodeFormat.unitDensityPolicy 和内容复杂度动态划分；完整覆盖 EP01 到最终集，不能重叠或漏集。每个 Unit 都要有目标、主要冲突、对手压力、情绪目标、揭露、兑现、高潮、结束钩子和进入下一阶段的因果。
 - Character 同时含 Narrative Bible 与 Visual Identity。Narrative Bible 的 want/need/fear/weakness/secret/motivation/decisionPattern/arc/speechStyle/behaviorRules/relationships 要能实际发动剧情；视觉字段只写稳定、可画、可辨认的特征。两部分共用同一个 characterKey，不建立两套人物。
-- 地点必须给出稳定布局、空间锚点、光线规则；道具必须给出外观、尺度、初始归属。不要把剧情性格写进视觉外观字段。
+- 每个地点必须先定义与屏幕无关的世界坐标，再给出可验证的空间拓扑：coordinateSystem 明确原点、北/东/垂直轴；dimensions 明确宽、深、高；surfaces 为每个墙面、地面、道路、台面等承载面分配稳定 surfaceId；fixedFeatures 为每扇门窗、楼梯、井、树、招牌、货架等固定设施分配 featureId，并写明唯一 supportSurfaceId、世界位置、尺寸、状态和外观；spatialRelations 只用这些稳定 ID 表达同面、对立、相邻、包含及方位距离；lightSources 写世界位置和方向；visualInvariants 列出跨镜头不得改变的细节；prohibitedElements 列出此地点明确不存在、容易被模型误造的物件。禁止使用没有观察基准的“左边/右边”代替世界方位。道具必须给出外观、尺度、初始归属。不要把剧情性格写进视觉外观字段。
 
 所有结果仍是待人工审查草稿。不要声称已经通过审查。不要输出分集集纲、完整对白、镜头或机位。只返回 Schema 对应 JSON。

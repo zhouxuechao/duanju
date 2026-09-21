@@ -12,6 +12,7 @@ import com.yourapp.drama.persistence.DocumentStore;
 import com.yourapp.drama.persistence.ResourceKind;
 import com.yourapp.drama.persistence.RevisionConflictException;
 import com.yourapp.drama.provider.StructuredJson;
+import com.yourapp.drama.production.RewriteBoundary;
 import jakarta.validation.Validator;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -72,8 +73,14 @@ public class StoryDevelopmentService {
          if (!normalizedProject.equals(project)) {
             project = this.store.update(ResourceKind.PROJECT, projectId, Documents.revision(project), normalizedProject);
          }
-         if (project.hasNonNull("activeStoryDocumentId")) {
-            return this.store.get(ResourceKind.STORY_DOCUMENT, Documents.text(project, "activeStoryDocumentId"));
+          if (project.hasNonNull("activeStoryDocumentId")) {
+             ObjectNode active=this.store.get(ResourceKind.STORY_DOCUMENT, Documents.text(project, "activeStoryDocumentId"));
+             String briefId=Documents.text(active,"storyBriefId");
+             if(!briefId.isBlank()){
+                ObjectNode brief=this.store.get(ResourceKind.STORY_DOCUMENT,briefId);
+                if(!"CONFIRMED".equals(Documents.text(brief,"reviewStatus")))return brief;
+             }
+             return active;
          } else if (project.path("episodeCount").isIntegralNumber() && project.path("episodeCount").asInt() >= 1 && project.path("episodeCount").asInt() <= 100) {
             if (project.path("targetDuration").isNumber() && !(project.path("targetDuration").asDouble() <= (double)0.0F)) {
                for(ObjectNode j : this.store.list(ResourceKind.GENERATION_JOB, projectId, (String)null)) {
@@ -86,9 +93,14 @@ public class StoryDevelopmentService {
                ObjectNode draft = Documents.obj().put("id", coreId).put("projectId", projectId).put("coreId", coreId).put("documentType", "CORE").put("version", 1).put("reviewStatus", "WAITING");
                draft.set("projectSnapshot", project.deepCopy());
                draft.set("content", Documents.obj());
-               ObjectNode saved = this.store.create(ResourceKind.STORY_DOCUMENT, draft);
-               this.store.update(ResourceKind.PROJECT, projectId, Documents.revision(project), project.deepCopy().put("activeStoryDocumentId", coreId));
-               return this.schedulePremise(saved);
+                ObjectNode saved = this.store.create(ResourceKind.STORY_DOCUMENT, draft);
+                this.store.update(ResourceKind.PROJECT, projectId, Documents.revision(project), project.deepCopy().put("activeStoryDocumentId", coreId));
+                ObjectNode brief=Documents.obj().put("projectId",projectId).put("coreId",coreId).put("documentType","STORY_BRIEF")
+                        .put("version",1).put("reviewStatus","WAITING");
+                brief.set("projectSnapshot",project.deepCopy());brief.set("content",Documents.obj());
+                ObjectNode storedBrief=this.store.create(ResourceKind.STORY_DOCUMENT,brief);
+                this.store.update(ResourceKind.STORY_DOCUMENT,coreId,Documents.revision(saved),saved.deepCopy().put("storyBriefId",Documents.id(storedBrief)));
+                return this.schedule(storedBrief);
             } else {
                throw new IllegalArgumentException("请先设置每集目标时长");
             }
@@ -177,9 +189,9 @@ public class StoryDevelopmentService {
          }
          if ("FORCE_CONTINUE".equals(action)) {
             String reason = request.path("overrideReason").asText("").trim();
-            if (reason.isBlank()) throw new IllegalArgumentException("强制继续必须填写原因");
+            PremiseGate.Result override=new PremiseGate().override(reason,actor.isBlank()?"USER":actor);
             next.set("premiseOverride", Documents.obj().put("overrideAt", Instant.now().toString())
-                    .put("overrideBy", actor.isBlank() ? "USER" : actor).put("overrideReason", reason));
+                    .put("overrideBy", override.reviewer()).put("overrideReason", override.reason()));
          } else {
             ObjectNode acceptance = Documents.obj().put("acceptedAt", Instant.now().toString()).put("acceptedBy", actor.isBlank() ? "USER" : actor);
             acceptance.set("recommendedAdjustments", next.path("premiseAnalysis").path("recommendedAdjustments").deepCopy());
@@ -225,6 +237,11 @@ public class StoryDevelopmentService {
    }
 
    public ObjectNode confirm(String documentId, ObjectNode request) {
+      ObjectNode candidate=this.store.get(ResourceKind.STORY_DOCUMENT,documentId);
+      if("STORY_BRIEF".equals(Documents.text(candidate,"documentType"))){
+         if("CONFIRMED".equals(Documents.text(candidate,"reviewStatus")))return candidate;
+         return this.confirmStoryBrief(documentId,request);
+      }
       return (ObjectNode)this.store.transaction(() -> {
          ObjectNode before = this.store.get(ResourceKind.STORY_DOCUMENT, documentId);
          this.store.getForUpdate(ResourceKind.PROJECT, Documents.project(before));
@@ -303,6 +320,26 @@ public class StoryDevelopmentService {
       });
    }
 
+   private ObjectNode confirmStoryBrief(String documentId,ObjectNode request){
+      ObjectNode confirmed=this.store.transaction(()->{
+         ObjectNode doc=this.store.getForUpdate(ResourceKind.STORY_DOCUMENT,documentId);this.requireCurrent(doc);
+         if("CONFIRMED".equals(Documents.text(doc,"reviewStatus")))return doc;
+         this.expectRevision(doc,request);
+         if(!"REVIEW".equals(Documents.text(doc,"reviewStatus")))throw new WorkflowException("DRAFT_NOT_READY","故事需求尚未生成或修改完成");
+         ObjectNode next=doc.deepCopy().put("reviewStatus","CONFIRMED").put("confirmedAt",Instant.now().toString());
+         next.set("validation",this.validate(doc,doc.path("content")));
+         return this.store.update(ResourceKind.STORY_DOCUMENT,documentId,Documents.revision(doc),next);
+      });
+      ObjectNode core=this.store.transaction(()->{
+         ObjectNode current=this.store.getForUpdate(ResourceKind.STORY_DOCUMENT,Documents.text(confirmed,"coreId"));
+         ObjectNode next=current.deepCopy().put("storyBriefId",Documents.id(confirmed));
+         next.set("storyBriefSnapshot",confirmed.path("content").deepCopy());
+         return this.store.update(ResourceKind.STORY_DOCUMENT,Documents.id(current),Documents.revision(current),next);
+      });
+      this.schedulePremise(core);
+      return confirmed;
+   }
+
    public ObjectNode rewrite(String documentId, ObjectNode request) {
       ObjectNode created = this.store.transaction(() -> {
          ObjectNode before = this.store.get(ResourceKind.STORY_DOCUMENT, documentId);
@@ -327,6 +364,9 @@ public class StoryDevelopmentService {
          rewrite.set("blockingIssues", doc.path("storyQa").path("blockingIssues").deepCopy());
          rewrite.set("rewriteInstructions", doc.path("storyQa").path("rewriteInstructions").deepCopy());
          rewrite.set("previousScript", doc.path("content").deepCopy());
+         int episodeNo=doc.path("episodeNo").asInt();JsonNode previous=Documents.obj(),following=Documents.obj();
+         for(ObjectNode other:this.docs(Documents.project(doc)))if("EPISODE_SCRIPT".equals(Documents.text(other,"documentType"))&&Documents.text(doc,"coreId").equals(Documents.text(other,"coreId"))&&!other.path("stale").asBoolean()&&"CONFIRMED".equals(Documents.text(other,"reviewStatus"))){if(other.path("episodeNo").asInt()==episodeNo-1)previous=other.path("content");if(other.path("episodeNo").asInt()==episodeNo+1)following=other.path("content");}
+         source.set("rewriteBoundary",new RewriteBoundary(this.mapper).build(episodeNo,previous,doc.path("content"),following));
          source.set("rewriteRequest", rewrite);
          next.set("sourceSnapshot", source);
          this.invalidate(doc);
@@ -427,12 +467,16 @@ public class StoryDevelopmentService {
       input.set("project", project);
       input.set("storyProfile", project.path("storyProfile").deepCopy());
       input.set("episodeFormat", episodeFormat);
-      input.set("rulePack", this.ruleResolver.resolve(Documents.text(doc, "documentType"), project.path("storyProfile"),
-              episodeFormat, project.path("distributionProfile").asText("GENERAL")));
+       String documentType=Documents.text(doc,"documentType"),basePrompt=this.prompt(documentType);
+       ObjectNode rulePack=this.ruleResolver.resolve(documentType, project.path("storyProfile"), episodeFormat,
+               project.path("distributionProfile").asText("GENERAL"),basePrompt,
+               project.path("writerModelProfile").asText("DEEPSEEK_WRITER"));
+       input.set("rulePack",rulePack);input.put("rulePackFingerprint",Documents.text(rulePack,"fingerprint"))
+               .put("promptCompilerVersion",ScreenwritingRuleResolver.STORY_COMPILER_VERSION);
       if ("CORE".equals(Documents.text(doc, "documentType")) && doc.path("premiseAnalysis").isObject()) {
          input.set("premiseAnalysis", doc.path("premiseAnalysis").deepCopy());
       }
-      if (!"CORE".equals(Documents.text(doc, "documentType"))) {
+      if (!Set.of("CORE","STORY_BRIEF").contains(Documents.text(doc, "documentType"))) {
          ObjectNode core = this.store.get(ResourceKind.STORY_DOCUMENT, Documents.text(doc, "coreId"));
          this.requireConfirmed(core);
          input.put("coreId", Documents.id(core)).put("continuityHash", Documents.text(core, "continuityHash"));
@@ -465,7 +509,13 @@ public class StoryDevelopmentService {
       input.set("project", project);
       input.set("storyProfile", project.path("storyProfile").deepCopy());
       input.set("episodeFormat", format);
-      input.set("rulePack", this.ruleResolver.resolve("PREMISE", project.path("storyProfile"), format, project.path("distributionProfile").asText("GENERAL")));
+      if(doc.path("storyBriefSnapshot").isObject())input.set("storyBrief",doc.path("storyBriefSnapshot").deepCopy());
+      String basePrompt=this.prompt("PREMISE");
+      ObjectNode rulePack=this.ruleResolver.resolve("PREMISE", project.path("storyProfile"), format,
+              project.path("distributionProfile").asText("GENERAL"),basePrompt,
+              project.path("writerModelProfile").asText("DEEPSEEK_WRITER"));
+      input.set("rulePack",rulePack);input.put("rulePackFingerprint",Documents.text(rulePack,"fingerprint"))
+              .put("promptCompilerVersion",ScreenwritingRuleResolver.STORY_COMPILER_VERSION);
       ObjectNode submitted = this.jobs.enqueue(Documents.project(doc), null, "STORY", input, "premise:" + Documents.id(doc) + ":" + UUID.randomUUID());
       this.jobs.mutate(Documents.id(submitted), j -> j.put("maxAttempts", 1));
       ObjectNode next = doc.deepCopy().put("generationJobId", Documents.id(submitted)).put("reviewStatus", "PREMISE_ANALYSIS");
@@ -479,7 +529,7 @@ public class StoryDevelopmentService {
       LlmGateway.StructuredResult<JsonNode> result = this.llm.generate(request, JsonNode.class);
       JsonNode premise = this.structured.parse(result.value().toString(), StoryDevelopmentSchemas.premise(), JsonNode.class, result.requestId());
       this.jobs.mutate(Documents.id(job), j -> j.put("providerRequestId", result.requestId()).put("model", result.model()).put("simulated", result.simulated()));
-      boolean viable = premise.path("viable").asBoolean(false);
+      boolean viable = new PremiseGate().evaluate(premise).decision()==PremiseGate.Decision.PASS;
       ObjectNode normalized = premise.deepCopy();
       if (!normalized.hasNonNull("capacityRisk")) normalized.put("capacityRisk", premise.path("risks").isEmpty() ? "未发现超出目标篇幅的容量风险" : premise.path("risks").get(0).asText());
       if (!normalized.path("weaknesses").isArray()) normalized.set("weaknesses", premise.path("risks").deepCopy());
@@ -626,13 +676,19 @@ public class StoryDevelopmentService {
          throw new IllegalArgumentException(error.getMessage());
       }
 
-      if ("CORE".equals(Documents.text(doc, "documentType"))) {
+      if ("STORY_BRIEF".equals(Documents.text(doc,"documentType"))) {
+         return Documents.obj().put("passed",true).put("checkedAt",Instant.now().toString())
+                 .put("message","创意约束、主角、对手、冲突、代价与不可改项已结构化");
+      } else if ("CORE".equals(Documents.text(doc, "documentType"))) {
          this.unique(content.path("characters"), "characterKey");
          this.unique(content.path("locations"), "locationKey");
          this.unique(content.path("props"), "propKey");
 
          for(JsonNode p : content.path("characters")) {
             this.unique(p.path("looks"), "lookKey");
+         }
+         for(JsonNode location : content.path("locations")) {
+            this.validateLocationTopology(location);
          }
          ObjectNode expectedProfile = this.storyProfiles.enrich((ObjectNode)doc.path("projectSnapshot").deepCopy()).withObject("storyProfile");
          if (!expectedProfile.equals(content.path("storyProfile"))) {
@@ -676,6 +732,10 @@ public class StoryDevelopmentService {
                   throw new IllegalArgumentException("剧本的 " + k + " 必须保持已确认集纲的交接状态；改变剧情请先修订集纲");
                }
             }
+            if(doc.path("sourceSnapshot").path("rewriteBoundary").isObject()){
+               List<com.yourapp.drama.production.ProductionModels.Risk> boundaryRisks=new RewriteBoundary(this.mapper).validate(content,doc.path("sourceSnapshot").path("rewriteBoundary"));
+               if(!boundaryRisks.isEmpty())throw new IllegalArgumentException(boundaryRisks.getFirst().code()+"："+boundaryRisks.getFirst().message());
+            }
          }
       }
 
@@ -704,6 +764,22 @@ public class StoryDevelopmentService {
          }
       }
 
+   }
+
+   private void validateLocationTopology(JsonNode location) {
+      JsonNode bible = location.path("locationBible");
+      this.unique(bible.path("surfaces"), "surfaceId");
+      this.unique(bible.path("fixedFeatures"), "featureId");
+      this.unique(bible.path("lightSources"), "lightId");
+      Set<String> surfaces = new HashSet<>(), nodes = new HashSet<>();
+      bible.path("surfaces").forEach(value -> { surfaces.add(Documents.text(value,"surfaceId")); nodes.add(Documents.text(value,"surfaceId")); });
+      bible.path("fixedFeatures").forEach(value -> {
+         String featureId=Documents.text(value,"featureId"), support=Documents.text(value,"supportSurfaceId");nodes.add(featureId);
+         if(!surfaces.contains(support))throw new IllegalArgumentException("地点 "+Documents.text(location,"locationKey")+" 的固定设施 "+featureId+" 引用了不存在的承载面 "+support);
+      });
+      bible.path("lightSources").forEach(value -> nodes.add(Documents.text(value,"lightId")));
+      for(JsonNode relation:bible.path("spatialRelations"))for(String field:List.of("subjectId","objectId"))
+         if(!nodes.contains(Documents.text(relation,field)))throw new IllegalArgumentException("地点 "+Documents.text(location,"locationKey")+" 的空间关系引用了不存在的节点 "+Documents.text(relation,field));
    }
 
    private void checkRefs(JsonNode node, JsonNode core) {
@@ -751,6 +827,11 @@ public class StoryDevelopmentService {
    }
 
    private String prompt(String type) {
+      if("STORY_BRIEF".equals(type)){
+         try(InputStream stream=(new ClassPathResource("development-skills/vendor/oiuv-ai-short-drama/script-brief/SKILL.md")).getInputStream()){
+            return new String(stream.readAllBytes(),StandardCharsets.UTF_8);
+         }catch(Exception e){throw new IllegalStateException("故事需求技能加载失败",e);}
+      }
       String var10000;
       switch (type) {
          case "PREMISE" -> var10000 = "00-premise-analysis";

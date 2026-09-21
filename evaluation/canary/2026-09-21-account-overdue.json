@@ -1,0 +1,22 @@
+{
+  "status": "BLOCKED_EXTERNAL",
+  "executedAt": "2026-09-21T23:09:27+08:00",
+  "scenario": "provider-canary",
+  "plannedRoutes": [
+    "FIRST_FRAME",
+    "FULL_MODAL_REFERENCE",
+    "REANCHOR_FIRST_FRAME"
+  ],
+  "submittedResource": "KEYFRAME",
+  "providerRequestId": "0217900033674920477e7d991a1abd211e987ddddb28caba70e00",
+  "providerTaskId": null,
+  "providerErrorCode": "AccountOverdueError",
+  "providerMessage": "The request failed because your account has an overdue balance.",
+  "imageRequests": 1,
+  "videoRequests": 0,
+  "mediaOutputs": 0,
+  "duplicateSubmissions": 0,
+  "billingStatus": "REJECTED_BEFORE_TASK",
+  "requestBodiesSaved": 0,
+  "requestBodiesReason": "The image request was rejected before a provider task or media URL existed; downstream video requests were not built or submitted."
+}

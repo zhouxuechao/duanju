@@ -3,6 +3,8 @@ package com.yourapp.drama.workflow;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.yourapp.drama.production.EvidenceLedger;
+import com.yourapp.drama.production.SatisfactionEngine;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -13,6 +15,8 @@ public class StoryQualityPolicy {
     private static final List<String> DELTAS = List.of("factsChanged", "relationshipsChanged", "goalsChanged",
             "knowledgeChanged", "riskChanged", "resourcesChanged");
     private static final List<String> PATTERN = List.of("episodeFunction", "hook", "mainConflict", "payoff", "cliffhanger");
+    private final SatisfactionEngine satisfaction = new SatisfactionEngine();
+    private final EvidenceLedger evidenceLedger = new EvidenceLedger();
 
     public ObjectNode apply(ObjectNode qa, JsonNode input) {
         boolean hasDelta = DELTAS.stream().anyMatch(key -> !qa.path("episodeDelta").path(key).isEmpty());
@@ -24,6 +28,17 @@ public class StoryQualityPolicy {
                 .filter(previous -> samePattern(outline, previous)).count();
         if (repeated >= 3) block(qa, "最近多集重复相同的开场、冲突、兑现和断章功能",
                 "更换本集的冲突机制和兑现方式，并让新的选择改变关系、知识、资源或风险状态");
+
+        JsonNode satisfactionContract=input.path("showrunnerContract").path("emotionContract").path("satisfactionContract");
+        if(satisfactionContract.isObject()){
+            SatisfactionEngine.Result satisfactionResult=satisfaction.evaluate(input.path("storyProfile").path("storyType").asText(),satisfactionContract,input.path("recentStructuralSummaries"));
+            satisfactionResult.risks().forEach(risk->block(qa,"爽感合同："+risk.message(),"按本剧 StoryType 的情绪合同修正压力、信息差、兑现推进或重复方式"));
+        }
+        JsonNode ledger=input.path("episodeScript").path("evidenceLedger");
+        if(ledger.isArray()&&!ledger.isEmpty()){
+            for(var risk:evidenceLedger.validate(ledger,input.path("episodeScript").path("storyFacts"),input.path("episodeScript").path("characterKnowledge"),input.path("evidenceWorld"),input.path("episodeNo").asLong()))
+                block(qa,"证据链："+risk.message(),"修正 Evidence、StoryFact、角色知情时间或证据持有人，使其不越过当前故事时间");
+        }
 
         qa.put("passed", qa.path("passed").asBoolean() && qa.path("blockingIssues").isEmpty());
         qa.put("rewriteRequired", !qa.path("passed").asBoolean() || qa.path("rewriteRequired").asBoolean());

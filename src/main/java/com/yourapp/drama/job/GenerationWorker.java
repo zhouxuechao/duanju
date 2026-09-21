@@ -91,6 +91,7 @@ public class GenerationWorker {
             if(result.expiresAt()!=null)asset.put("providerUrlExpiresAt",result.expiresAt().toString());
             if(result.simulated())asset.put("previewUrl","/demo/keyframe.png");
             JsonNode plannedShot=input.path("context").path("shot");for(String field:List.of("directorPlanVersion","dramaticBeatVersion","shotPlanVersion"))if(plannedShot.has(field))asset.set(field,plannedShot.path(field).deepCopy());
+            for(String field:List.of("semanticRole","providerFrameMode","timeSec","stateVersion"))if(input.has(field))asset.set(field,input.path(field).deepCopy());
             for(String field:List.of("sequenceCompilerVersion","normalizedPromptHash","referenceBindingsHash","referenceAuthorityFingerprint","continuitySnapshotHash","sequenceStateFingerprint","providerCapabilitiesVersion"))if(input.has(field))asset.set(field,input.path(field).deepCopy());
             asset.set("assetViewIds",input.path("assetViewIds").deepCopy());asset.set("assetReferences",input.path("assetReferences").deepCopy());
             if(kind==KEYFRAME&&input.path("storyboardReference").isObject())asset.set("storyboardReference",input.path("storyboardReference").deepCopy());
@@ -118,8 +119,8 @@ public class GenerationWorker {
         if(!lipsync)workflow.checkHandoff(frame);
         String url=lipsync?"":text(input,"firstFrameProviderUrl");
         String route=text(input,"videoRequestRoute");
-        if(!lipsync&&"FIRST_FRAME".equals(route)&&!url.equals(required(frame,"providerUrl")))throw new WorkflowException("URL_SNAPSHOT_MISMATCH","首帧路线的关键帧生产链接与任务快照不一致");
-        if(!lipsync&&"FULL_MODAL_REFERENCE".equals(route)&&!url.isBlank())throw new WorkflowException("REFERENCE_ROUTE_CONFLICT","全模态参考路线不得同时发送 first_frame");
+        if(!lipsync&&Set.of("FIRST_FRAME","NATIVE_FIRST_FRAME","NATIVE_FIRST_LAST_FRAME").contains(route)&&!url.equals(required(frame,"providerUrl")))throw new WorkflowException("URL_SNAPSHOT_MISMATCH","首帧路线的关键帧生产链接与任务快照不一致");
+        if(!lipsync&&Set.of("FULL_MODAL_REFERENCE","SEMANTIC_REFERENCES","STORYBOARD_GUIDED").contains(route)&&!url.isBlank())throw new WorkflowException("REFERENCE_ROUTE_CONFLICT","全模态参考路线不得同时发送 first_frame");
         if(!lipsync&&"CONTINUATION_LAST_FRAME".equals(route)&&!url.equals(text(input.path("context").path("previousTake"),"lastFrameUrl")))throw new WorkflowException("URL_SNAPSHOT_MISMATCH","续接尾帧与 previousTake 快照不一致");
         // The exact String returned by Seedream is the first frame. No storage call occurs on this path.
         List<VideoGenerator.Reference> references=new ArrayList<>();for(JsonNode ref:input.path("references"))references.add(new VideoGenerator.Reference(required(ref,"type"),required(ref,"url"),required(ref,"role")));
@@ -131,13 +132,13 @@ public class GenerationWorker {
                     .put("provider","VOLCENGINE").put("sourceKeyframeId",id(frame)).put("sourceProviderUrlSnapshot",required(frame,"providerUrl"))
                     .put("promptVersionId",required(input,"promptVersionId")).put("generationJobId",id(job)).put("providerRequestId",submission.requestId()).put("providerTaskId",submission.taskId())
                     .put("providerStatus","QUEUED").put("qcStatus","PENDING").put("selected",false).put("locked",false).put("simulated",submission.simulated());
-                for(String field:List.of("parentTakeId","continuationDepth","reanchorReason","sequenceStrategy","sequenceRelation","sequenceCompilerVersion","normalizedPromptHash","referenceBindingsHash","referenceAuthorityFingerprint","continuitySnapshotHash","sequenceStateFingerprint","providerCapabilitiesVersion"))if(input.has(field))take.set(field,input.path(field).deepCopy());
+                for(String field:List.of("parentTakeId","continuationDepth","reanchorReason","sequenceStrategy","sequenceRelation","sequenceCompilerVersion","normalizedPromptHash","referenceBindingsHash","referenceAuthorityFingerprint","continuitySnapshotHash","sequenceStateFingerprint","providerCapabilitiesVersion","modelId","modelProfileVersion","capabilityFingerprint","taskType","lockMode","route","videoRequestRoute","activatedMaterials","excludedMaterials","referenceMapping","referenceAuthority","referenceBudget","providerParameters","prompt","rulePackFingerprint","rulePackUpstreamCommit","runtimeRuleIds","audioGenerationPolicy","modelProfile","preflight"))if(input.has(field))take.set(field,input.path(field).deepCopy());
                 if(input.path("retake").isObject())take.set("retakeAudit",input.path("retake").deepCopy());
                 if(lipsync)take.put("variantType","LIPSYNC").put("sourceVideoTakeId",required(input,"sourceTakeId"));
                 take.set("inputSnapshot",input.deepCopy());take.set("assetViewIds",frame.path("assetViewIds").deepCopy());take.set("assetReferences",frame.path("assetReferences").deepCopy()); ObjectNode saved=store.create(VIDEO_TAKE,take);
                 if(!lipsync){ObjectNode current=store.getForUpdate(KEYFRAME,id(frame));store.update(KEYFRAME,id(current),revision(current),current.deepCopy().put("handoffStatus","HANDED_OFF").put("handedOffAt",Instant.now().toString()));}
                 jobs.mutate(id(job),j->{j.put("providerTaskId",submission.taskId()).put("providerRequestId",submission.requestId()).put("progress",20).put("simulated",submission.simulated());j.set("outputSnapshot",obj().put("takeId",id(saved)));});
-                if(!lipsync)jobs.enqueue(project(job),required(job,"shotId"),"ARCHIVE",obj().put("targetKind","keyframes").put("targetId",id(frame)).put("providerUrl",url).put("simulated",submission.simulated()),"archive:keyframe:"+id(frame));
+                if(!lipsync)jobs.enqueue(project(job),required(job,"shotId"),"ARCHIVE",obj().put("targetKind","keyframes").put("targetId",id(frame)).put("providerUrl",required(frame,"providerUrl")).put("simulated",submission.simulated()),"archive:keyframe:"+id(frame));
                 return null;
             });
         }catch(Exception e){jobs.fail(id(job),"ACCEPTED_PERSISTENCE_FAILED","服务商已接受视频任务，任务号 "+submission.taskId()+"；本地保存失败，请核对后恢复",false,true);throw new WorkflowException("SUBMISSION_UNCERTAIN","服务商已接单，本地记录保存失败，禁止自动重复提交");}

@@ -1,0 +1,9 @@
+{
+  "fixtureId":"modern-counterattack",
+  "idea":"被裁员的仓库管理员用遗留账本追回被侵吞的补偿款",
+  "episodeCount":12,
+  "targetDuration":24,
+  "distributionProfile":"GENERAL",
+  "storyProfile":{"settingGenre":"URBAN","storyType":"COUNTERATTACK","audience":"GENERAL","tones":["克制","爽"],"tropes":[]},
+  "expectedInvariants":{"requiredRuleId":"TYPE_COUNTERATTACK","coreLoopMustContain":"低估与压制","coreLoopMustNotContain":"接触→吸引","maxSceneLimit":2,"futureFactLeakageAllowed":false}
+}

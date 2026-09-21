@@ -39,8 +39,13 @@ class DirectorContractTest {
             .set("characters",mapper.createArrayNode().add(mapper.createObjectNode().put("characterId","actor").put("worldPosition","院门南侧一米")
                 .put("facing","朝北").put("framePosition","画面左侧").put("screenDirection","FRAME_RIGHT").put("eyeLineTarget","北侧门环")
                 .put("visibleBodyPart","RIGHT_HAND").put("bodyFrameSide","IN_FRAME_LEFT").put("limbEntrySide","FRAME_LEFT").put("contactPoint","右手握住铃柄"))));
+        ((ObjectNode)shot.path("blocking")).putArray("spatialAnchors").add(mapper.createObjectNode().put("subject","actor").put("anchorObject","院门").put("relation","SOUTH_OF").put("facing","NORTH").put("distance","1米").put("side","SOUTH"));
         shot.set("performancePlan",mapper.createObjectNode().put("primaryAction","凝视铁铃").put("microExpression","眉间收紧")
-            .put("bodyLanguage","肩背微僵").put("gaze","视线锁定门环").put("gesture","右手稳握铃柄").put("actionUnits",1).set("propOperations",mapper.createArrayNode()));
+            .put("bodyLanguage","肩背微僵").put("gaze","视线锁定门环").put("gesture","右手稳握铃柄").put("actionUnits",1)
+            .put("detailLevel","BASIC").put("microExpressionStage","NONE")
+            .set("performanceCues",mapper.createObjectNode().put("eyes","").put("jaw","").put("breath","").put("hands","").put("shoulders","").put("pause","")));
+        ((ObjectNode)shot.path("performancePlan")).set("propOperations",mapper.createArrayNode());
+        ((ObjectNode)shot.path("performancePlan")).putArray("facsUnits");
         shot.set("visibilityPlan",mapper.createObjectNode().put("occlusion","NONE").put("requiredDetail","IDENTITY").set("visibleFeatures",mapper.createArrayNode().add("眼睛")));
         shot.put("expression","警觉压住恐惧").put("eyeLine","朝画面右侧门环").put("focus","老人眼睛")
             .put("dialogueOwner","").put("transition","CUT");
@@ -54,6 +59,8 @@ class DirectorContractTest {
             .put("emotionAfter","警觉").put("informationReveal","门外存在异常动静").put("importance","HIGH").put("suggestedDuration",6);
         beat.putArray("activeCharacters").add("actor");beat.putArray("storyFactChanges");beat.putArray("relationshipChanges");output.putArray("dramaticBeats").add(beat);
         output.putObject("sceneState").put("locationId","yard").put("time","午夜").put("lighting","西侧月光").put("spatialRelations","院门在北侧，井在东侧");
+        output.putArray("presenceLedger").add(mapper.createObjectNode().put("characterId","actor").put("presence","PRESENT").put("visibility","FOREGROUND").put("anchor","院门南侧一米"));
+        shot.putArray("offscreenCharacterIds");shot.putArray("exitedCharacterIds");
         output.putArray("shots").add(shot).add(shot.deepCopy().put("relationToPrevious","REACTION"));
     }
     @AfterEach void close(){validatorFactory.close();}
@@ -69,6 +76,39 @@ class DirectorContractTest {
         assertThat(root.has("directorPlan")).isTrue();
         assertThat(root.has("dramaticBeats")).isTrue();
         assertThat(shot.fieldNames()).toIterable().contains("beatId","directorIntent","subject","secondarySubjects","blocking","performancePlan","dialogueOwner");
+    }
+    @Test void formalContractCarriesPresencePerformanceAndTimingGuards(){
+        JsonNode root=contract.schema(input).path("properties"),shotSchema=root.path("shots").path("items").path("properties");
+        assertThat(root.has("presenceLedger")).isTrue();
+        assertThat(shotSchema.fieldNames()).toIterable().contains("offscreenCharacterIds","exitedCharacterIds");
+        assertThat(shotSchema.path("performancePlan").path("properties").fieldNames()).toIterable()
+            .contains("detailLevel","microExpressionStage","performanceCues","facsUnits");
+        input.putObject("episodeScript").put("script","周伯：别开门，他没有影子。");
+        ObjectNode line=mapper.createObjectNode().put("characterId","actor").put("displayText","别开门，他没有影子。")
+            .put("sourceScript","周伯：别开门，他没有影子。").put("emotion","恐惧中克制").put("startMs",0).put("endMs",900);
+        shot(0).withArray("dialogues").add(line);shot(0).put("dialogueOwner","actor");
+        assertThatThrownBy(()->contract.validate(output,input,"timing-request")).hasMessageContaining("DIALOGUE_ESTIMATED_OVERRUN");
+    }
+    @Test void formalContractExecutesFirstShotAndFramingValidators(){
+        shot(0).put("subject","他和她").put("action","有人伸出一只手");
+        assertThatThrownBy(()->contract.validate(output,input,"anchor-request")).hasMessageContaining("MULTI_SUBJECT_AMBIGUITY");
+        shot(0).put("subject","actor").put("action","周伯伸出右手").put("shotSize","CLOSE_UP");
+        ((ObjectNode)shot(0).path("blocking").path("characters").path(0)).put("worldPosition","ROOM_FAR_NORTH");
+        ((ObjectNode)shot(0).path("visibilityPlan")).put("requiredDetail","PROP_DETAIL");
+        assertThatThrownBy(()->contract.validate(output,input,"framing-request")).hasMessageContaining("SHOT_SCALE_CONFLICT");
+    }
+    @Test void blockingPlansExposeStructuredWorldSpaceAnchors() {
+        JsonNode full=contract.schema(input).path("properties").path("shots").path("items").path("properties").path("blocking").path("properties").path("spatialAnchors");
+        JsonNode staged=contract.planSchema(input).path("properties").path("shotSkeletons").path("items").path("properties").path("basicBlocking").path("properties").path("spatialAnchors");
+        assertThat(full.path("type").asText()).isEqualTo("array");
+        assertThat(staged.path("type").asText()).isEqualTo("array");
+        assertThat(full.path("items").path("required")).extracting(JsonNode::asText)
+                .containsExactlyInAnyOrder("subject","anchorObject","relation","facing","distance","side");
+    }
+    @Test void directorContractRejectsWorldAnchorFlipAcrossAdjacentShots() {
+        ((ObjectNode)shot(1).path("blocking").path("spatialAnchors").path(0)).put("relation","NORTH_OF").put("side","NORTH");
+        assertThatThrownBy(()->contract.validate(output,input,"provider-spatial"))
+                .hasMessageContaining("SPATIAL_ANCHOR_WORLD_RELATION_CHANGED");
     }
     @Test void finalShotSchemaRejectsLegacyScreenDirectionAliases(){
         JsonNode direction=contract.schema(input).path("properties").path("shots").path("items").path("properties")
@@ -141,7 +181,7 @@ class DirectorContractTest {
         ObjectNode detail=mapper.createObjectNode().put("shotIndex",1).put("visualFocus","老人移动的脚步").put("emotion","警觉").put("expression","眉间收紧").put("eyeLine","看向水井").put("focus","老人脚步").put("difficulty","B");
         for(String field:List.of("performancePlan","visibilityPlan"))detail.set(field,shot(0).path(field).deepCopy());
         ObjectNode selectedCamera=((ObjectNode)shot(0).path("cameraPlan")).deepCopy();selectedCamera.remove("lensMm");selectedCamera.put("lensPreset","LENS_50MM");detail.set("cameraPlan",selectedCamera);
-        detail.putArray("dialogues").add(mapper.createObjectNode().put("characterId","actor").put("displayText","门外有人。").put("emotion","压低声音警告").put("startMs",100).put("endMs",1200));
+        detail.putArray("dialogues").add(mapper.createObjectNode().put("characterId","actor").put("displayText","门外有人。").put("emotion","压低声音警告").put("startMs",100).put("endMs",1800));
         ObjectNode selectedViews=detail.putObject("referenceViews");selectedViews.putArray("characterViews").add("FRONT");selectedViews.put("locationView","FRONT");selectedViews.putArray("propViews").add("SIDE");
         ObjectNode framing=detail.putObject("blocking");framing.putArray("characters").addObject().put("characterId","actor").put("framePosition","画面左三分之一").put("eyeLineTarget","水井")
             .put("visibleBodyPart","WHOLE_BODY").put("bodyFrameSide","IN_FRAME_LEFT").put("limbEntrySide","NONE").put("contactPoint","");
@@ -233,7 +273,7 @@ class DirectorContractTest {
         assertThatCode(()->contract.validate(canonical,input,"provider-123")).doesNotThrowAnyException();
     }
     @Test void offscreenStateReturnedByTheModelCannotOverwriteTheServerLedger() {
-        ObjectNode second=shot(1);second.putArray("characterIds");second.putArray("propIds");
+        ObjectNode second=shot(1);second.putArray("characterIds");second.putArray("offscreenCharacterIds").add("actor");second.putArray("propIds");
         second.putObject("referenceViews").put("yard","FRONT");
         ObjectNode canonical=contract.canonicalizeTrustedFields(output,input);
         assertThat(canonical.path("shots").path(1).path("startState").path("characters")).isEmpty();
@@ -274,6 +314,7 @@ class DirectorContractTest {
         input.putObject("episodeScript").put("script","周伯：门外的人不是老李。");
         ObjectNode listener=mapper.createObjectNode().put("id","listener").put("name","陈木根").put("baseLookId","listener-look");input.withObject("assets").withArray("characters").add(listener);
         input.withObject("assets").withArray("looks").add(mapper.createObjectNode().put("id","listener-look").put("characterId","listener"));
+        output.withArray("presenceLedger").add(mapper.createObjectNode().put("characterId","listener").put("presence","PRESENT").put("visibility","BACKGROUND").put("anchor","供桌右侧"));
         for(int i=0;i<2;i++){
             ObjectNode s=shot(i);s.withArray("characterIds").add("listener");s.withObject("referenceViews").put("listener-look","FRONT");
             ObjectNode listenerState=mapper.createObjectNode().put("identityId","listener").put("lookId","listener-look").put("position","供桌右侧")
@@ -390,7 +431,7 @@ class DirectorContractTest {
         ((ObjectNode)input.path("scene")).put("duration",9);
         ObjectNode first=shot(0).deepCopy();
         ObjectNode hidden=first.deepCopy().put("relationToPrevious","REACTION");
-        hidden.putArray("characterIds");hidden.putArray("propIds");hidden.putObject("referenceViews").put("yard","FRONT");
+        hidden.putArray("characterIds");hidden.putArray("offscreenCharacterIds").add("actor");hidden.putArray("propIds");hidden.putObject("referenceViews").put("yard","FRONT");
         ((ObjectNode)hidden.path("startState").path("characters")).removeAll();
         ((ObjectNode)hidden.path("startState").path("props")).removeAll();
         ((ObjectNode)hidden.path("endState").path("characters")).removeAll();

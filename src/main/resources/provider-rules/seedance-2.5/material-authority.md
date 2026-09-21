@@ -1,0 +1,1 @@
+REFERENCE_AUTHORITY: every activated reference declares the dimensions it controls and the dimensions it must not transfer. Identity, look, location, prop, composition, motion, and audio authority remain separate. User-selected references keep the highest explicit authority.

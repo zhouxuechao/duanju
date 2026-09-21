@@ -26,7 +26,7 @@ public final class SequenceBoundaryGate {
         for(String beat:reserved)if(!beat.isBlank()&&action.contains(beat))fail("RESERVED_BEAT_EARLY","当前动作提前执行未来节拍 "+beat);
         int depth=previous.path("continuationDepth").asInt(0),max=request.path("sceneContinuityPolicy").path("maxContinuationDepth").asInt(2);
         if("CONTINUOUS".equals(relation)&&depth>=max&&(!request.path("reanchorPlan").isObject()||request.path("reanchorPlan").isEmpty()))fail("REANCHOR_REQUIRED","连续生成深度已达到上限，必须从 Canonical References 重新锚定");
-        Map<String,Integer> authority=new HashMap<>();for(JsonNode binding:bindings){int priority=binding.path("authorityPriority").asInt();for(JsonNode control:binding.path("controls")){String key=control.asText();Integer old=authority.putIfAbsent(key,priority);if(old!=null&&old==priority)fail("REFERENCE_AUTHORITY_CONFLICT","同一维度存在两个同级权威："+key);}}
+        Map<String,Integer> authority=new HashMap<>();for(JsonNode binding:bindings){int priority=binding.path("authorityPriority").asInt();String subject=text(binding,"subjectId");if(subject.isBlank())subject=text(binding,"entityId");if(subject.isBlank())subject=text(binding,"sourceResourceId");if(subject.isBlank())subject="GLOBAL";for(JsonNode control:binding.path("controls")){String key=subject+"|"+control.asText();Integer old=authority.putIfAbsent(key,priority);if(old!=null&&old==priority)fail("REFERENCE_AUTHORITY_CONFLICT","同一主体的同一维度存在两个同级权威："+key);}}
     }
     private Set<String> upper(JsonNode array){Set<String> out=new LinkedHashSet<>();if(array.isArray())array.forEach(v->out.add(v.asText("").trim().toUpperCase(Locale.ROOT)));return out;}
     private boolean observedMismatch(JsonNode observed,JsonNode planned,JsonNode shot){

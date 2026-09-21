@@ -1,0 +1,1 @@
+START_FRAME and END_FRAME are native locked boundary frames only when the selected route supports them. INTERMEDIATE_KEYFRAME, COMPOSITION_REFERENCE, IDENTITY_REFERENCE, LOCATION_REFERENCE, PROP_REFERENCE, and POSE_REFERENCE are semantic references and must not be mislabeled as native boundary frames. Preserve world-space SpatialAnchor relations even when screen positions change.

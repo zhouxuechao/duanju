@@ -62,12 +62,16 @@ class EngineeringGovernanceIntegrationTest {
         assertThat(started.path("status").asText()).isEqualTo("SUCCESS");
         assertThat(started.path("resumeFromStage").asText()).isBlank();
         assertThat(started.path("stages")).anyMatch(stage->stage.path("stage").asText().equals("PREFLIGHT")&&stage.path("status").asText().equals("SUCCESS"));
+        assertThat(started.path("stages")).extracting(stage->stage.path("stage").asText()).containsExactly(
+            "PREFLIGHT","STORY","DIRECTOR","IMAGE","VIDEO","AUDIO","TIMELINE","PREVIEW","CREATIVE_QA","FINAL");
         assertThat(started.path("stages")).allMatch(stage->stage.path("status").asText().equals("SUCCESS"));
         String runId=started.path("id").asText();
         ObjectNode timeline=store.list(TIMELINE,id(project),null).getFirst();
         assertThat(text(timeline,"previewUrl")).startsWith("/api/media/renders/");
         assertThat(text(timeline,"finalUrl")).startsWith("/api/media/renders/");
         assertThat(text(timeline,"finalQaStatus")).isEqualTo("PASSED");
+        assertThat(timeline.path("finalCreativeQa").fieldNames()).toIterable().contains(
+            "characterConsistency","propContinuity","positionContinuity","actionContinuity","dialogueQuality","bgmFit","sfxAccuracy","hook","midHook","cliffhanger");
         assertThat(store.list(STORYBOARD,id(project),null)).isNotEmpty();
         assertThat(store.list(QC_RESULT,id(project),null)).anyMatch(review->!review.path("passed").asBoolean());
         assertThat(store.list(DIALOGUE_LINE,id(project),null)).isNotEmpty();
