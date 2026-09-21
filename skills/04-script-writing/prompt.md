@@ -13,4 +13,4 @@
 - scenes 的 startSec/endSec/duration 连续，合计严格等于 targetDurationSec。对白量要给动作、反应和 TTS 留出时间。
 - 开场 Hook、本集 Payoff、集尾 Cliffhanger 必须来自本集具体情境，不能连续使用“电话响、门打开、所有人震惊”等同一种母题。
 
-所有资产 key 逐字复制 CORE；startState/endState 必须与已确认 Outline 相同。镜头参数、机位、焦段与导演调度由后续导演阶段生成。输出是待 Story QA 和人工审查的草稿，只返回 Schema 对应 JSON。
+所有资产 key 逐字复制 CORE；startState/endState 必须与已确认 Outline 相同。evidenceLedger.formedAt 表示证据首次形成的集号，必须填写当前或更早的 episodeNo，不能填写集内秒数；集内发生时刻由正文、Beat 或 Scene 表达。镜头参数、机位、焦段与导演调度由后续导演阶段生成。输出是待 Story QA 和人工审查的草稿，只返回 Schema 对应 JSON。

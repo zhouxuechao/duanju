@@ -227,6 +227,47 @@ class AssetViewIntegrationTest {
         assertThat(binding.path("mustNotTransfer")).extracting(JsonNode::asText).doesNotContain("background");
         assertThat(input.path("prompt").asText()).contains("真实透视","离地1.5米","featureId","不得遗漏、增添、复制或换面");
     }
+    @Test void derivedLocationPromptRejectsMasterCompositionAndMakesTheTargetCameraDominant(){
+        ObjectNode request=obj();request.putArray("assetIds").add(locationId);assets.generate(projectId,request);
+        approve(run(current(locationId,"LAYOUT")));
+
+        ObjectNode front=store.get(GENERATION_JOB,required(current(locationId,"FRONT"),"generationJobId"));
+        String prompt=front.path("inputSnapshot").path("prompt").asText();
+        assertThat(prompt).startsWith("[TARGET VIEW — HIGHEST PRIORITY]");
+        assertThat(prompt).contains(
+                "目标 viewCamera 是构图与投影的最高约束",
+                "不得继承参考图的观察方向、取景位置、画面布局或可见面",
+                "相机位于主活动区北侧并朝南",
+                "北侧边界位于相机身后");
+        run(current(locationId,"FRONT"));
+        verify(images,atLeastOnce()).generate(argThat(r->
+                r.prompt().startsWith("[TARGET VIEW — HIGHEST PRIORITY]")
+                        && r.referenceImageUrls().isEmpty()
+                        && !r.options().containsKey("guidance_scale")
+                        && Map.of("mode","standard").equals(r.options().get("optimize_prompt_options"))));
+    }
+    @Test void propSideUsesAnEdgeOnCameraContractAndPreservesIdentityTextOnlyWhereVisible(){
+        ObjectNode request=obj();request.putArray("assetIds").add(propId);assets.generate(projectId,request);
+        approve(run(current(propId,"FRONT")));
+
+        ObjectNode side=store.get(GENERATION_JOB,required(current(propId,"SIDE"),"generationJobId"));
+        JsonNode camera=side.path("inputSnapshot").path("viewCamera");
+        assertThat(camera.path("projection").asText()).isEqualTo("EDGE_ON_PROFILE");
+        assertThat(camera.path("objectPlaneToCameraDegrees").asInt()).isEqualTo(90);
+        assertThat(side.path("inputSnapshot").path("prompt").asText()).contains(
+                "必须显示物件真实厚度",
+                "身份文字、标记和图案必须保持");
+    }
+    @Test void rejectedViewFeedbackIsCarriedIntoTheReplacementRequest(){
+        generateLook();approve(run(current(lookId,"FRONT")));
+        ObjectNode left=run(current(lookId,"LEFT"));
+        ObjectNode rejected=assets.reject(id(left),obj().put("revision",revision(left)).put("note","侧面仍复制了正面构图"));
+
+        ObjectNode replacement=assets.regenerate(id(rejected),obj().put("revision",revision(rejected)));
+        ObjectNode job=store.get(GENERATION_JOB,required(replacement,"generationJobId"));
+        assertThat(job.path("inputSnapshot").path("revisionFeedback").asText()).isEqualTo("侧面仍复制了正面构图");
+        assertThat(job.path("inputSnapshot").path("prompt").asText()).contains("上一版可见偏差：侧面仍复制了正面构图");
+    }
     @Test void legacyLocationCompilerCannotRemainProductionReady(){
         ObjectNode request=obj();request.putArray("assetIds").add(locationId);assets.generate(projectId,request);
         approve(run(current(locationId,"LAYOUT")));

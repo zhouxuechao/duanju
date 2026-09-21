@@ -19,6 +19,24 @@ class StoryQualityPolicyTest {
         assertThat(checked.path("blockingIssues").get(0).asText()).contains("没有事实");
     }
 
+    @Test void confirmedBoundaryChangeRecoversDeltaWhenTheModelReturnsEmptyArrays() {
+        ObjectNode qa = qa();
+        ObjectNode input = input(0);
+        input.withObject("episodeOutline").put("startState", "身份稳定、票未翻面、灯亮")
+                .put("endState", "身份动摇、票已翻面、灯灭");
+        input.withObject("episodeOutline").putArray("progressionEvents")
+                .add(obj().put("atSec", 8).put("type", "身份/知识").put("description", "主角看见自己的注销记录"))
+                .add(obj().put("atSec", 20).put("type", "风险/目标").put("description", "身份风险由猜测变成眼前证据"));
+        input.set("episodeScript", obj().put("startState", "身份稳定、票未翻面、灯亮")
+                .put("endState", "身份动摇、票已翻面、灯灭"));
+
+        ObjectNode checked = policy.apply(qa, input);
+
+        assertThat(checked.path("passed").asBoolean()).isTrue();
+        assertThat(checked.at("/episodeDelta/knowledgeChanged").get(0).asText()).contains("注销记录");
+        assertThat(checked.at("/episodeDelta/riskChanged").get(0).asText()).contains("身份风险");
+    }
+
     @Test void fourStructurallyIdenticalEpisodesAreBlockedWithoutLoadingFullHistory() {
         ObjectNode qa = qa();
         qa.withObject("episodeDelta").withArray("knowledgeChanged").add("获得新线索");

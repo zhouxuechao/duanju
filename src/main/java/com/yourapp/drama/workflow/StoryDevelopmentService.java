@@ -24,7 +24,9 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -388,10 +390,11 @@ public class StoryDevelopmentService {
          LlmGateway.StructuredRequest request = new LlmGateway.StructuredRequest(this.prompt(Documents.text(doc, "documentType")), input.toString(), this.mapper.convertValue(schema, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {}), Map.of());
          LlmGateway.StructuredResult<JsonNode> result = this.llm.generate(request, JsonNode.class);
          this.jobs.mutate(Documents.id(job), (j) -> j.put("providerRequestId", result.requestId()).put("model", result.model()).put("simulated", result.simulated()));
+         JsonNode generatedContent = this.canonicalizeSystemOwnedFields(doc, result.value());
 
          ObjectNode validation;
          try {
-            validation = this.validate(doc, (JsonNode)result.value());
+            validation = this.validate(doc, generatedContent);
          } catch (RuntimeException error) {
             String rawMessage = error.getMessage();
             String failureMessage = rawMessage == null || rawMessage.isBlank() ? error.getClass().getSimpleName() : rawMessage;
@@ -399,7 +402,7 @@ public class StoryDevelopmentService {
             this.store.transaction(() -> {
                ObjectNode latest = this.store.getForUpdate(ResourceKind.STORY_DOCUMENT, documentId);
                ObjectNode invalid = latest.deepCopy().put("reviewStatus", "FAILED");
-               invalid.set("content", (JsonNode)result.value());
+               invalid.set("content", generatedContent.deepCopy());
                invalid.set("validation", Documents.obj().put("passed", false).put("message", failureMessage));
                this.store.update(ResourceKind.STORY_DOCUMENT, documentId, Documents.revision(latest), invalid);
                return null;
@@ -411,7 +414,7 @@ public class StoryDevelopmentService {
             ObjectNode latest = this.store.getForUpdate(ResourceKind.STORY_DOCUMENT, documentId);
             boolean needsQa = "EPISODE_SCRIPT".equals(Documents.text(latest, "documentType")) && this.current(latest);
             ObjectNode next = latest.deepCopy().put("reviewStatus", this.current(latest) ? (needsQa ? "QA_PENDING" : "REVIEW") : "STALE").put("providerRequestId", result.requestId());
-            next.set("content", ((JsonNode)result.value()).deepCopy());
+            next.set("content", generatedContent.deepCopy());
             next.set("validation", validation);
             ObjectNode saved = this.store.update(ResourceKind.STORY_DOCUMENT, documentId, Documents.revision(latest), next);
             this.jobs.succeed(Documents.id(job), Documents.obj().put("documentId", documentId).put("stage", Documents.text(doc, "documentType")).put("awaitingReview", this.current(latest)).put("simulated", result.simulated()));
@@ -421,6 +424,83 @@ public class StoryDevelopmentService {
       } else {
          this.jobs.mutate(Documents.id(job), (j) -> j.put("status", "CANCELLED"));
       }
+   }
+
+   private JsonNode canonicalizeSystemOwnedFields(ObjectNode document, JsonNode generated) {
+      if (!generated.isObject()) return generated;
+      ObjectNode content = (ObjectNode)generated.deepCopy();
+      String documentType = Documents.text(document, "documentType");
+      if ("CORE".equals(documentType)) {
+         ObjectNode project = this.storyProfiles.enrich((ObjectNode)document.path("projectSnapshot").deepCopy());
+         content.set("storyProfile", project.path("storyProfile").deepCopy());
+         content.path("locations").forEach(this::canonicalizeTopologyReferences);
+      } else if ("EPISODE_SCRIPT".equals(documentType)) {
+         JsonNode outline = document.path("sourceSnapshot").path("episodeOutline");
+         if (outline.isObject()) {
+            content.set("startState", outline.path("startState").deepCopy());
+            content.set("endState", outline.path("endState").deepCopy());
+         }
+         JsonNode protectedState = document.path("sourceSnapshot").path("rewriteBoundary").path("protected");
+         if (protectedState.isObject()) {
+            for (String field : List.of("establishedFacts", "unrevealedSecrets", "characterKnowledge", "evidenceIds", "relationships")) {
+               JsonNode expected = protectedState.path(field);
+               if (!expected.isMissingNode() && !expected.isNull()) content.set(field, expected.deepCopy());
+            }
+         }
+      }
+      return content;
+   }
+
+   private void canonicalizeTopologyReferences(JsonNode location) {
+      JsonNode bible = location.path("locationBible");
+      Set<String> surfaces = new LinkedHashSet<>(), nodes = new LinkedHashSet<>();
+      bible.path("surfaces").forEach(value -> {
+         String id = Documents.text(value, "surfaceId");
+         if (!id.isBlank()) { surfaces.add(id); nodes.add(id); }
+      });
+      bible.path("fixedFeatures").forEach(value -> {
+         if (value.isObject()) {
+            ObjectNode feature = (ObjectNode)value;
+            String id = Documents.text(feature, "featureId");
+            if (!id.isBlank()) nodes.add(id);
+            String support = Documents.text(feature, "supportSurfaceId");
+            String canonical = uniqueNearReference(support, surfaces);
+            if (!canonical.equals(support)) feature.put("supportSurfaceId", canonical);
+         }
+      });
+      bible.path("lightSources").forEach(value -> {
+         String id = Documents.text(value, "lightId");
+         if (!id.isBlank()) nodes.add(id);
+      });
+      bible.path("spatialRelations").forEach(value -> {
+         if (!value.isObject()) return;
+         ObjectNode relation = (ObjectNode)value;
+         for (String field : List.of("subjectId", "objectId")) {
+            String reference = Documents.text(relation, field);
+            String canonical = uniqueNearReference(reference, nodes);
+            if (!canonical.equals(reference)) relation.put(field, canonical);
+         }
+      });
+   }
+
+   private String uniqueNearReference(String reference, Set<String> allowed) {
+      if (reference.isBlank() || allowed.contains(reference)) return reference;
+      List<String> sameCaseFold = allowed.stream().filter(candidate -> candidate.equalsIgnoreCase(reference)).toList();
+      if (sameCaseFold.size() == 1) return sameCaseFold.getFirst();
+      List<String> near = allowed.stream().filter(candidate -> Math.max(candidate.length(), reference.length()) >= 4)
+              .filter(candidate -> editDistance(candidate.toUpperCase(Locale.ROOT), reference.toUpperCase(Locale.ROOT)) <= 1).toList();
+      return near.size() == 1 ? near.getFirst() : reference;
+   }
+
+   private int editDistance(String left, String right) {
+      int[] previous = new int[right.length() + 1];
+      for (int j = 0; j <= right.length(); j++) previous[j] = j;
+      for (int i = 1; i <= left.length(); i++) {
+         int[] current = new int[right.length() + 1]; current[0] = i;
+         for (int j = 1; j <= right.length(); j++) current[j] = Math.min(Math.min(current[j - 1] + 1, previous[j] + 1), previous[j - 1] + (left.charAt(i - 1) == right.charAt(j - 1) ? 0 : 1));
+         previous = current;
+      }
+      return previous[right.length()];
    }
 
    public void syncFailure(ObjectNode job) {

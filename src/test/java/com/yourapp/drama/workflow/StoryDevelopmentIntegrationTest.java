@@ -143,6 +143,59 @@ class StoryDevelopmentIntegrationTest {
     }
 
     @Test
+    void microOutlineAcceptsAnExplicitDisabledMidHookWithoutInventingEscalation() throws Exception {
+        ObjectNode core = generateCore();
+        development.confirm(id(core), obj().put("revision", revision(core)).put("batchSize", 5));
+        ObjectNode batch = latest("OUTLINE_BATCH", 1);
+        reset(llm);
+        when(llm.generate(any(), eq(JsonNode.class))).thenAnswer(invocation -> {
+            LlmGateway.StructuredResult<JsonNode> result = resultFor(invocation.getArgument(0));
+            ObjectNode value = (ObjectNode) result.value().deepCopy();
+            ObjectNode midHook = ((ObjectNode) value.path("episodes").get(0)).putObject("midHook");
+            midHook.put("required", false).put("preferredPositionRatio", .5).put("type", "NONE")
+                    .put("description", "微短片采用单回合推进，不设置独立中段钩子")
+                    .put("raisesWhat", "").put("mustNotResolveMainPayoff", true);
+            return new LlmGateway.StructuredResult<JsonNode>(value, result.model(), result.requestId(), value.toString(), result.simulated());
+        });
+
+        worker.tick();
+        batch = store.get(STORY_DOCUMENT, id(batch));
+
+        assertThat(text(batch, "reviewStatus")).isEqualTo("REVIEW");
+        assertThat(batch.at("/content/episodes/0/midHook/required").asBoolean()).isFalse();
+        assertThat(batch.at("/content/episodes/0/midHook/raisesWhat").asText()).isEmpty();
+    }
+
+    @Test
+    void episodeScriptUsesConfirmedOutlineBoundaryStatesWhenTheModelParaphrasesThem() throws Exception {
+        ObjectNode core = generateCore();
+        ObjectNode batch1 = confirmAndGenerate(core, 5);
+        confirm(batch1);
+        ObjectNode batch2 = latest("OUTLINE_BATCH", 2);
+        reset(llm);
+        when(llm.generate(any(), eq(JsonNode.class))).thenAnswer(invocation -> {
+            LlmGateway.StructuredRequest request = invocation.getArgument(0);
+            LlmGateway.StructuredResult<JsonNode> result = resultFor(request);
+            JsonNode input = mapper.readTree(request.userPrompt());
+            if (!"EPISODE_SCRIPT".equals(input.path("phase").asText())) return result;
+            ObjectNode paraphrased = (ObjectNode) result.value().deepCopy();
+            paraphrased.put("startState", "模型改写后的开场状态");
+            paraphrased.put("endState", "模型改写后的结尾状态");
+            return new LlmGateway.StructuredResult<JsonNode>(paraphrased, result.model(), result.requestId(), paraphrased.toString(), result.simulated());
+        });
+
+        development.confirm(id(batch2), obj().put("revision", revision(batch2)));
+        worker.tick();
+        ObjectNode script = latest("EPISODE_SCRIPT", 1);
+
+        assertThat(text(script, "reviewStatus")).isEqualTo("QA_PENDING");
+        assertThat(text(script.path("content"), "startState"))
+                .isEqualTo(text(script.path("sourceSnapshot").path("episodeOutline"), "startState"));
+        assertThat(text(script.path("content"), "endState"))
+                .isEqualTo(text(script.path("sourceSnapshot").path("episodeOutline"), "endState"));
+    }
+
+    @Test
     void scriptConfirmationMaterializesEpisodeSceneAndSchedulesNextScript() {
         ObjectNode core = generateCore();
         ObjectNode b1 = confirmAndGenerate(core, 5); confirm(b1);
@@ -194,6 +247,48 @@ class StoryDevelopmentIntegrationTest {
         String input = requests.getAllValues().stream().map(LlmGateway.StructuredRequest::userPrompt).filter(value -> value.contains("\"phase\":\"CORE\"")).findFirst().orElseThrow();
         assertThat(input).contains("episodeFormat", "GENERAL_MICRO", "rulePack", "fingerprint", "BASE_CORE");
         assertThat(input).contains("premiseAnalysis");
+    }
+
+    @Test
+    void coreUsesTheCanonicalProjectProfileWhenTheModelOmitsAProfileField() throws Exception {
+        when(llm.generate(any(), eq(JsonNode.class))).thenAnswer(invocation -> {
+            LlmGateway.StructuredRequest request = invocation.getArgument(0);
+            JsonNode input = mapper.readTree(request.userPrompt());
+            LlmGateway.StructuredResult<JsonNode> result = resultFor(request);
+            if (!"CORE".equals(input.path("phase").asText())) return result;
+            ObjectNode incomplete = (ObjectNode) result.value().deepCopy();
+            ((ObjectNode) incomplete.path("storyProfile")).remove("tones");
+            return new LlmGateway.StructuredResult<JsonNode>(incomplete, result.model(), result.requestId(), incomplete.toString(), result.simulated());
+        });
+
+        ObjectNode core = generateCore();
+        ObjectNode canonical = store.get(PROJECT, projectId).withObject("storyProfile");
+
+        assertThat(text(core, "reviewStatus")).isEqualTo("REVIEW");
+        assertThat(core.path("content").path("storyProfile")).isEqualTo(canonical);
+        assertThat(core.path("content").path("storyProfile").path("tones").isArray()).isTrue();
+    }
+
+    @Test
+    void coreRepairsOnlyUniquelyResolvableTopologyReferenceTypos() throws Exception {
+        when(llm.generate(any(), eq(JsonNode.class))).thenAnswer(invocation -> {
+            LlmGateway.StructuredRequest request = invocation.getArgument(0);
+            JsonNode input = mapper.readTree(request.userPrompt());
+            LlmGateway.StructuredResult<JsonNode> result = resultFor(request);
+            if (!"CORE".equals(input.path("phase").asText())) return result;
+            ObjectNode mistyped = (ObjectNode) result.value().deepCopy();
+            ObjectNode bible = (ObjectNode) mistyped.at("/locations/0/locationBible");
+            ((ObjectNode) bible.path("fixedFeatures").get(0)).put("supportSurfaceId", "ROD");
+            ((ObjectNode) bible.path("spatialRelations").get(0)).put("subjectId", "POSTBO");
+            return new LlmGateway.StructuredResult<JsonNode>(mistyped, result.model(), result.requestId(), mistyped.toString(), result.simulated());
+        });
+
+        ObjectNode core = generateCore();
+        JsonNode bible = core.at("/content/locations/0/locationBible");
+
+        assertThat(text(core, "reviewStatus")).isEqualTo("REVIEW");
+        assertThat(bible.at("/fixedFeatures/0/supportSurfaceId").asText()).isEqualTo("ROAD");
+        assertThat(bible.at("/spatialRelations/0/subjectId").asText()).isEqualTo("POSTBOX");
     }
 
     @Test
@@ -382,6 +477,44 @@ class StoryDevelopmentIntegrationTest {
         assertThat(text(rewritten.path("sourceSnapshot").path("rewriteRequest"), "preserveStartState")).isEqualTo(text(script.path("content"), "startState"));
         assertThat(text(rewritten.path("sourceSnapshot").path("rewriteRequest"), "preserveEndState")).isEqualTo(text(script.path("content"), "endState"));
         assertThat(store.get(STORY_DOCUMENT, id(script)).path("stale").asBoolean()).isTrue();
+    }
+
+    @Test
+    void qaRewriteRestoresProtectedSecretsWhenTheModelOnlyParaphrasesThem() throws Exception {
+        ObjectNode core = generateCore();
+        ObjectNode batch1 = confirmAndGenerate(core, 5); confirm(batch1);
+        ObjectNode batch2 = latest("OUTLINE_BATCH", 2); confirm(batch2);
+        ObjectNode script = latest("EPISODE_SCRIPT", 1); worker.tick();
+        script = store.get(STORY_DOCUMENT, id(script));
+        ObjectNode content = (ObjectNode) script.path("content").deepCopy();
+        content.putArray("unrevealedSecrets").add("寄信人的身份仍未揭晓");
+        ObjectNode qa = (ObjectNode) script.path("storyQa").deepCopy();
+        qa.put("passed", false).put("rewriteRequired", true);
+        qa.withArray("blockingIssues").add("本集没有真实剧情增量");
+        qa.withArray("rewriteInstructions").add("加入会被下一集继承的角色决定");
+        ObjectNode scripted = script.deepCopy();
+        scripted.set("content", content);
+        scripted.set("storyQa", qa);
+        script = store.update(STORY_DOCUMENT, id(script), revision(script), scripted);
+
+        ObjectNode rewritten = development.rewrite(id(script), obj().put("revision", revision(script)));
+        reset(llm);
+        when(llm.generate(any(), eq(JsonNode.class))).thenAnswer(invocation -> {
+            LlmGateway.StructuredRequest request = invocation.getArgument(0);
+            LlmGateway.StructuredResult<JsonNode> result = resultFor(request);
+            JsonNode input = mapper.readTree(request.userPrompt());
+            if (!"EPISODE_SCRIPT".equals(input.path("phase").asText())) return result;
+            ObjectNode paraphrased = (ObjectNode) result.value().deepCopy();
+            paraphrased.putArray("unrevealedSecrets").add("寄信人究竟是谁仍未揭晓");
+            return new LlmGateway.StructuredResult<JsonNode>(paraphrased, result.model(), result.requestId(), paraphrased.toString(), result.simulated());
+        });
+
+        worker.tick();
+        rewritten = store.get(STORY_DOCUMENT, id(rewritten));
+
+        assertThat(text(rewritten, "reviewStatus")).isEqualTo("QA_PENDING");
+        assertThat(rewritten.path("content").path("unrevealedSecrets"))
+                .isEqualTo(rewritten.at("/sourceSnapshot/rewriteBoundary/protected/unrevealedSecrets"));
     }
 
     private ObjectNode generateCore() { ObjectNode brief=development.start(projectId,obj());worker.tick();brief=store.get(STORY_DOCUMENT,id(brief));development.confirm(id(brief),obj().put("revision",revision(brief)));worker.tick();worker.tick();return store.list(STORY_DOCUMENT,projectId,null).stream().filter(d->"CORE".equals(text(d,"documentType"))).findFirst().orElseThrow(); }

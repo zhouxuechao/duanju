@@ -19,6 +19,7 @@ public class StoryQualityPolicy {
     private final EvidenceLedger evidenceLedger = new EvidenceLedger();
 
     public ObjectNode apply(ObjectNode qa, JsonNode input) {
+        recoverConfirmedDeltas(qa, input);
         boolean hasDelta = DELTAS.stream().anyMatch(key -> !qa.path("episodeDelta").path(key).isEmpty());
         if (!hasDelta) block(qa, "本集没有事实、关系、目标、知识、风险或资源变化，删除后不影响后续剧情",
                 "保留已确认的 startState/endState，在当前集加入由角色选择造成且会被后续继承的真实变化");
@@ -43,6 +44,30 @@ public class StoryQualityPolicy {
         qa.put("passed", qa.path("passed").asBoolean() && qa.path("blockingIssues").isEmpty());
         qa.put("rewriteRequired", !qa.path("passed").asBoolean() || qa.path("rewriteRequired").asBoolean());
         return qa;
+    }
+
+    private void recoverConfirmedDeltas(ObjectNode qa, JsonNode input) {
+        if (DELTAS.stream().anyMatch(key -> !qa.path("episodeDelta").path(key).isEmpty())) return;
+        JsonNode outline = input.path("episodeOutline"), script = input.path("episodeScript");
+        String outlineStart = outline.path("startState").asText("").trim();
+        String outlineEnd = outline.path("endState").asText("").trim();
+        if (outlineStart.isBlank() || outlineStart.equals(outlineEnd)
+                || !outlineStart.equals(script.path("startState").asText("").trim())
+                || !outlineEnd.equals(script.path("endState").asText("").trim())
+                || !outline.path("progressionEvents").isArray()) return;
+        ObjectNode delta = qa.withObject("episodeDelta");
+        for (JsonNode event : outline.path("progressionEvents")) {
+            String description = event.path("description").asText("").trim();
+            if (description.isBlank()) continue;
+            String type = event.path("type").asText("");
+            String key = type.contains("知识") || type.contains("信息") || type.contains("身份") ? "knowledgeChanged"
+                    : type.contains("关系") ? "relationshipsChanged"
+                    : type.contains("风险") ? "riskChanged"
+                    : type.contains("目标") ? "goalsChanged"
+                    : type.contains("资源") || type.contains("道具") ? "resourcesChanged" : "factsChanged";
+            ArrayNode values = delta.withArray(key);
+            if (values.size() < 20 && !contains(values, description)) values.add(description);
+        }
     }
 
     private boolean samePattern(JsonNode current, JsonNode previous) {

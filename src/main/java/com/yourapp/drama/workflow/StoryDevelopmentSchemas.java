@@ -12,6 +12,7 @@ public final class StoryDevelopmentSchemas {
     private StoryDevelopmentSchemas() {}
 
     private static ObjectNode text() { return Documents.obj().put("type", "string").put("minLength", 1); }
+    private static ObjectNode optionalText() { return Documents.obj().put("type", "string"); }
     private static ObjectNode bool() { return Documents.obj().put("type", "boolean"); }
     private static ObjectNode number(double min, double max) { return Documents.obj().put("type", "number").put("minimum", min).put("maximum", max); }
     private static ObjectNode integer(int min, int max) { return Documents.obj().put("type", "integer").put("minimum", min).put("maximum", max); }
@@ -117,7 +118,7 @@ public final class StoryDevelopmentSchemas {
 
     private static ObjectNode midHook() {
         return object("required", bool(), "preferredPositionRatio", number(0.25, 0.75), "type", text(),
-                "description", text(), "raisesWhat", text(), "mustNotResolveMainPayoff", bool());
+                "description", text(), "raisesWhat", optionalText(), "mustNotResolveMainPayoff", bool());
     }
 
     private static ObjectNode progression() {
@@ -143,7 +144,8 @@ public final class StoryDevelopmentSchemas {
         required.put("script", text().put("minLength", 80)); required.put("targetDurationSec", number(1, 1800));
         required.put("characterKeys", strings(0, 30)); required.put("locationKeys", strings(0, 30)); required.put("propKeys", strings(0, 30));
         required.put("beatBoundaries", array(beat(), 2, 24)); required.put("scenes", array(scene(), 1, 20));
-        ObjectNode evidence = object("evidenceId", text(), "type", text(), "formedAt", number(0, 1000000), "verified", bool(),
+        ObjectNode formedAtEpisode = integer(1, 10000).put("description", "证据首次形成的集号，必须使用 episodeNo，不是当前集内秒数");
+        ObjectNode evidence = object("evidenceId", text(), "type", text(), "formedAt", formedAtEpisode, "verified", bool(),
                 "tampered", bool(), "obtainedBy", strings(0, 30), "knownBy", strings(0, 30), "holder", text(), "supportsFacts", strings(0, 30));
         return object(required, Map.of("midHook", midHook(), "evidenceLedger", array(evidence,0,100),
                 "storyFacts", looseObject(), "characterKnowledge", looseObject(),
