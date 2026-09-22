@@ -16,11 +16,13 @@
     "payload": {
       "type": "object",
       "properties": {
-        "displayText": {},
-        "knowledgeBase": {}
+        "knowledgeBase": {},
+        "semanticText": {},
+        "subtitleText": {}
       },
       "required": [
-        "displayText",
+        "semanticText",
+        "subtitleText",
         "knowledgeBase"
       ],
       "additionalProperties": true

@@ -67,8 +67,10 @@ public class VideoRequestRouteResolver {
         if(taskType==VideoTaskType.STORYBOARD_GUIDED){if(!profile.supportsStoryboard())throw unsupported("STORYBOARD_UNSUPPORTED");appendSemanticBindings(referenceBindings,semantic);return new Resolved(Route.STORYBOARD_GUIDED,null,semantic);}
         if(taskType==VideoTaskType.REFERENCE_GENERATE){
             if(!accepted(previousTake))throw unsupported("REFERENCE_GENERATE_REQUIRES_ACCEPTED_PREVIOUS_TAKE");appendSemanticBindings(referenceBindings,semantic);
-            boolean hasVideo=semantic.stream().anyMatch(ref->"video_url".equals(ref.type()));String previousVideo=text(previousTake,"videoUrl");
-            if(!hasVideo&&!previousVideo.isBlank())semantic.addFirst(new VideoGenerator.Reference("video_url",previousVideo,"reference_video"));
+            String previousVideo=text(previousTake,"videoUrl");
+            if(previousVideo.isBlank())throw unsupported("PREVIOUS_VIDEO_REQUIRED");
+            if(semantic.stream().noneMatch(ref->"video_url".equals(ref.type())&&previousVideo.equals(ref.url())))
+                semantic.addFirst(new VideoGenerator.Reference("video_url",previousVideo,"reference_video"));
             return new Resolved(Route.FULL_MODAL_REFERENCE,null,semantic);
         }
         appendSemanticBindings(referenceBindings,semantic);return new Resolved(Route.SEMANTIC_REFERENCES,null,semantic);

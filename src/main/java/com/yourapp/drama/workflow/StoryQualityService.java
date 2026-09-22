@@ -11,11 +11,10 @@ import com.yourapp.drama.model.ProviderException;
 import com.yourapp.drama.persistence.DocumentStore;
 import com.yourapp.drama.persistence.ResourceKind;
 import com.yourapp.drama.provider.StructuredJson;
+import com.yourapp.drama.production.PromptCompiler;
 import jakarta.validation.Validator;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Comparator;
@@ -29,9 +28,9 @@ public class StoryQualityService {
     private final DocumentStore store; private final JobService jobs; private final LlmGateway llm;
     private final ObjectMapper mapper; private final StructuredJson structured;
     private final EpisodeFormatResolver formats; private final ScreenwritingRuleResolver rules;
-    private final StoryQualityPolicy policy;
+    private final StoryQualityPolicy policy;private final PromptCompiler prompts;
     public StoryQualityService(DocumentStore store,JobService jobs,LlmGateway llm,ObjectMapper mapper,Validator validator,
-                               EpisodeFormatResolver formats,ScreenwritingRuleResolver rules,StoryQualityPolicy policy){this.store=store;this.jobs=jobs;this.llm=llm;this.mapper=mapper;this.structured=new StructuredJson(mapper,validator);this.formats=formats;this.rules=rules;this.policy=policy;}
+                               EpisodeFormatResolver formats,ScreenwritingRuleResolver rules,StoryQualityPolicy policy,PromptCompiler prompts){this.store=store;this.jobs=jobs;this.llm=llm;this.mapper=mapper;this.structured=new StructuredJson(mapper,validator);this.formats=formats;this.rules=rules;this.policy=policy;this.prompts=prompts;}
 
     public ObjectNode schedule(ObjectNode document){
         String contentHash=contentHash(document.path("content"));
@@ -48,7 +47,8 @@ public class StoryQualityService {
         JsonNode input=job.path("inputSnapshot");String documentId=Documents.required(input,"documentId");
         ObjectNode document=store.get(ResourceKind.STORY_DOCUMENT,documentId);
         if(!Documents.id(job).equals(Documents.text(document,"qaJobId"))||!Documents.text(input,"contentHash").equals(contentHash(document.path("content")))){jobs.mutate(Documents.id(job),j->j.put("status","CANCELLED"));return;}
-        LlmGateway.StructuredRequest request=new LlmGateway.StructuredRequest(prompt(),input.toString(),mapper.convertValue(StoryQualitySchemas.schema(),new TypeReference<Map<String,Object>>(){}),Map.of("modelRole","story_qa"));
+        var compiled=prompts.compileStory("STORY_QA",input,StoryQualitySchemas.schema());jobs.mutate(Documents.id(job),j->{j.put("promptCompilerVersion",compiled.compilerVersion());j.set("promptIR",compiled.promptIRJson().deepCopy());});
+        LlmGateway.StructuredRequest request=new LlmGateway.StructuredRequest(compiled.systemPrompt(),compiled.userPrompt(),mapper.convertValue(compiled.schema(),new TypeReference<Map<String,Object>>(){}),Map.of("modelRole","story_qa"));
         LlmGateway.StructuredResult<JsonNode> result=llm.generate(request,JsonNode.class);
         JsonNode parsed;
         try{parsed=structured.parse(result.value().toString(),StoryQualitySchemas.schema(),JsonNode.class,result.requestId());}
@@ -71,7 +71,7 @@ public class StoryQualityService {
         ObjectNode core=store.get(ResourceKind.STORY_DOCUMENT,Documents.required(document,"coreId"));JsonNode project=document.path("projectSnapshot");JsonNode format=formats.resolve(project);
         input.set("episodeFormat",format);input.set("storyProfile",project.path("storyProfile").deepCopy());
         ObjectNode rulePack=rules.resolve("STORY_QA",project.path("storyProfile"),format,
-                project.path("distributionProfile").asText("GENERAL"),prompt(),
+                project.path("distributionProfile").asText("GENERAL"),prompts.storySkillText("STORY_QA"),
                 project.path("writerModelProfile").asText("DEEPSEEK_WRITER"));
         input.set("rulePack",rulePack);input.put("rulePackFingerprint",Documents.text(rulePack,"fingerprint"));
         input.set("episodeOutline",document.path("sourceSnapshot").path("episodeOutline").deepCopy());input.set("episodeScript",document.path("content").deepCopy());
@@ -83,6 +83,5 @@ public class StoryQualityService {
         core.path("content").path("props").forEach(value->propIds.add(Documents.text(value,"propKey")));
         ArrayNode recent=input.putArray("recentStructuralSummaries");store.list(ResourceKind.STORY_DOCUMENT,Documents.project(document),null).stream().filter(d->"EPISODE_SCRIPT".equals(Documents.text(d,"documentType"))&&d.path("episodeNo").asInt()<document.path("episodeNo").asInt()&&!d.path("stale").asBoolean()).sorted(Comparator.comparingInt((ObjectNode d)->d.path("episodeNo").asInt()).reversed()).limit(5).sorted(Comparator.comparingInt(d->d.path("episodeNo").asInt())).forEach(d->{ObjectNode summary=Documents.obj().put("episodeNo",d.path("episodeNo").asInt());JsonNode outline=d.path("sourceSnapshot").path("episodeOutline");for(String field:List.of("episodeFunction","hook","mainConflict","escalation","payoff","cliffhanger"))summary.set(field,outline.path(field).deepCopy());if(d.path("storyQa").has("episodeDelta"))summary.set("episodeDelta",d.path("storyQa").path("episodeDelta").deepCopy());recent.add(summary);});return input;}
 
-    private String prompt(){try(InputStream stream=new ClassPathResource("development-skills/05-story-quality/prompt.md").getInputStream()){return new String(stream.readAllBytes(),StandardCharsets.UTF_8);}catch(Exception e){throw new IllegalStateException("故事质检技能加载失败",e);}}
     public String contentHash(JsonNode value){try{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.toString().getBytes(StandardCharsets.UTF_8)));}catch(Exception e){throw new IllegalStateException(e);}}
 }

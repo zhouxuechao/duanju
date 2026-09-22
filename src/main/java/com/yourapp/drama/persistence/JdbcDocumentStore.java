@@ -42,13 +42,14 @@ public class JdbcDocumentStore implements DocumentStore {
         m.get(VIDEO_TAKE).addAll(List.of(col("takeNo","int"),col("provider","text"),col("model","text"),col("promptVersionId","uuid"),col("providerRequestId","text"),col("sourceKeyframeId","uuid"),col("sourceProviderUrlSnapshot","text"),col("videoUrl","text"),col("archiveUrl","text"),col("qcScore","decimal"),col("selected","bool"),col("locked","bool"),col("cost","decimal")));
         m.get(GENERATION_JOB).addAll(List.of(col("shotId","uuid"),col("type","text"),col("status","text"),col("providerRequestId","text"),col("providerTaskId","text"),col("promptVersionId","uuid"),col("requestKey","text"),col("retryAt","time"),col("attempts","int"),col("maxAttempts","int"),col("progress","decimal"),col("cost","decimal"),col("failureReason","text"),col("cancelRequested","bool")));
         m.get(STORY_FACT).addAll(List.of(col("factKey","text"),col("predicate","text"),col("validFromStoryTime","decimal"),col("validToStoryTime","decimal"),col("revealedAtStoryTime","decimal"),col("status","text"),col("sourceSceneId","uuid"),col("sourceShotId","uuid")));
+        m.get(STORY_FACT_MUTATION).addAll(List.of(col("factId","uuid"),col("operation","text"),col("effectiveFromStoryTime","decimal"),col("sceneId","uuid"),col("beatId","uuid")));
         m.get(CHARACTER_KNOWLEDGE).addAll(List.of(col("characterId","uuid"),col("factId","uuid"),col("knowledgeState","text"),col("knownFromStoryTime","decimal"),col("knownFromSceneId","uuid")));
         m.get(ENTITY_ALIAS).addAll(List.of(col("entityId","uuid"),col("alias","text"),col("aliasType","text"),col("validFromStoryTime","decimal"),col("validToStoryTime","decimal"),col("source","text"),col("confidence","decimal")));
         m.get(RELATIONSHIP).addAll(List.of(col("subjectCharacterId","uuid"),col("objectCharacterId","uuid"),col("relationshipType","text"),col("state","text"),col("validFromStoryTime","decimal"),col("validToStoryTime","decimal"),col("sourceSceneId","uuid"),col("sourceShotId","uuid")));
         m.get(LOCATION_STATE).addAll(List.of(col("locationId","uuid"),col("state","text"),col("validFromStoryTime","decimal"),col("validToStoryTime","decimal"),col("sourceSceneId","uuid"),col("sourceShotId","uuid")));
         m.get(PROMPT_VERSION).addAll(List.of(col("shotId","uuid"),col("version","int"),col("promptTemplateId","uuid")));
         m.get(STORYBOARD).add(col("version","int"));
-        m.get(DIALOGUE_LINE).addAll(List.of(col("characterId","uuid"),col("displayText","text"),col("dialectText","text"),col("speechText","text")));
+        m.get(DIALOGUE_LINE).addAll(List.of(col("characterId","uuid"),col("semanticText","text"),col("spokenText","text"),col("subtitleText","text")));
         m.get(VOICE_PROFILE).add(col("characterId","uuid"));
         m.get(VOICE_STATE).addAll(List.of(col("voiceProfileId","uuid"),col("state","text"),col("providerVoiceId","text"),col("referenceAudioUrl","text"),col("validFromStoryTime","decimal"),col("validToStoryTime","decimal")));
         m.get(AUDIO_CLIP).addAll(List.of(col("shotId","uuid"),col("dialogueLineId","uuid")));

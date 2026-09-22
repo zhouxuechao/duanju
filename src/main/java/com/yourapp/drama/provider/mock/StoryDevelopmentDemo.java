@@ -141,6 +141,8 @@ final class StoryDevelopmentDemo {
             card.withObject("foreshadowing").putArray("resolve");
             card.putArray("progressionEvents").add(obj().put("atSec", Math.max(1, seconds / 2)).put("type", "NEW_INFORMATION").put("description", "确认泥迹来源"));
             card.putArray("scenePlan").add(scene(seconds));
+            card.set("episodeEnding",obj().put("primaryType","DANGER").put("strength","HIGH").put("description","祠堂内刚刚停止的脚步声表明有人仍在现场")
+                    .put("unresolvedPressure","暗处来访者可能已经发现周伯").put("nextEpisodeQuestion","祠堂里的人是谁"));
             cards.add(card);
             start = end;
         }
@@ -156,6 +158,7 @@ final class StoryDevelopmentDemo {
         addFormat(out, format, seconds, "beatBoundaries");
         refs(out);
         out.putArray("scenes").add(scene(seconds));
+        out.set("episodeEnding",outline.path("episodeEnding").deepCopy());
         return out;
     }
 
@@ -173,8 +176,11 @@ final class StoryDevelopmentDemo {
     }
 
     private static ObjectNode beat(String id, double start, double end) {
-        return obj().put("beatId", id).put("purpose", id.equals("OPENING_HOOK") ? "建立观看问题" : "兑现本集变化并留下后续问题")
+        ObjectNode beat=obj().put("beatId", id).put("purpose", id.equals("OPENING_HOOK") ? "建立观看问题" : "兑现本集变化并留下后续问题")
+                .put("action",id.equals("OPENING_HOOK")?"周伯在锁孔旁发现一道仍带木屑的新划痕":"周伯停下开锁并转身寻找来访者")
+                .put("dialogue","").put("visualInformation",id.equals("OPENING_HOOK")?"旧锁旁的新鲜划痕与飘落木屑清晰可见":"周伯把钥匙收回右侧衣袋")
                 .put("startSec", start).put("endSec", end);
+        var signals=beat.putArray("hookSignals");if(id.equals("OPENING_HOOK"))signals.add("ANOMALY").add("QUESTION");return beat;
     }
 
     private static void refs(ObjectNode value) {
@@ -184,8 +190,14 @@ final class StoryDevelopmentDemo {
     }
 
     private static ObjectNode scene(double seconds) {
-        return obj().put("name", "院内追查").put("description", "周伯穿田间装，带旧钥匙从南门走到北侧屋檐，发现划痕并停步观察。")
+        ObjectNode scene=obj().put("sceneId","yard-investigation").put("name", "院内追查").put("description", "周伯穿田间装，带旧钥匙从南门走到北侧屋檐，发现划痕并停步观察。")
+                .put("storyTime",0).put("locationKey","yard").put("sceneGoal","确认是谁动过柜门").put("conflict","新划痕表明有人抢先到过")
+                .put("dramaticFunction","获得新证据并改变调查顺序").put("informationChange","发现锁孔边的新鲜划痕")
+                .put("relationshipChange","").put("emotionChange","从犹豫转为警觉").put("characterStateChange","周伯决定暂停开锁并先寻找来访者")
                 .put("startSec", 0).put("endSec", seconds).put("duration", seconds);
+        scene.putArray("characterKeys").add("lead");scene.putArray("propKeys").add("key");
+        scene.set("startState",obj().put("knowledge","不知道有人来过").put("goal","用钥匙开柜"));
+        scene.set("endState",obj().put("knowledge","确认刚有人动过锁").put("goal","先查来访者"));return scene;
     }
 
     private static ObjectNode quality(){

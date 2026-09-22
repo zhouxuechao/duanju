@@ -7,6 +7,7 @@ import com.yourapp.drama.model.ImageGenerator;
 import com.yourapp.drama.persistence.*;
 import com.yourapp.drama.production.LocationViewProjection;
 import com.yourapp.drama.production.AssetDependencyAnalyzer;
+import com.yourapp.drama.production.PromptCompiler;
 import com.yourapp.drama.production.ProviderCapabilityRegistry;
 import com.yourapp.drama.storage.*;
 import org.springframework.stereotype.Service;
@@ -28,8 +29,9 @@ public class AssetViewService {
     private final ImageGenerator images;
     private final MediaStorage storage;
     private final ProviderMediaFetcher fetcher;
+    private final PromptCompiler prompts;
     private static final Set<String> METADATA=Set.of("id","projectId","parentId","revision","createdAt","updatedAt","referenceImageUrl","referenceSetVersion","referenceStatus","provider","providerStatus","providerAssetId","sourceType","identityLocked","locked","stale","requiredViews","archiveUrl","providerUrl","baseLookId");
-    public AssetViewService(DocumentStore store,JobService jobs,ImageGenerator images,MediaStorage storage,ProviderMediaFetcher fetcher){this.store=store;this.jobs=jobs;this.images=images;this.storage=storage;this.fetcher=fetcher;}
+    public AssetViewService(DocumentStore store,JobService jobs,ImageGenerator images,MediaStorage storage,ProviderMediaFetcher fetcher,PromptCompiler prompts){this.store=store;this.jobs=jobs;this.images=images;this.storage=storage;this.fetcher=fetcher;this.prompts=prompts;}
 
     public ObjectNode generate(String projectId,ObjectNode request){return store.transaction(()->{
         ObjectNode project=store.getForUpdate(PROJECT,projectId),core=currentCore(project);AssetDependencyAnalyzer.Level dependency=dependencyLevel(project,request);
@@ -223,8 +225,8 @@ public class AssetViewService {
         }else if(!baselineLook(current).isBlank()){
             ObjectNode baseline=currentViews(project(current),text(current,"coreId"),baselineLook(current)).stream().filter(v->v.path("master").asBoolean()&&v.path("approved").asBoolean()).findFirst().orElseThrow(()->new WorkflowException("IDENTITY_ANCHOR_REQUIRED","请先确认这个演员的基础定妆主图，后续服装才能保持同一张脸"));references.add(id(baseline));
         }
-        String compiledPrompt=prompt(current,references);ArrayNode bindings=JsonNodeFactory.instance.arrayNode();for(JsonNode referenceId:references)bindings.add(referenceBinding(current,store.get(ASSET_VIEW,referenceId.asText())));
-        String bindingHash=hash(bindings);ObjectNode input=obj().put("assetViewId",id(current)).put("coreId",text(current,"coreId")).put("sourceHash",text(current,"sourceHash")).put("imageTaskType","ASSET_REFERENCE").put("compilerVersion",compilerVersion(current)).put("normalizedPromptHash",hash(TextNode.valueOf(compiledPrompt.replaceAll("\\s+"," ").trim()))).put("referenceBindingsHash",bindingHash).put("referenceAuthorityFingerprint",bindingHash).put("continuitySnapshotHash",text(current,"sourceHash")).put("providerCapabilitiesVersion",ProviderCapabilityRegistry.VERSION).put("prompt",compiledPrompt);input.set("sourceSnapshot",current.path("sourceSnapshot").deepCopy());input.set("referenceViewIds",references);input.set("referenceBindings",bindings);
+        ArrayNode bindings=JsonNodeFactory.instance.arrayNode();for(JsonNode referenceId:references)bindings.add(referenceBinding(current,store.get(ASSET_VIEW,referenceId.asText())));
+        String bindingHash=hash(bindings);ObjectNode input=obj().put("assetViewId",id(current)).put("coreId",text(current,"coreId")).put("assetKind",text(current,"assetKind")).put("assetId",text(current,"assetId")).put("view",text(current,"view")).put("sourceHash",text(current,"sourceHash")).put("imageTaskType","ASSET_REFERENCE").put("compilerVersion",compilerVersion(current)).put("referenceBindingsHash",bindingHash).put("referenceAuthorityFingerprint",bindingHash).put("continuitySnapshotHash",text(current,"sourceHash")).put("providerCapabilitiesVersion",ProviderCapabilityRegistry.VERSION);input.set("sourceSnapshot",current.path("sourceSnapshot").deepCopy());input.set("referenceViewIds",references);input.set("referenceBindings",bindings);
         ArrayNode providerReferences=references.deepCopy();
         if("LOCATION".equals(text(current,"assetKind"))&&!current.path("master").asBoolean()){
             providerReferences.removeAll();input.put("referenceDeliveryMode","STRUCTURED_TOPOLOGY_ONLY");
@@ -234,6 +236,7 @@ public class AssetViewService {
         if("CHARACTER_LOOK".equals(text(current,"assetKind")))input.set("viewCamera",characterCamera(text(current,"view")));
         if("PROP".equals(text(current,"assetKind")))input.set("viewCamera",propCamera(text(current,"view")));
         if(!text(current,"revisionFeedback").isBlank())input.put("revisionFeedback",text(current,"revisionFeedback"));
+        var compiled=prompts.compileAssetReference(input);String compiledPrompt=compiled.prompt();input.put("compilerVersion",compiled.compilerVersion()).put("normalizedPromptHash",hash(TextNode.valueOf(compiledPrompt.replaceAll("\\s+"," ").trim()))).put("prompt",compiledPrompt);input.set("promptIR",compiled.promptIRJson().deepCopy());
         ObjectNode job=jobs.enqueue(project(current),null,"ASSET_IMAGE",input,"asset-view:"+id(current));jobs.mutate(id(job),j->j.put("maxAttempts",1));
         ObjectNode next=current.deepCopy().put("status","GENERATING").put("generationJobId",id(job));next.set("referenceViewIds",references.deepCopy());return store.update(ASSET_VIEW,id(current),revision(current),next);
     }
@@ -252,20 +255,6 @@ public class AssetViewService {
             mustNotTransfer.add("pose").add("background").add("camera");
         }
         return binding;
-    }
-    private String prompt(ObjectNode view,ArrayNode referenceIds){
-        String angle=switch(text(view,"view")){case "FRONT"->"正面，按世界坐标的正前方";case "LEFT"->"左侧面，沿人物/物件左侧世界轴线观察";case "RIGHT"->"右侧面，沿人物右侧世界轴线观察";case "BACK"->"背面，沿背部世界轴线观察";case "LAYOUT"->"正上方俯视平面布局，标出入口、出口和固定地标相对位置";case "REVERSE"->"与正面机位相对的反向空间视角，不能翻转布局";case "SIDE"->"场景侧向视角，沿固定空间轴线保留深度";case "SCALE"->"道具比例视角，完整物件旁放无文字一米比例杆";default->throw new IllegalArgumentException("未知参考视角");};
-        if("LOCATION".equals(text(view,"assetKind")))angle=locationCamera(text(view,"view")).toString();
-        if("CHARACTER_LOOK".equals(text(view,"assetKind")))angle=characterCamera(text(view,"view")).toString();
-        if("PROP".equals(text(view,"assetKind")))angle=propCamera(text(view,"view")).toString();
-        String skill=loadPrompt(view.path("assetKind").asText());
-        String metadata="\\n本次执行参数（供模型理解，不要在图片中显示，也不要返回 JSON）：assetKind="+text(view,"assetKind")+"；assetId="+text(view,"assetId")+"；view="+text(view,"view")+"；sourceSnapshot="+view.path("sourceSnapshot")+"；referenceViewIds="+referenceIds+"。\\n";
-        String anchor=switch(text(view,"assetKind")){case "CHARACTER_LOOK"->"这是角色身份与定妆参考图。角色身份锚点与服装定妆分开：不得把手持道具、场景、剧情动作或临时姿势固化到人物主图；基础身份主图只确认脸、发型、体态和比例，服装主图只在此身份上确认本套衣服。人物保持同一世界朝向，只移动相机；脸侧、耳朵、肩膀、手和不对称特征必须服从 viewCamera。固定配饰不得换边，例如左肩到右胯的背带在四视图中始终连接同一身体锚点，不能按画面斜线照抄。";case "LOCATION"->"这是空场景参考图。locationBible 是唯一空间真相：逐个核对 surfaces 的承载面，以及每个 fixedFeatures.featureId 的 supportSurfaceId、worldPosition、size、state、appearance；不得遗漏、增添、复制或换面。prohibitedElements 中的内容不得出现。所有入口、出口、门窗、道路、井、树和固定地标按同一世界坐标保留；门窗必须保持同一开关状态；不同视角只能改变相机位置，不能旋转、镜像或移动建筑。目标 viewCamera 是构图与投影的最高约束；参考图只提供空间身份，不得继承参考图的观察方向、取景位置、画面布局或可见面。";default->"这是单件道具参考图。保持轮廓、尺寸比例、材质、重量感、颜色、纹理、刻痕、磨损和当前状态；身份文字、标记和图案必须保持，只有当目标侧面因几何遮挡确实不可见时才可不显示；不要出现手、人或第二件同类道具。";};
-        String refs=!referenceIds.isEmpty()?"输入参考图是已经确认的同一素材锚点；严格保持身份、几何、材质和纹理，只改变观察视角。":"这是本套多视图的主参考，生成后需人工确认后才能成为其它视角锚点。";
-        String cameraPriority="LOCATION".equals(text(view,"assetKind"))&&referenceIds.size()>0?locationCameraInstruction(text(view,"view")):"";
-        String feedback=text(view,"revisionFeedback").isBlank()?"":"上一版可见偏差："+text(view,"revisionFeedback")+"。本次必须纠正此偏差，未点名的身份与几何保持不变。";
-        String priority=cameraPriority.isBlank()?"":"[TARGET VIEW — HIGHEST PRIORITY]\n"+cameraPriority+"目标 viewCamera 是构图与投影的最高约束；参考图只提供空间身份，不得继承参考图的观察方向、取景位置、画面布局或可见面。\n";
-        return priority+feedback+"本视角："+angle+"。\n"+metadata+skill+anchor+refs+"。只生成一张单视角制作参考图，不要拼图、四宫格、重复主体、文字水印或 JSON。";
     }
     private ObjectNode locationCamera(String view){
         return LocationViewProjection.describe(view);
@@ -290,21 +279,8 @@ public class AssetViewService {
             default->throw new IllegalArgumentException("未知道具参考视角");
         };
     }
-    private String locationCameraInstruction(String view){
-        return switch(view){
-            case "FRONT"->"相机位于主活动区北侧并朝南；北侧边界位于相机身后，不能成为画面正前方主体；画面深度必须从北侧近景延伸到南侧远景。必须从该机位重新投影世界坐标，不能复刻布局主图或其它视图的构图。";
-            case "REVERSE"->"相机位于主活动区南侧并朝北；南侧边界位于相机身后，画面深度必须从南侧近景延伸到北侧远景；必须与 FRONT 形成相反观察方向，不能生成同向近似画面。";
-            case "SIDE"->"相机位于主活动区东侧并朝西；东侧边界位于相机身后，画面深度必须从东侧近景延伸到西侧远景；必须呈现真正的横向空间关系，不能生成朝北或朝南的近似画面。";
-            default->"";
-        };
-    }
     private String compilerVersion(ObjectNode view){return switch(text(view,"assetKind")){case "CHARACTER_LOOK"->CHARACTER_COMPILER_VERSION;case "LOCATION"->LOCATION_COMPILER_VERSION;default->ASSET_COMPILER_VERSION;};}
     private boolean compilerCurrent(ObjectNode view){return !view.hasNonNull("providerUrl")||compilerVersion(view).equals(text(view,"compilerVersion"));}
-    private String loadPrompt(String kind){
-        String folder=switch(kind){case "CHARACTER_LOOK"->"09-character-design";case "LOCATION"->"10-location-design";case "PROP"->"11-prop-design";default->throw new IllegalArgumentException("未知素材类型："+kind);};
-        try(var stream=new org.springframework.core.io.ClassPathResource("development-skills/"+folder+"/prompt.md").getInputStream()){return new String(stream.readAllBytes(),java.nio.charset.StandardCharsets.UTF_8);}
-        catch(Exception e){throw new IllegalStateException("素材多视图技能加载失败："+folder,e);}
-    }
     private ObjectNode currentCore(ObjectNode project){
         if(text(project,"activeStoryDocumentId").isBlank())throw new WorkflowException("CORE_REVIEW_REQUIRED","请先确认整季核心故事");
         ObjectNode core=store.get(STORY_DOCUMENT,text(project,"activeStoryDocumentId"));

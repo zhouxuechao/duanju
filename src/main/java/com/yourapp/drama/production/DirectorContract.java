@@ -23,6 +23,7 @@ public final class DirectorContract {
     private static final List<String> VISIBLE_BODY_PARTS=List.of("WHOLE_BODY","FACE","TORSO","LEFT_HAND","RIGHT_HAND","BOTH_HANDS","LEFT_FOOT","RIGHT_FOOT","OTHER");
     private static final List<String> BODY_FRAME_SIDES=List.of("IN_FRAME_LEFT","IN_FRAME_CENTER","IN_FRAME_RIGHT","OFFSCREEN_LEFT","OFFSCREEN_RIGHT","OFFSCREEN_TOP","OFFSCREEN_BOTTOM","BEHIND_CAMERA");
     private static final List<String> LIMB_ENTRY_SIDES=List.of("NONE","FRAME_LEFT","FRAME_RIGHT","FRAME_TOP","FRAME_BOTTOM","INTO_DEPTH","OUT_OF_DEPTH");
+    private static final List<String> EYELINE_TARGET_TYPES=List.of("CHARACTER","PROP","LOCATION_FEATURE","SPATIAL_ANCHOR","CAMERA");
     private static final Map<String,Integer> LENS_PRESETS=Map.of("LENS_18MM",18,"LENS_24MM",24,"LENS_28MM",28,"LENS_35MM",35,"LENS_50MM",50,"LENS_85MM",85,"LENS_135MM",135);
     private final StructuredJson json;
     private final SpatialAnchor spatialAnchor;
@@ -47,7 +48,7 @@ public final class DirectorContract {
         p.set("beatId",string());p.set("purpose",boundedString(1,160));p.set("feltIntent",boundedString(1,180));p.set("action",boundedString(1,180));
         p.set("subject",boundedString(1,120));p.set("secondarySubjects",array(boundedString(1,120),0).put("maxItems",6));
         p.set("dialogueOwner",values(withEmpty(keys(assets,"characters"))));
-        p.set("duration",obj().put("type","number").put("minimum",2).put("maximum",5));
+        p.set("duration",shotDurationSchema(input));
         p.set("shotSize",values(SHOT_SIZES));p.set("cameraAngle",values(CAMERA_ANGLES));p.set("cameraMovement",values(CAMERA_MOVEMENTS));
         p.set("relationToPrevious",values(sceneRelations()));p.set("directorIntent",values(DIRECTOR_INTENTS));p.set("transition",values(TRANSITIONS));
         p.set("characterIds",ids(assets,"characters"));p.set("offscreenCharacterIds",ids(assets,"characters"));p.set("exitedCharacterIds",ids(assets,"characters"));
@@ -74,14 +75,14 @@ public final class DirectorContract {
         p.set("referenceViews",detailReferenceViewsSchema(input));
         ObjectNode change=object(),cp=change.withObject("properties");
         cp.set("path",boundedString(1,240).put("pattern","^(characters\\.[^.]+\\.(lookId|position|lookDirection|holding|pose|actionState)|props\\.[^.]+\\.(holder|position|state))$"));
-        cp.set("to",boundedString(0,240));cp.set("reason",boundedString(1,240));cp.set("atSeconds",obj().put("type","number").put("minimum",0).put("maximum",120));requireAll(change);
+        cp.set("to",stateValueSchema());cp.set("reason",boundedString(1,240));cp.set("atSeconds",obj().put("type","number").put("minimum",0).put("maximum",120));requireAll(change);
         p.set("stateChanges",array(change,0).put("maxItems",20));requireAll(detail);
         ObjectNode root=object();root.withObject("properties").set("shots",array(detail,count).put("maxItems",count));requireAll(root);return root;
     }
 
     private ObjectNode blockingDetailSchema(JsonNode assets){
         ObjectNode blocking=object(),p=blocking.withObject("properties"),actor=object(),a=actor.withObject("properties");
-        a.set("characterId",values(keys(assets,"characters")));a.set("framePosition",boundedString(1,120));a.set("eyeLineTarget",boundedString(1,120));requireAll(actor);
+        a.set("characterId",values(keys(assets,"characters")));a.set("framePosition",boundedString(1,120));a.set("eyeLineTarget",boundedString(1,120));a.set("eyeLineTargetType",values(EYELINE_TARGET_TYPES));a.set("eyeLineTargetId",boundedString(1,160));requireAll(actor);
         a.set("visibleBodyPart",values(VISIBLE_BODY_PARTS));a.set("bodyFrameSide",values(BODY_FRAME_SIDES));a.set("limbEntrySide",values(LIMB_ENTRY_SIDES));a.set("contactPoint",boundedString(0,160));requireAll(actor);
         p.set("characters",array(actor,0).put("maxItems",Math.max(1,keys(assets,"characters").size())));requireAll(blocking);return blocking;
     }
@@ -101,9 +102,9 @@ public final class DirectorContract {
         p.set("axisSide",values(List.of("A_SIDE","B_SIDE","ON_AXIS")));p.set("axisChangeReason",boundedString(0,200));
         p.set("keyObjectPositions",boundedString(1,200));p.set("doorWindowState",boundedString(1,160));
         ObjectNode actor=object(),a=actor.withObject("properties");a.set("characterId",values(keys(assets,"characters")));
-        for(String field:List.of("worldPosition","facing"))a.set(field,boundedString(1,120));
+        for(String field:List.of("worldPosition","facing","movementVector"))a.set(field,boundedString(1,120));
         a.set("screenDirection",values(SCREEN_DIRECTIONS));requireAll(actor);
-        p.set("characters",array(actor,0).put("maxItems",Math.max(1,keys(assets,"characters").size())));requireAll(blocking);p.set("spatialAnchors",spatialAnchorsSchema());return blocking;
+        p.set("characters",array(actor,0).put("maxItems",Math.max(1,keys(assets,"characters").size())));p.set("props",propBlockingSchema(assets));requireAll(blocking);p.set("spatialAnchors",spatialAnchorsSchema());return blocking;
     }
 
     public ObjectNode schema(JsonNode input) {
@@ -117,7 +118,7 @@ public final class DirectorContract {
         p.set("expression",string());p.set("eyeLine",string());p.set("focus",string());p.set("dialogueOwner",values(withEmpty(keys(assets,"characters"))));
         p.set("transition",values(TRANSITIONS));
         ((ObjectNode)p.path("action")).put("maxLength",180);
-        p.set("duration",obj().put("type","number").put("minimum",2).put("maximum",5));
+        p.set("duration",shotDurationSchema(input));
         p.set("shotSize",values(SHOT_SIZES));p.set("cameraAngle",values(CAMERA_ANGLES));p.set("cameraMovement",values(CAMERA_MOVEMENTS));
         p.set("relationToPrevious",values(sceneRelations()));
         p.set("difficulty",values(Arrays.stream(Difficulty.values()).map(Enum::name).toList()));
@@ -127,7 +128,7 @@ public final class DirectorContract {
         p.set("startState",stateSchema(assets));p.set("endState",stateSchema(assets));
         ObjectNode change=object();ObjectNode changeProperties=change.withObject("properties");
         changeProperties.set("path",string().put("pattern","^(characters\\.[^.]+\\.(lookId|position|lookDirection|holding|pose|actionState)|props\\.[^.]+\\.(holder|position|state))$"));
-        changeProperties.set("from",boundedString(0,240));changeProperties.set("to",boundedString(0,240));changeProperties.set("reason",string());requireAll(change);
+        changeProperties.set("from",stateValueSchema());changeProperties.set("to",stateValueSchema());changeProperties.set("reason",string());requireAll(change);
         p.set("authorizedChanges",array(change,0).put("maxItems",20));
         ObjectNode views=object();ObjectNode viewProperties=views.withObject("properties");
         for(String id:keys(assets,"looks"))viewProperties.set(id,values(List.of("FRONT","LEFT","RIGHT","BACK")));
@@ -159,6 +160,13 @@ public final class DirectorContract {
         ObjectNode beat=object(),p=beat.withObject("properties");
         for(String field:List.of("beatId","beatPurpose","action","conflict","emotionBefore","emotionAfter","informationReveal"))p.set(field,string());
         p.set("activeCharacters",ids(assets,"characters"));p.set("storyFactChanges",array(string(),0).put("maxItems",12));p.set("relationshipChanges",array(string(),0).put("maxItems",12));
+        ObjectNode knowledge=object(),k=knowledge.withObject("properties");k.set("audienceLearns",array(boundedString(1,240),0).put("maxItems",12));
+        ObjectNode characterChange=object(),c=characterChange.withObject("properties");c.set("characterId",values(keys(assets,"characters")));c.set("learns",array(boundedString(1,240),0).put("maxItems",12));c.set("beliefBefore",boundedString(0,240));c.set("beliefAfter",boundedString(0,240));requireAll(characterChange);
+        k.set("characterChanges",array(characterChange,0).put("maxItems",Math.max(1,keys(assets,"characters").size())));requireAll(knowledge);p.set("knowledgeChange",knowledge);
+        p.set("setup",boundedString(0,300));p.set("payoff",boundedString(0,300));
+        p.set("eventType",values(List.of("NONE","REVEAL","INSULT","CONFESSION","THREAT","DEATH","SECRET")));
+        p.set("reactionPriority",values(List.of("NONE","SPEAKER","LISTENER","EQUAL")));
+        p.set("reactionSubjectId",values(withEmpty(keys(assets,"characters"))));p.set("reactionReason",boundedString(0,300));
         p.set("importance",values(List.of("LOW","MEDIUM","HIGH","CLIMAX")));p.set("suggestedDuration",obj().put("type","number").put("minimum",1).put("maximum",120));requireAll(beat);return beat;
     }
     private ObjectNode planBeatSchema(JsonNode assets){
@@ -169,10 +177,11 @@ public final class DirectorContract {
         for(String field:List.of("cameraWorldPosition","axis","keyObjectPositions","doorWindowState"))p.set(field,string());
         p.set("axisSide",values(List.of("A_SIDE","B_SIDE","ON_AXIS")));p.set("axisChangeReason",obj().put("type","string").put("maxLength",240));
         ObjectNode actor=object(),a=actor.withObject("properties");a.set("characterId",values(keys(assets,"characters")));
-        for(String field:List.of("worldPosition","facing","framePosition","eyeLineTarget"))a.set(field,string());
+        for(String field:List.of("worldPosition","facing","movementVector","framePosition","eyeLineTarget"))a.set(field,string());a.set("eyeLineTargetType",values(EYELINE_TARGET_TYPES));a.set("eyeLineTargetId",boundedString(1,160));
         a.set("screenDirection",values(SCREEN_DIRECTIONS));a.set("visibleBodyPart",values(VISIBLE_BODY_PARTS));a.set("bodyFrameSide",values(BODY_FRAME_SIDES));a.set("limbEntrySide",values(LIMB_ENTRY_SIDES));a.set("contactPoint",boundedString(0,160));requireAll(actor);
-        p.set("characters",array(actor,0).put("maxItems",Math.max(1,keys(assets,"characters").size())));p.set("spatialAnchors",spatialAnchorsSchema());requireAll(blocking);return blocking;
+        p.set("characters",array(actor,0).put("maxItems",Math.max(1,keys(assets,"characters").size())));p.set("props",propBlockingSchema(assets));p.set("spatialAnchors",spatialAnchorsSchema());requireAll(blocking);return blocking;
     }
+    private ObjectNode propBlockingSchema(JsonNode assets){ObjectNode prop=object(),p=prop.withObject("properties");p.set("propId",values(keys(assets,"props")));p.set("worldPosition",boundedString(1,160));requireAll(prop);return array(prop,0).put("maxItems",Math.max(1,keys(assets,"props").size()));}
     private ObjectNode spatialAnchorsSchema(){ObjectNode anchor=object(),p=anchor.withObject("properties");for(String field:List.of("subject","anchorObject","relation","facing","distance","side"))p.set(field,boundedString(1,160));requireAll(anchor);return array(anchor,0).put("maxItems",24);}
     private ObjectNode performanceSchema(JsonNode input){
         ObjectNode performance=object(),p=performance.withObject("properties");
@@ -210,14 +219,14 @@ public final class DirectorContract {
     private ObjectNode dialogueSchema(JsonNode assets) {
         ObjectNode line=object();ObjectNode p=line.withObject("properties");
         p.set("characterId",values(keys(assets,"characters")));
-        for(String field:List.of("displayText","sourceScript","emotion"))p.set(field,string());
+        for(String field:List.of("semanticText","subtitleText","sourceScript","emotion"))p.set(field,string());
         ((ObjectNode)p.path("sourceScript")).put("maxLength",800);
         p.set("startMs",obj().put("type","integer").put("minimum",0));p.set("endMs",obj().put("type","integer").put("minimum",1));
         requireAll(line);p.set("estimatedDurationSeconds",obj().put("type","number").put("minimum",0).put("maximum",120));ObjectNode result=array(line,0).put("maxItems",keys(assets,"characters").isEmpty()?0:4);return result;
     }
     private ObjectNode dialogueDetailSchema(JsonNode assets) {
         ObjectNode line=object();ObjectNode p=line.withObject("properties");
-        p.set("characterId",values(keys(assets,"characters")));for(String field:List.of("displayText","emotion"))p.set(field,string());
+        p.set("characterId",values(keys(assets,"characters")));for(String field:List.of("semanticText","subtitleText","emotion"))p.set(field,string());
         p.set("startMs",obj().put("type","integer").put("minimum",0));p.set("endMs",obj().put("type","integer").put("minimum",1));
         requireAll(line);return array(line,0).put("maxItems",keys(assets,"characters").isEmpty()?0:4);
     }
@@ -229,7 +238,8 @@ public final class DirectorContract {
             cp.set("identityId",obj().put("type","string").put("const",actorId));
             List<String> lookIds=new ArrayList<>();for(JsonNode look:assets.path("looks"))if(actorId.equals(text(look,"characterId")))lookIds.add(id(look));
             if(lookIds.isEmpty())invalid("input.assets.characters."+actorId+".lookId","拆镜前需要属于该人物的定妆版本");
-            cp.set("lookId",values(lookIds));for(String field:List.of("position","lookDirection","pose","actionState"))cp.set(field,string());
+            cp.set("lookId",values(lookIds));for(String field:List.of("position","lookDirection","pose"))cp.set(field,string());
+            cp.set("actionState",actionStateSchema());
             cp.set("holding",values(withEmpty(keys(assets,"props"))).put("description","仅填写人物手中直接拿着的一个道具 ID；装在袋、盒、口袋等容器内的道具不算直接持有"));requireAll(character);charProperties.set(actorId,character);
         }
         p.set("characters",characters);
@@ -240,6 +250,14 @@ public final class DirectorContract {
         }
         p.set("props",props);requireAll(state);p.set("spatialAnchors",spatialAnchorsSchema());return state;
     }
+
+    private ObjectNode actionStateSchema(){
+        ObjectNode actionState=object(),p=actionState.withObject("properties");
+        p.set("action",boundedString(1,120));p.set("progress",obj().put("type","number").put("minimum",0).put("maximum",1));
+        p.set("hand",values(Arrays.stream(ProductionModels.ActionHand.values()).map(Enum::name).toList()));p.set("object",boundedString(0,160));
+        requireAll(actionState);return actionState;
+    }
+    private ObjectNode stateValueSchema(){ObjectNode value=obj();value.putArray("oneOf").add(string()).add(actionStateSchema());return value;}
 
     /** Keep project configuration authoritative while retaining the raw provider output on the job. */
     public ObjectNode canonicalizeTrustedFields(JsonNode output,JsonNode input) {
@@ -283,21 +301,21 @@ public final class DirectorContract {
 
     private void normalizePlanDurations(JsonNode shots,double targetSeconds){
         if(!shots.isArray()||shots.isEmpty())return;
-        int count=shots.size(),target=(int)Math.round(targetSeconds*100),minimum=count*200,maximum=count*500;
-        if(target<minimum||target>maximum)return;
-        int[] allocated=new int[count];double[] weights=new double[count];Arrays.fill(allocated,200);
-        for(int i=0;i<count;i++)weights[i]=Math.max(.25,shots.path(i).path("duration").asDouble(3)-2);
+        int count=shots.size(),target=(int)Math.round(targetSeconds*100),perShotMinimum=(int)(EditorialTiming.MIN_SHOT_MS/10),minimum=count*perShotMinimum;
+        if(target<minimum)return;
+        int[] allocated=new int[count];double[] weights=new double[count];Arrays.fill(allocated,perShotMinimum);
+        for(int i=0;i<count;i++)weights[i]=Math.max(.01,shots.path(i).path("duration").asDouble(1));
         int remaining=target-minimum;
         while(remaining>0){
-            double totalWeight=0;for(int i=0;i<count;i++)if(allocated[i]<500)totalWeight+=weights[i];
+            double totalWeight=0;for(int i=0;i<count;i++)if(allocated[i]<target)totalWeight+=weights[i];
             if(totalWeight<=0)break;
             int before=remaining;
-            for(int i=0;i<count&&remaining>0;i++)if(allocated[i]<500){
-                int grant=Math.min(500-allocated[i],(int)Math.floor(before*weights[i]/totalWeight));
+            for(int i=0;i<count&&remaining>0;i++)if(allocated[i]<target){
+                int grant=Math.min(target-allocated[i],(int)Math.floor(before*weights[i]/totalWeight));
                 grant=Math.min(grant,remaining);allocated[i]+=grant;remaining-=grant;
             }
             if(remaining==before){
-                int selected=-1;double best=-1;for(int i=0;i<count;i++)if(allocated[i]<500&&weights[i]>best){selected=i;best=weights[i];}
+                int selected=-1;double best=-1;for(int i=0;i<count;i++)if(allocated[i]<target&&weights[i]>best){selected=i;best=weights[i];}
                 if(selected<0)break;allocated[selected]++;remaining--;
             }
         }
@@ -383,7 +401,7 @@ public final class DirectorContract {
             JsonNode skeleton=batchInput.path("shotSkeletons").path(index),detail=detailOutput.path("shots").path(index);String path="$.shots["+index+"]";
             if(detail.path("shotIndex").asInt()!=skeleton.path("shotIndex").asInt())invalid(path+".shotIndex","详情必须与本批镜头骨架逐项对应");
             ObjectNode start=ledger.deepCopy(),end=ledger.deepCopy();ArrayNode authorized=JsonNodeFactory.instance.arrayNode();
-            for(JsonNode change:detail.path("stateChanges")){String from=applyChange(end,change,path+".stateChanges");authorized.add(obj().put("path",text(change,"path")).put("from",from).put("to",text(change,"to")).put("reason",text(change,"reason")).put("atSeconds",change.path("atSeconds").asDouble()));}
+            for(JsonNode change:detail.path("stateChanges")){JsonNode from=applyChange(end,change,path+".stateChanges");ObjectNode applied=obj().put("path",text(change,"path")).put("reason",text(change,"reason")).put("atSeconds",change.path("atSeconds").asDouble());applied.set("from",from);applied.set("to",change.path("to").deepCopy());authorized.add(applied);}
             ObjectNode shot=obj();for(String field:List.of("purpose","feltIntent","action","beatId","coversBeats","dramaticJob","actionContract","directorIntent","subject","secondarySubjects","dialogueOwner","transition","duration","shotSize","cameraAngle","cameraMovement","relationToPrevious","characterIds","offscreenCharacterIds","exitedCharacterIds","propIds"))shot.set(field,skeleton.path(field).deepCopy());
             shot.put("shotPurpose",text(skeleton,"purpose"));
             shot.set("blocking",materializeBlocking(skeleton,detail.path("blocking"),start,path));
@@ -424,10 +442,10 @@ public final class DirectorContract {
 
     private ArrayNode materializeDialogues(JsonNode selected,JsonNode input,String path){
         String script=text(input.path("episodeScript"),"script");ArrayNode result=JsonNodeFactory.instance.arrayNode();int index=0;
-        for(JsonNode value:selected){String linePath=path+".dialogues["+index+++ "]",display=text(value,"displayText");
-            if(display.isBlank()||script.isBlank()||!script.contains(display))invalid(linePath+".displayText","台词必须逐字摘自已确认的单集剧本");
-            String source=Arrays.stream(script.split("\\R",-1)).filter(line->line.contains(display)).findFirst().orElse(display);
-            ObjectNode materialized=((ObjectNode)value).deepCopy();materialized.put("sourceScript",source).put("estimatedDurationSeconds",Math.round(dialogueTiming.estimateSeconds(display,4.5,text(value,"emotion").isBlank()?0:.2)*100d)/100d);result.add(materialized);
+        for(JsonNode value:selected){String linePath=path+".dialogues["+index+++ "]",semantic=text(value,"semanticText");
+            if(semantic.isBlank()||script.isBlank()||!script.contains(semantic))invalid(linePath+".semanticText","台词必须逐字摘自已确认的单集剧本");
+            String source=Arrays.stream(script.split("\\R",-1)).filter(line->line.contains(semantic)).findFirst().orElse(semantic);
+            ObjectNode materialized=((ObjectNode)value).deepCopy();materialized.put("sourceScript",source).put("estimatedDurationSeconds",Math.round(dialogueTiming.estimateSeconds(semantic,4.5,text(value,"emotion").isBlank()?0:.2)*100d)/100d);result.add(materialized);
         }
         return result;
     }
@@ -437,10 +455,12 @@ public final class DirectorContract {
         ObjectNode result=((ObjectNode)selected).deepCopy();result.remove("lensPreset");result.put("lensMm",lens);return result;
     }
 
-    private String applyChange(ObjectNode state,JsonNode change,String path){
+    private JsonNode applyChange(ObjectNode state,JsonNode change,String path){
         String[] parts=text(change,"path").split("\\.");if(parts.length!=3)invalid(path+".path","状态路径格式无效");
         JsonNode entity=state.path(parts[0]).path(parts[1]);if(!entity.isObject()||!entity.has(parts[2]))invalid(path+".path","状态路径不存在于场景初始状态");
-        String current=entity.path(parts[2]).asText();((ObjectNode)entity).put(parts[2],text(change,"to"));return current;
+        JsonNode current=entity.path(parts[2]).deepCopy(),next=change.path("to");
+        if(current.isObject()!=next.isObject())invalid(path+".to","状态变化前后必须使用相同的数据类型");
+        ((ObjectNode)entity).set(parts[2],next.deepCopy());return current;
     }
 
     private ObjectNode materializeBlocking(JsonNode skeleton,JsonNode framing,JsonNode start,String path){
@@ -449,8 +469,11 @@ public final class DirectorContract {
         for(JsonNode actor:framing.path("characters")){String actorId=text(actor,"characterId");if(!actual.add(actorId))invalid(path+".blocking.characters","人物构图不能重复");framingById.put(actorId,actor);}
         if(!actual.equals(expected))invalid(path+".blocking.characters","必须且只能为本镜可见人物提供画面位置和视线目标");
         Map<String,JsonNode> plannedById=new LinkedHashMap<>();for(JsonNode actor:blocking.path("characters"))plannedById.put(text(actor,"characterId"),actor);
-        ArrayNode actors=JsonNodeFactory.instance.arrayNode();for(String actorId:expected){JsonNode planned=plannedById.get(actorId),state=start.path("characters").path(actorId),frame=framingById.get(actorId);if(planned==null||!state.isObject())invalid(path+".blocking.characters."+actorId,"缺少人物规划或连续性起始状态");ObjectNode actor=((ObjectNode)planned).deepCopy();actor.put("worldPosition",text(state,"position"));if(!text(state,"lookDirection").isBlank())actor.put("facing",text(state,"lookDirection"));for(String field:List.of("framePosition","eyeLineTarget","visibleBodyPart","bodyFrameSide","limbEntrySide","contactPoint"))actor.put(field,text(frame,field));actors.add(actor);}
-        blocking.set("characters",actors);return blocking;
+        ArrayNode actors=JsonNodeFactory.instance.arrayNode();for(String actorId:expected){JsonNode planned=plannedById.get(actorId),state=start.path("characters").path(actorId),frame=framingById.get(actorId);if(planned==null||!state.isObject())invalid(path+".blocking.characters."+actorId,"缺少人物规划或连续性起始状态");ObjectNode actor=((ObjectNode)planned).deepCopy();actor.put("worldPosition",text(state,"position"));if(!text(state,"lookDirection").isBlank())actor.put("facing",text(state,"lookDirection"));for(String field:List.of("framePosition","eyeLineTarget","eyeLineTargetType","eyeLineTargetId","visibleBodyPart","bodyFrameSide","limbEntrySide","contactPoint"))actor.put(field,text(frame,field));actors.add(actor);}
+        blocking.set("characters",actors);
+        Set<String> expectedProps=strings(skeleton.path("propIds")),actualProps=new LinkedHashSet<>();Map<String,JsonNode> plannedProps=new LinkedHashMap<>();for(JsonNode prop:blocking.path("props")){String propId=text(prop,"propId");if(!actualProps.add(propId))invalid(path+".blocking.props","道具空间位置不能重复");plannedProps.put(propId,prop);}
+        if(!actualProps.equals(expectedProps))invalid(path+".blocking.props","必须且只能为本镜可见道具提供世界位置");
+        ArrayNode propPositions=JsonNodeFactory.instance.arrayNode();for(String propId:expectedProps){JsonNode planned=plannedProps.get(propId),state=start.path("props").path(propId);if(planned==null||!state.isObject())invalid(path+".blocking.props."+propId,"缺少道具规划或连续性起始状态");ObjectNode prop=((ObjectNode)planned).deepCopy();prop.put("worldPosition",text(state,"position"));propPositions.add(prop);}blocking.set("props",propPositions);return blocking;
     }
 
     private ObjectNode requireObject(JsonNode value,String path){if(!value.isObject())invalid(path,"必须是对象");return (ObjectNode)value;}
@@ -505,7 +528,7 @@ public final class DirectorContract {
             validateState(shot,shot.path("startState"),path+".startState");validateState(shot,shot.path("endState"),path+".endState");
             validateViews(shot,output.path("sceneState"),path);
             validateDialogues(shot,input,path);
-            validatePerformance(shot.path("performancePlan"),input,path+".performancePlan");validateFraming(shot,path);
+            validatePerformance(shot.path("performancePlan"),input,path+".performancePlan");validateFraming(shot,path);validateEyelines(shot,input,output.path("sceneState"),path);
             // The model may omit off-screen assets to keep the request small.  The
             // server-side ledger retains their last confirmed state; compare only
             // fields explicitly reintroduced by this shot against that ledger.
@@ -551,7 +574,7 @@ public final class DirectorContract {
             ObjectNode end=start.deepCopy();merge(end,raw.path("endState"));
             ObjectNode shot=raw.deepCopy();shot.put("locationId",text(output.path("sceneState"),"locationId"));
             DirectorDurationPolicy.DurationPlan timing=durationPolicy.recommend(raw,beats.getOrDefault(text(raw,"beatId"),obj()),output.path("directorPlan"));
-            double providerDuration=raw.path("duration").asDouble();shot.put("providerDuration",providerDuration).put("editDuration",Math.min(providerDuration,timing.editDuration())).put("durationBasis",timing.rationale());
+            shot.put("editDuration",timing.editDuration()).put("durationBasis",timing.rationale());
             shot.set("startState",start);shot.set("endState",end);shots.add(shot);ledger=end;
         }
         return shots;
@@ -584,11 +607,11 @@ public final class DirectorContract {
         for(JsonNode line:shot.path("dialogues")) {
             String linePath=path+".dialogues["+index+++"]";
             String owner=text(line,"characterId");owners.add(owner);if(!visible.contains(owner))invalid(linePath+".characterId","对白人物必须出现在本镜头中");
-            String source=text(line,"sourceScript"),display=text(line,"displayText");
-            if(script.isBlank()||!script.contains(source)||!source.contains(display))invalid(linePath+".sourceScript","台词必须原样摘自已确认的单集剧本，不得在拆镜时改写或发明对白");
+            String source=text(line,"sourceScript"),semantic=text(line,"semanticText");
+            if(script.isBlank()||!script.contains(source)||!source.contains(semantic))invalid(linePath+".sourceScript","台词必须原样摘自已确认的单集剧本，不得在拆镜时改写或发明对白");
             long start=line.path("startMs").asLong(),end=line.path("endMs").asLong();
             if(start<previousEnd||end<=start||end>Math.round(shot.path("duration").asDouble()*1000))invalid(linePath+".startMs","对白时间必须顺序排列且落在本镜头时长内");
-            double estimated=dialogueTiming.estimateSeconds(display,4.5,text(line,"emotion").isBlank()?0:.2);if(estimated>(end-start)/1000d+.15)invalid(linePath+".endMs","DIALOGUE_ESTIMATED_OVERRUN：预计发音 "+Math.round(estimated*100d)/100d+" 秒，超过分配时段 "+(end-start)/1000d+" 秒");
+            double estimated=dialogueTiming.estimateSeconds(semantic,4.5,text(line,"emotion").isBlank()?0:.2);if(estimated>(end-start)/1000d+.15)invalid(linePath+".endMs","DIALOGUE_ESTIMATED_OVERRUN：预计发音 "+Math.round(estimated*100d)/100d+" 秒，超过分配时段 "+(end-start)/1000d+" 秒");
             previousEnd=end;
         }
         String declared=text(shot,"dialogueOwner");
@@ -603,6 +626,22 @@ public final class DirectorContract {
     private void validatePresence(JsonNode initial,JsonNode shots,JsonNode input,String path){Set<String> known=new LinkedHashSet<>(keys(input.path("assets"),"characters")),declared=new LinkedHashSet<>();for(JsonNode entry:initial){String id=text(entry,"characterId");if(!known.contains(id))invalid("$.presenceLedger","PresenceLedger 引用了未知人物："+id);if(!declared.add(id))invalid("$.presenceLedger","PresenceLedger 人物不能重复："+id);}if(!declared.equals(known))invalid("$.presenceLedger","PresenceLedger 必须逐一声明本场人物的在场、画外或缺席状态");List<ProductionModels.Risk> risks=presenceValidator.validateScene(initial,shots);if(!risks.isEmpty())invalid(path+"."+risks.getFirst().path(),risks.getFirst().code()+"："+risks.getFirst().message());}
     private void validateFirstShot(JsonNode shots){if(!shots.isArray()||shots.isEmpty())return;JsonNode first=shots.path(0);String description=String.join("；",text(first,"subject"),text(first,"action"),text(first,"purpose"));List<ProductionModels.Risk> risks=firstShotValidator.validate(description);if(!risks.isEmpty())invalid("$.shots[0]."+risks.getFirst().path(),risks.getFirst().code()+"："+risks.getFirst().message());}
     private void validateFraming(JsonNode shot,String path){String camera=text(shot.path("cameraPlan"),"position");if(camera.isBlank())camera=text(shot.path("basicBlocking"),"cameraWorldPosition");String required=text(shot.path("visibilityPlan"),"requiredDetail");for(JsonNode actor:shot.path("blocking").path("characters")){var result=framingValidator.validate(text(shot,"shotSize"),camera,text(actor,"worldPosition"),required);if(result.status()==FramingVisibilityValidator.Status.SHOT_SCALE_CONFLICT)invalid(path+".blocking.characters."+text(actor,"characterId"),"SHOT_SCALE_CONFLICT："+result.recommendation());}}
+    private void validateEyelines(JsonNode shot,JsonNode input,JsonNode sceneState,String path){
+        Set<String> visible=strings(shot.path("characterIds")),offscreen=strings(shot.path("offscreenCharacterIds")),props=strings(shot.path("propIds")),anchors=new LinkedHashSet<>();
+        for(JsonNode anchor:shot.path("blocking").path("spatialAnchors"))anchors.add(text(anchor,"anchorObject"));
+        Set<String> characters=new LinkedHashSet<>();for(JsonNode actor:input.path("assets").path("characters"))characters.add(id(actor));
+        String locationId=text(sceneState,"locationId");Set<String> features=new LinkedHashSet<>();for(JsonNode location:input.path("assets").path("locations"))if(locationId.equals(id(location)))for(JsonNode feature:location.path("locationBible").path("fixedFeatures"))features.add(text(feature,"featureId"));
+        for(JsonNode actor:shot.path("blocking").path("characters")){
+            String type=text(actor,"eyeLineTargetType"),target=text(actor,"eyeLineTargetId"),actorPath=path+".blocking.characters."+text(actor,"characterId")+".eyeLineTarget";boolean valid=switch(type){
+                case "CHARACTER"->characters.contains(target)&&(visible.contains(target)||offscreen.contains(target));
+                case "PROP"->props.contains(target);
+                case "LOCATION_FEATURE"->features.contains(target);
+                case "SPATIAL_ANCHOR"->anchors.contains(target);
+                case "CAMERA"->"CAMERA".equals(target);
+                default->false;
+            };if(!valid)invalid(actorPath,"视线目标必须引用本镜声明的人物、道具、地点固定设施、空间锚点或相机");
+        }
+    }
     private void validatePerformance(JsonNode performance,JsonNode input,String path){String expected=text(input.path("directorRuleProfile"),"performanceDetail");if(expected.isBlank())expected=text(input.path("directorStyleProfile"),"performanceDetail");if(!Set.of("BASIC","MICRO_EXPRESSION","FACS").contains(expected))expected="BASIC";if(!expected.equals(text(performance,"detailLevel")))invalid(path+".detailLevel","表演细节等级必须使用服务端选择的 "+expected);String stage=text(performance,"microExpressionStage");if("BASIC".equals(expected)&&!"NONE".equals(stage))invalid(path+".microExpressionStage","BASIC 镜头不应伪造微表情阶段");if(!"BASIC".equals(expected)&&"NONE".equals(stage))invalid(path+".microExpressionStage","重要文戏必须声明可观察的微表情阶段");if("FACS".equals(expected)&&performance.path("facsUnits").isEmpty())invalid(path+".facsUnits","FACS 镜头必须声明动作单元");if(!"FACS".equals(expected)&&!performance.path("facsUnits").isEmpty())invalid(path+".facsUnits","非 FACS 镜头不得堆叠动作单元");}
     private static String resolveCharacterSubject(String subject,JsonNode input) {
         String resolved="";
@@ -645,15 +684,17 @@ public final class DirectorContract {
     private static ObjectNode boundedString(int min,int max){return obj().put("type","string").put("minLength",min).put("maxLength",max);}
     private static ObjectNode values(List<String> values){ObjectNode result=obj().put("type","string");ArrayNode options=result.putArray("enum");values.forEach(options::add);return result;}
     private static ObjectNode array(JsonNode item,int min){ObjectNode result=obj().put("type","array").put("minItems",min);result.set("items",item);return result;}
+    private static ObjectNode shotDurationSchema(JsonNode input){return obj().put("type","number").put("minimum",EditorialTiming.MIN_SHOT_SECONDS).put("maximum",duration(input));}
     private static ObjectNode ids(JsonNode root,String name){List<String> values=keys(root,name);ObjectNode result=array(values.isEmpty()?string():values(values),0);result.put("maxItems",values.size());return result;}
     private static void requireAll(ObjectNode object){ArrayNode required=object.withArray("required");object.path("properties").fieldNames().forEachRemaining(required::add);}
     private static int[] shotBounds(JsonNode input){
         double duration=duration(input);
+        int physicalMax=(int)Math.floor(duration/EditorialTiming.MIN_SHOT_SECONDS);
+        if(physicalMax<1)invalid("input.sceneTargetDurationSeconds","场景时长短于当前剪辑系统的最短镜头");
         double average=input.path("directorStyleProfile").path("averageShotLength").asDouble(3);
-        if(average<2||average>5)average=3;
+        if(average<=0)average=3;
         int target=Math.max(1,(int)Math.round(duration/average));
-        int physicalMin=Math.max(1,(int)Math.ceil(duration/5d)),physicalMax=Math.max(physicalMin,(int)Math.floor(duration/2d));
-        int min=Math.min(physicalMax,Math.max(physicalMin,(int)Math.ceil(target*.8)));
+        int min=Math.min(physicalMax,Math.max(1,(int)Math.ceil(target*.8)));
         // Average shot length is a pacing preference, not a hard coverage cap.
         // Dense dialogue/reveal scenes may need extra reaction or insert shots;
         // the exact-duration validator still prevents padding or overrun.

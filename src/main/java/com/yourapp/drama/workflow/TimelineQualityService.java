@@ -3,6 +3,10 @@ package com.yourapp.drama.workflow;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.*;
 import com.yourapp.drama.persistence.DocumentStore;
+import com.yourapp.drama.production.EditorialTiming;
+import com.yourapp.drama.production.EditingEngine;
+import com.yourapp.drama.production.EditOperation;
+import com.yourapp.drama.production.ProductionModels;
 import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.util.*;
@@ -18,6 +22,7 @@ public class TimelineQualityService {
         ObjectNode timeline=store.getForUpdate(TIMELINE,timelineId);long contentRevision=timeline.path("contentRevision").asLong(1);
         ArrayNode failures=JsonNodeFactory.instance.arrayNode(),details=JsonNodeFactory.instance.arrayNode();
         List<ObjectNode> items=store.list(TIMELINE_ITEM,project(timeline),timelineId),videos=items.stream().filter(i->"VIDEO".equals(text(i,"track"))).sorted(Comparator.comparingLong(i->i.path("startMs").asLong())).toList();
+        ArrayNode editingItems=JsonNodeFactory.instance.arrayNode();items.forEach(editingItems::add);List<ProductionModels.Risk> editingRisks=new ArrayList<>();EditingEngine.validate(editingItems,editingRisks);for(ProductionModels.Risk risk:editingRisks)if("ERROR".equals(risk.severity()))failure(failures,details,risk.code(),risk.message());
         if(videos.isEmpty())failure(failures,details,"VIDEO_REQUIRED","时间线没有视频轨");
         long cursor=0;ObjectNode previousShot=null;int videoIndex=0;
         for(ObjectNode item:videos){long start=item.path("startMs").asLong(-1),duration=item.path("durationMs").asLong(-1),sourceIn=item.path("sourceInMs").asLong(-1),sourceOut=item.path("sourceOutMs").asLong(-1);String transition=item.path("transition").asText("CUT").toUpperCase(Locale.ROOT);long transitionDuration=item.path("transitionDurationMs").asLong(0);
@@ -26,7 +31,7 @@ public class TimelineQualityService {
             if("CROSS_DISSOLVE".equals(transition)&&(transitionDuration<100||transitionDuration>1000||transitionDuration>=duration))failure(failures,details,"TRANSITION_DURATION_INVALID","叠化时长必须为 0.1～1 秒且短于当前片段");
             long overlap=videoIndex>0&&"CROSS_DISSOLVE".equals(transition)?transitionDuration:0,expectedStart=videoIndex==0?0:cursor-overlap;
             if(start!=expectedStart)failure(failures,details,start<expectedStart?"VIDEO_OVERLAP":"VIDEO_GAP","视频轨在 "+expectedStart+"ms 处不连续");
-            if(duration<1250||sourceIn<0||sourceOut-sourceIn!=duration)failure(failures,details,"VIDEO_TRIM_INVALID","视频剪辑入点、出点与时长不一致");
+            long pauseDuration=EditingEngine.hasOperation(item,EditOperation.PAUSE)?item.path("pauseDurationMs").asLong(-1):0,sourceDuration=duration-Math.max(0,pauseDuration);if(duration<EditorialTiming.MIN_SHOT_MS||sourceIn<0||pauseDuration<0||sourceDuration<=0||sourceOut-sourceIn!=sourceDuration)failure(failures,details,"VIDEO_TRIM_INVALID","视频剪辑源区间与输出时长、停帧时长不一致");
             ObjectNode take=safe(VIDEO_TAKE,text(item,"videoTakeId"));if(take==null)failure(failures,details,"VIDEO_TAKE_MISSING","时间线引用的视频版本不存在");else{
                 long actual=take.path("actualDurationMs").asLong(0);if(actual<=0&&!take.path("simulated").asBoolean())failure(failures,details,"MEDIA_DURATION_UNKNOWN","视频缺少媒体探测时长");if(actual>0&&sourceOut>actual)failure(failures,details,"VIDEO_TRIM_OUT_OF_RANGE","视频出点超过素材实际时长");
                 if(!take.path("selected").asBoolean()||!take.path("locked").asBoolean()||!"PASSED".equals(text(take,"qcStatus")))failure(failures,details,"VIDEO_TAKE_NOT_APPROVED","时间线使用了未采用或未通过质检的视频");

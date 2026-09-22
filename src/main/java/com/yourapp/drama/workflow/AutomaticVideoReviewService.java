@@ -13,8 +13,8 @@ import static com.yourapp.drama.workflow.Documents.*;
 @Service
 public class AutomaticVideoReviewService {
     private static final Object[] LOCKS=new Object[64];static{Arrays.setAll(LOCKS,ignored->new Object());}
-    private final DocumentStore store;private final VisualExpectedContextService expectedContexts;private final VideoQualityReviewer reviewer;private final VisualQualityProtocol protocol;private final VisualQualityPolicy policy;private final VisualReviewMediaService media;private final VideoFrameExtractor extractor;private final WorkflowService workflow;
-    public AutomaticVideoReviewService(DocumentStore store,VisualExpectedContextService expectedContexts,VideoQualityReviewer reviewer,VisualQualityProtocol protocol,VisualQualityPolicy policy,VisualReviewMediaService media,VideoFrameExtractor extractor,WorkflowService workflow){this.store=store;this.expectedContexts=expectedContexts;this.reviewer=reviewer;this.protocol=protocol;this.policy=policy;this.media=media;this.extractor=extractor;this.workflow=workflow;}
+    private final DocumentStore store;private final VisualExpectedContextService expectedContexts;private final VideoQualityReviewer reviewer;private final RuleEngine rules;private final VisualQualityProtocol protocol;private final VisualQualityPolicy policy;private final VisualReviewMediaService media;private final VideoFrameExtractor extractor;private final WorkflowService workflow;
+    public AutomaticVideoReviewService(DocumentStore store,VisualExpectedContextService expectedContexts,VideoQualityReviewer reviewer,RuleEngine rules,VisualQualityProtocol protocol,VisualQualityPolicy policy,VisualReviewMediaService media,VideoFrameExtractor extractor,WorkflowService workflow){this.store=store;this.expectedContexts=expectedContexts;this.reviewer=reviewer;this.rules=rules;this.protocol=protocol;this.policy=policy;this.media=media;this.extractor=extractor;this.workflow=workflow;}
 
     public ObjectNode review(String takeId,JsonNode request){
         String assessmentKey="vlm:video:v"+VisualQualityProtocol.VERSION+":"+takeId+(request.path("apply").asBoolean(false)?":apply":":shadow");synchronized(LOCKS[Math.floorMod(assessmentKey.hashCode(),LOCKS.length)]){return reviewOnce(takeId,request,assessmentKey);}
@@ -23,6 +23,7 @@ public class AutomaticVideoReviewService {
         ObjectNode take=store.get(VIDEO_TAKE,takeId);if(!"SUCCEEDED".equals(text(take,"providerStatus")))throw new WorkflowException("VIDEO_NOT_READY","视频尚未生成成功");
         ObjectNode existing=existingAssessment(project(take),takeId,assessmentKey);if(existing!=null){ObjectNode response=take.deepCopy();response.set("automaticReview",existing);return response;}boolean shadow=!request.path("apply").asBoolean(false);
         JsonNode generation=take.path("inputSnapshot");if(!generation.path("context").isObject())throw new WorkflowException("VIDEO_CONTEXT_REQUIRED","视频缺少生成时上下文，不能进行可靠质检");
+        try{rules.requireDeterministicPass(generation.path("context"));}catch(DeterministicRuleViolationException failure){throw new WorkflowException("DETERMINISTIC_RULE_FAILED",failure.getMessage());}
         ObjectNode expected=expectedContexts.build(generation.path("context"));media.addReferences(take,generation,expected);
         List<VideoQualityReviewer.Frame> frames=take.path("simulated").asBoolean()?simulatedFrames():extractor.extract(media.requiredArchiveKey(take));
         JsonNode result;try{result=protocol.validate(reviewer.review(expected,frames),expected);}catch(ProviderException failure){failedAssessment(take,assessmentKey,shadow,failure);throw failure;}

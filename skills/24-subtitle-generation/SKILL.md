@@ -15,7 +15,7 @@
 
 ## 硬规则
 
-- 字幕文本只读取 displayText
+- 字幕文本只读取 subtitleText，不得从 semanticText 或 spokenText 推断
 - 每次运行记录 projectId、projectVersion、输入版本和产出版本，旧产出不得覆盖。
 
 ## 失败处理

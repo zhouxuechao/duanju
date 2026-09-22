@@ -59,4 +59,30 @@ class ScreenwritingRuleResolverTest {
         assertThat(first.path("loadedRules").path(0).path("contentHash").asText()).hasSize(64);
         assertThat(first.path("fingerprint").asText()).isNotEqualTo(second.path("fingerprint").asText());
     }
+
+    @Test void cliffhangerStrengthComesFromTheStoryTypeRulePack(){
+        ObjectNode format=new EpisodeFormatResolver().resolve(obj().put("targetDuration",24));
+        ObjectNode suspense=obj().put("storyType","SUSPENSE"),other=obj().put("storyType","OTHER");
+        suspense.putArray("tropes");other.putArray("tropes");
+
+        String suspenseStrength=resolver.resolve("STORY_QA",suspense,format,"GENERAL").at("/storyTypeRule/episodeEndingPolicy/minimumStrength").asText();
+        String otherStrength=resolver.resolve("STORY_QA",other,format,"GENERAL").at("/storyTypeRule/episodeEndingPolicy/minimumStrength").asText();
+
+        assertThat(suspenseStrength).isEqualTo("HIGH");
+        assertThat(otherStrength).isEqualTo("LOW");
+    }
+
+    @Test void storyFormatControlsPresentationPolicyWithoutChangingTheStoryType(){
+        ObjectNode profile=obj().put("storyType","SUSPENSE_MYSTERY");profile.putArray("tropes");
+        ObjectNode episode=new EpisodeFormatResolver().resolve(obj().put("targetDuration",75));
+        ObjectNode storyFormat=new StoryFormatResolver().resolve(obj().put("targetDuration",75).put("episodeCount",12)
+            .set("storyFormat",obj().put("formatId","VERTICAL_COMIC").put("narrativeForm","SHORT_DRAMA").put("presentation","COMIC").put("orientation","VERTICAL")));
+
+        ObjectNode pack=resolver.resolve("SCRIPT",profile,episode,storyFormat,"GENERAL","base","DEEPSEEK_WRITER");
+
+        assertThat(pack.path("storyType").asText()).isEqualTo("SUSPENSE_MYSTERY");
+        assertThat(pack.at("/storyFormat/presentation").asText()).isEqualTo("COMIC");
+        assertThat(pack.at("/formatRule/visualStyle/presentation").asText()).isEqualTo("COMIC");
+        assertThat(pack.at("/formatRule/sceneDensity/maxScenes").asInt()).isEqualTo(episode.path("sceneLimit").asInt());
+    }
 }

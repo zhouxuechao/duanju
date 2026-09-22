@@ -68,20 +68,20 @@ public class ProductionService {
     }
 
     public JsonNode renderDialect(JsonNode request) {
-        String display = required(request, "displayText");
+        String semantic = required(request, "semanticText"),subtitle=required(request,"subtitleText");
         String dialect = text(request, "dialect");
         double strength = request.path("dialectStrength").asDouble(1.0);
         if (strength < 0 || strength > 1) throw new IllegalArgumentException("dialectStrength 必须在 0 至 1 之间");
-        ObjectNode result = mapper.createObjectNode().put("displayText", display).put("dialect", dialect).put("dialectStrength", strength);
+        ObjectNode result = mapper.createObjectNode().put("semanticText",semantic).put("subtitleText",subtitle).put("dialect", dialect).put("dialectStrength", strength);
         if (strength == 0 || dialect.isBlank()) {
-            result.put("dialectText", display).put("speechText", display).put("confidence", 1.0)
+            result.put("spokenText",semantic).put("confidence", 1.0)
                 .put("needsHumanCorrection", false).put("status", "READY").putArray("matchedEntryIds");
             return result;
         }
         JsonNode correction = request.path("correction");
         if (correction.path("approved").asBoolean(false)) {
-            String d = required(correction, "dialectText"), s = required(correction, "speechText");
-            result.put("dialectText", d).put("speechText", s).put("confidence", 1.0)
+            String spoken=required(correction,"spokenText");
+            result.put("spokenText",spoken).put("confidence", 1.0)
                 .put("needsHumanCorrection", false).put("status", "HUMAN_CORRECTED");
             result.putArray("matchedEntryIds").add(text(correction, "entryId"));
             return result;
@@ -92,24 +92,24 @@ public class ProductionService {
         if (kb.isArray()) for (JsonNode entry : kb) {
             if (!dialect.equalsIgnoreCase(text(entry, "dialect")) && !dialect.equalsIgnoreCase(text(entry, "locale"))) continue;
             if (!entry.path("approved").asBoolean(false)) continue;
-            String source = text(entry, "displayText");
-            double score = similarity(display, source);
-            if (score >= 0.55 && !text(entry, "dialectText").isBlank() && !text(entry, "speechText").isBlank()) candidates.add(new Candidate(score, entry));
+            String source = text(entry, "semanticText");
+            double score = similarity(semantic, source);
+            if (score >= 0.55 && !text(entry, "spokenText").isBlank()) candidates.add(new Candidate(score, entry));
         }
         candidates.sort(Comparator.comparingDouble(Candidate::score).reversed());
         ArrayNode suggestions = result.putArray("suggestions");
         for (Candidate candidate : candidates.stream().limit(3).toList()) {
             ObjectNode s = mapper.createObjectNode().put("entryId", text(candidate.entry(), "id"))
-                .put("score", candidate.score()).put("displayText", text(candidate.entry(), "displayText"))
-                .put("dialectText", text(candidate.entry(), "dialectText"));
+                .put("score", candidate.score()).put("semanticText", text(candidate.entry(), "semanticText"))
+                .put("spokenText", text(candidate.entry(), "spokenText"));
             suggestions.add(s);
         }
         if (candidates.isEmpty() || candidates.getFirst().score() < 0.8) {
-            result.put("dialectText", "").put("speechText", "").put("confidence", candidates.isEmpty() ? 0 : candidates.getFirst().score())
+            result.put("spokenText", "").put("confidence", candidates.isEmpty() ? 0 : candidates.getFirst().score())
                 .put("needsHumanCorrection", true).put("status", "HUMAN_REVIEW_REQUIRED").putArray("matchedEntryIds");
         } else {
             JsonNode best = candidates.getFirst().entry();
-            result.put("dialectText", text(best, "dialectText")).put("speechText", text(best, "speechText"))
+            result.put("spokenText", text(best, "spokenText"))
                 .put("confidence", candidates.getFirst().score()).put("needsHumanCorrection", false).put("status", "READY");
             result.putArray("matchedEntryIds").add(text(best, "id"));
         }
@@ -123,7 +123,7 @@ public class ProductionService {
         int maxChars=style.path("maxCharsPerLine").asInt(),maxLines=style.path("maxLines").asInt();double maxCps=style.path("maxCps").asDouble();if(maxChars<4||maxChars>32||maxLines<1||maxLines>2||maxCps<4||maxCps>30)throw new IllegalArgumentException("字幕样式的每行字数、行数或阅读速度范围无效");ArrayNode issues=mapper.createArrayNode();
         List<Cue> cues = new ArrayList<>();
         for (JsonNode line : lines) {
-            String display = required(line, "displayText");
+            String display = required(line, "subtitleText");
             long start = timeMs(line, "startMs", "start");
             long end = line.has("endMs") ? timeMs(line, "endMs", "end") : start + timeMs(line, "audioDurationMs", "durationMs");
             if (start < 0 || end <= start) throw new IllegalArgumentException("字幕音频时间必须为非负且 end > start: " + text(line, "dialogueId"));
@@ -164,8 +164,10 @@ public class ProductionService {
             String transition=item.path("transition").asText("CUT").toUpperCase(Locale.ROOT);long transitionDuration=item.path("transitionDurationMs").asLong("CROSS_DISSOLVE".equals(transition)?300:0),fadeIn=item.path("fadeInMs").asLong("BGM".equals(track)?500:"AMBIENCE".equals(track)?250:0),fadeOut=item.path("fadeOutMs").asLong("BGM".equals(track)?800:"AMBIENCE".equals(track)?400:0);
             if(!Set.of("CUT","MATCH_CUT","CROSS_DISSOLVE","FADE_TO_BLACK").contains(transition))error(risks,"INVALID_TRANSITION",media,"转场只支持 CUT、MATCH_CUT、CROSS_DISSOLVE、FADE_TO_BLACK");
             if(fadeIn<0||fadeOut<0||fadeIn+fadeOut>=duration)error(risks,"INVALID_AUDIO_FADE",media,"音频淡入淡出必须非负，且总时长要短于素材片段");
-            parsed.add(new TrackItem(track, path.toString(), start, sourceStart, duration, volume,playbackRate,transition,transitionDuration,fadeIn,fadeOut));
+            long pauseDuration=EditingEngine.hasOperation(item,EditOperation.PAUSE)?item.path("pauseDurationMs").asLong(-1):0;
+            parsed.add(new TrackItem(track, path.toString(), start, sourceStart, duration, volume,playbackRate,transition,transitionDuration,fadeIn,fadeOut,pauseDuration));
         }
+        EditingEngine.validate(items,risks);
         for (String track : List.of("VIDEO", "DIALOGUE", "AMBIENCE", "SFX", "BGM")) {
             List<TrackItem> same = parsed.stream().filter(i -> i.track().equals(track)).sorted(Comparator.comparingLong(TrackItem::start)).toList();
             for (int i = 1; i < same.size(); i++) if (same.get(i - 1).start() + same.get(i - 1).duration() > same.get(i).start() && !track.equals("BGM")&&!track.equals("VIDEO"))
@@ -190,9 +192,9 @@ public class ProductionService {
         List<Integer> videos = new ArrayList<>(), audio = new ArrayList<>();
         for (int i = 0; i < parsed.size(); i++) {
             TrackItem item = parsed.get(i);
-            long sourceDuration=item.track().equals("VIDEO")?item.duration():Math.round(item.duration()*item.playbackRate());
+            long sourceDuration=item.track().equals("VIDEO")?item.duration()-Math.max(0,item.pauseDuration()):Math.round(item.duration()*item.playbackRate());
             String trim="start="+seconds(item.sourceStart())+":duration="+seconds(sourceDuration);
-            if (item.track().equals("VIDEO")) { videos.add(i); graph.append('[').append(i).append(":v]trim=").append(trim).append(",setpts=PTS-STARTPTS,scale=").append(width).append(':').append(height).append(":force_original_aspect_ratio=decrease,pad=").append(width).append(':').append(height).append(":(ow-iw)/2:(oh-ih)/2:black,fps=").append(fps).append(",setsar=1,settb=AVTB,format=").append(pixelFormat).append("[v").append(i).append("]; "); }
+            if (item.track().equals("VIDEO")) { videos.add(i); graph.append('[').append(i).append(":v]trim=").append(trim).append(",setpts=PTS-STARTPTS");if(item.pauseDuration()>0)graph.append(",tpad=stop_mode=clone:stop_duration=").append(decimal(item.pauseDuration()/1000d));graph.append(",scale=").append(width).append(':').append(height).append(":force_original_aspect_ratio=decrease,pad=").append(width).append(':').append(height).append(":(ow-iw)/2:(oh-ih)/2:black,fps=").append(fps).append(",setsar=1,settb=AVTB,format=").append(pixelFormat).append("[v").append(i).append("]; "); }
             else { audio.add(i); graph.append('[').append(i).append(":a]atrim=").append(trim).append(",asetpts=PTS-STARTPTS");if(Math.abs(item.playbackRate()-1)>.0001)graph.append(",atempo=").append(decimal(item.playbackRate()));if(item.fadeIn()>0)graph.append(",afade=t=in:st=0:d=").append(decimal(item.fadeIn()/1000d));if(item.fadeOut()>0)graph.append(",afade=t=out:st=").append(decimal((item.duration()-item.fadeOut())/1000d)).append(":d=").append(decimal(item.fadeOut()/1000d));graph.append(",adelay=").append(item.start()).append('|').append(item.start()).append(",volume=").append(item.volume()).append("[a").append(i).append("]; "); }
         }
         if (!videos.isEmpty()) {String current="v"+videos.getFirst();double assembled=parsed.get(videos.getFirst()).duration()/1000d;for(int n=1;n<videos.size();n++){int inputIndex=videos.get(n);TrackItem item=parsed.get(inputIndex);String next="va"+n;if("CROSS_DISSOLVE".equals(item.transition())){double cross=item.transitionDuration()/1000d,offset=assembled-cross;graph.append('[').append(current).append("][v").append(inputIndex).append("]xfade=transition=fade:duration=").append(decimal(cross)).append(":offset=").append(decimal(offset)).append('[').append(next).append("]; ");assembled+=item.duration()/1000d-cross;}else if("FADE_TO_BLACK".equals(item.transition())){double fade=Math.min(.25,Math.min(assembled,item.duration()/1000d)/4),fadeStart=Math.max(0,assembled-fade);String out="vfo"+n,in="vfi"+n;graph.append('[').append(current).append("]fade=t=out:st=").append(decimal(fadeStart)).append(":d=").append(decimal(fade)).append('[').append(out).append("]; [v").append(inputIndex).append("]fade=t=in:st=0:d=").append(decimal(fade)).append('[').append(in).append("]; [").append(out).append("][").append(in).append("]concat=n=2:v=1:a=0[").append(next).append("]; ");assembled+=item.duration()/1000d;}else{graph.append('[').append(current).append("][v").append(inputIndex).append("]concat=n=2:v=1:a=0[").append(next).append("]; ");assembled+=item.duration()/1000d;}current=next;}graph.append('[').append(current).append("]null[vconcat]; ");}
@@ -233,7 +235,7 @@ public class ProductionService {
             case "storyagent", "story-agent", "story" -> throw new IllegalArgumentException("故事契约按 CORE、OUTLINE_BATCH、EPISODE_SCRIPT 分阶段生成，请使用 /api/story-development 接口审查后推进");
             case "directoragent", "director-agent", "director" -> throw new IllegalArgumentException("导演契约随本次资产版本生成，请向 POST /api/schemas/agents/director 提交场景和 assets 上下文");
             case "continuityqcagent", "continuity-qc-agent", "continuity-qc", "qc" -> { required.add("passed").add("risks").add("repairPlan"); properties.putObject("passed").put("type", "boolean"); properties.putObject("risks").put("type", "array"); properties.putObject("repairPlan").put("type", "array"); schema.put("additionalProperties", false); }
-            case "editingagent", "editing-agent", "editing" -> { required.add("items").add("soundDesign").add("subtitleMode"); properties.putObject("items").put("type", "array"); properties.putObject("soundDesign"); properties.putObject("subtitleMode").put("enum", mapper.createArrayNode().add("BURN_IN").add("SIDECAR")); schema.put("additionalProperties", false); }
+            case "editingagent", "editing-agent", "editing" -> { required.add("items").add("soundDesign").add("subtitleMode");ObjectNode item=properties.putObject("items").put("type","array").putObject("items").put("type","object");ArrayNode itemRequired=item.putArray("required");itemRequired.add("track").add("startMs").add("durationMs").add("editOperations");ObjectNode itemProperties=item.putObject("properties");itemProperties.putObject("track").put("enum",mapper.createArrayNode().add("VIDEO").add("DIALOGUE").add("AMBIENCE").add("SFX").add("BGM"));itemProperties.putObject("startMs").put("type","integer").put("minimum",0);itemProperties.putObject("durationMs").put("type","integer").put("minimum",1);itemProperties.putObject("sourceInMs").put("type","integer").put("minimum",0);itemProperties.putObject("sourceOutMs").put("type","integer").put("minimum",1);itemProperties.putObject("pauseDurationMs").put("type","integer").put("minimum",1);itemProperties.putObject("gapBeforeMs").put("type","integer").put("minimum",1);ArrayNode operationValues=mapper.createArrayNode();for(EditOperation operation:EditOperation.values())operationValues.add(operation.name());itemProperties.putObject("editOperations").put("type","array").putObject("items").set("enum",operationValues);item.put("additionalProperties",true);properties.putObject("soundDesign").put("type","object"); properties.putObject("subtitleMode").put("enum", mapper.createArrayNode().add("BURN_IN").add("SIDECAR")); schema.put("additionalProperties", false); }
             default -> throw new IllegalArgumentException("未知 Agent schema: " + agent);
         }
         return schema;
@@ -255,5 +257,5 @@ public class ProductionService {
     private record Candidate(double score, JsonNode entry) {}
     private record Cue(String id, String display, long start, long end) {}
     private String decimal(double value){return java.math.BigDecimal.valueOf(value).stripTrailingZeros().toPlainString();}
-    private record TrackItem(String track, String path, long start, long sourceStart, long duration, double volume,double playbackRate,String transition,long transitionDuration,long fadeIn,long fadeOut) {}
+    private record TrackItem(String track, String path, long start, long sourceStart, long duration, double volume,double playbackRate,String transition,long transitionDuration,long fadeIn,long fadeOut,long pauseDuration) {}
 }

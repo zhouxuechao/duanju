@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.*;
 import com.yourapp.drama.job.JobService;
 import com.yourapp.drama.persistence.*;
+import com.yourapp.drama.production.PromptCompiler;
 import com.yourapp.drama.production.ProductionService;
 import org.springframework.stereotype.Service;
 import java.util.*;
@@ -13,32 +14,33 @@ import static com.yourapp.drama.workflow.Documents.*;
 @Service
 public class PostProductionService {
     private final DocumentStore store;private final JobService jobs;private final ProductionService production;
-    private final StoryDevelopmentService development;private final WorkflowService workflow; private final VoiceStateResolver voiceStates;private final TimelineQualityService timelineQuality;private final FinalCreativeQualityService creativeQuality;
-    public PostProductionService(DocumentStore store,JobService jobs,ProductionService production,StoryDevelopmentService development,WorkflowService workflow,VoiceStateResolver voiceStates,TimelineQualityService timelineQuality,FinalCreativeQualityService creativeQuality){this.store=store;this.jobs=jobs;this.production=production;this.development=development;this.workflow=workflow;this.voiceStates=voiceStates;this.timelineQuality=timelineQuality;this.creativeQuality=creativeQuality;}
+    private final StoryDevelopmentService development;private final WorkflowService workflow; private final VoiceStateResolver voiceStates;private final TimelineQualityService timelineQuality;private final FinalCreativeQualityService creativeQuality;private final PromptCompiler prompts;
+    public PostProductionService(DocumentStore store,JobService jobs,ProductionService production,StoryDevelopmentService development,WorkflowService workflow,VoiceStateResolver voiceStates,TimelineQualityService timelineQuality,FinalCreativeQualityService creativeQuality,PromptCompiler prompts){this.store=store;this.jobs=jobs;this.production=production;this.development=development;this.workflow=workflow;this.voiceStates=voiceStates;this.timelineQuality=timelineQuality;this.creativeQuality=creativeQuality;this.prompts=prompts;}
 
     public ObjectNode dialect(String dialogueId,ObjectNode body){
         return store.transaction(()->{
             ObjectNode line=store.getForUpdate(DIALOGUE_LINE,dialogueId),request=body.deepCopy();
-            request.put("displayText",required(line,"displayText"));request.put("dialect",body.path("dialect").asText(line.path("dialect").asText("MANDARIN")));
+            request.put("semanticText",required(line,"semanticText")).put("subtitleText",required(line,"subtitleText"));request.put("dialect",body.path("dialect").asText(line.path("dialect").asText("MANDARIN")));
             request.put("dialectStrength",body.has("dialectStrength")?body.path("dialectStrength").asDouble():line.path("dialectStrength").asDouble(1));
             ArrayNode entries=request.putArray("knowledgeBase");for(ResourceKind kind:List.of(DIALECT_DICTIONARY,DIALECT_PHRASE,DIALECT_EXAMPLE,DIALECT_CORRECTION))store.list(kind,project(line),null).forEach(entries::add);
             JsonNode result=production.renderDialect(request);
-            ObjectNode next=line.deepCopy();for(String field:List.of("dialectText","speechText","dialect","dialectStrength","confidence","needsHumanCorrection","status"))if(result.has(field))next.set(field,result.path(field));
+            ObjectNode next=line.deepCopy();for(String field:List.of("spokenText","dialect","dialectStrength","confidence","needsHumanCorrection","status"))if(result.has(field))next.set(field,result.path(field));
             next.set("dialectMatches",result.path("matchedEntryIds"));
             if(body.path("correction").path("approved").asBoolean(false)){
-                ObjectNode correction=obj().put("projectId",project(line)).put("dialogueLineId",dialogueId).put("displayText",required(line,"displayText"))
-                    .put("dialect",required(result,"dialect")).put("dialectText",required(result,"dialectText")).put("speechText",required(result,"speechText")).put("approved",true).put("humanConfirmed",true);
+                ObjectNode correction=obj().put("projectId",project(line)).put("dialogueLineId",dialogueId).put("semanticText",required(line,"semanticText"))
+                    .put("subtitleText",required(line,"subtitleText")).put("dialect",required(result,"dialect")).put("spokenText",required(result,"spokenText")).put("approved",true).put("humanConfirmed",true);
                 store.create(DIALECT_CORRECTION,correction);
             }
             return store.update(DIALOGUE_LINE,dialogueId,revision(line),next);
         });
     }
     public ObjectNode tts(String dialogueId,ObjectNode body){
-        ObjectNode line=store.get(DIALOGUE_LINE,dialogueId);if(text(line,"speechText").isBlank())throw new WorkflowException("SPEECH_TEXT_REQUIRED","请先完成方言/发音文本确认");
+        ObjectNode line=store.get(DIALOGUE_LINE,dialogueId);if(text(line,"spokenText").isBlank())throw new WorkflowException("SPOKEN_TEXT_REQUIRED","请先完成方言/发音文本确认");
         ensureCurrentShot(required(line,"shotId"));
-        ObjectNode profile=findVoice(line);if(profile==null)throw new WorkflowException("VOICE_PROFILE_REQUIRED","配音必须绑定已确认的角色音色或声音参考，不能随机选音色");String voiceId=profile.path("providerVoiceId").asText("");String referenceAudioUrl=profile.path("referenceAudioUrl").asText("");ObjectNode voiceState=obj();ObjectNode shot=store.get(SHOT,required(line,"shotId"));if(shot.path("storyTime").isNumber()){voiceState=voiceStates.resolve(project(line),id(profile),shot.path("storyTime").asDouble());if(voiceState.hasNonNull("providerVoiceId"))voiceId=voiceState.path("providerVoiceId").asText("");if(voiceState.hasNonNull("referenceAudioUrl"))referenceAudioUrl=voiceState.path("referenceAudioUrl").asText("");}if((voiceId.isBlank()&&referenceAudioUrl.isBlank())||(!voiceId.isBlank()&&!referenceAudioUrl.isBlank()))throw new WorkflowException("VOICE_PROFILE_INVALID","角色音色必须在 providerVoiceId 与已批准 referenceAudioUrl 中二选一");ObjectNode input=obj().put("dialogueLineId",dialogueId).put("shotId",required(line,"shotId")).put("speechText",required(line,"speechText"))
-            .put("displayText",required(line,"displayText")).put("dialect",line.path("dialect").asText("MANDARIN")).put("speed",line.path("speed").asDouble(.95)).put("providerVoiceId",voiceId);
+        ObjectNode profile=findVoice(line);if(profile==null)throw new WorkflowException("VOICE_PROFILE_REQUIRED","配音必须绑定已确认的角色音色或声音参考，不能随机选音色");String voiceId=profile.path("providerVoiceId").asText("");String referenceAudioUrl=profile.path("referenceAudioUrl").asText("");ObjectNode voiceState=obj();ObjectNode shot=store.get(SHOT,required(line,"shotId"));if(shot.path("storyTime").isNumber()){voiceState=voiceStates.resolve(project(line),id(profile),shot.path("storyTime").asDouble());if(voiceState.hasNonNull("providerVoiceId"))voiceId=voiceState.path("providerVoiceId").asText("");if(voiceState.hasNonNull("referenceAudioUrl"))referenceAudioUrl=voiceState.path("referenceAudioUrl").asText("");}if((voiceId.isBlank()&&referenceAudioUrl.isBlank())||(!voiceId.isBlank()&&!referenceAudioUrl.isBlank()))throw new WorkflowException("VOICE_PROFILE_INVALID","角色音色必须在 providerVoiceId 与已批准 referenceAudioUrl 中二选一");ObjectNode input=obj().put("dialogueLineId",dialogueId).put("shotId",required(line,"shotId")).put("spokenText",required(line,"spokenText"))
+            .put("semanticText",required(line,"semanticText")).put("subtitleText",required(line,"subtitleText")).put("dialect",line.path("dialect").asText("MANDARIN")).put("speed",line.path("speed").asDouble(.95)).put("providerVoiceId",voiceId);
         input.put("voiceProfileId",id(profile));ObjectNode profileForRequest=profile.deepCopy();profileForRequest.put("providerVoiceId",voiceId);if(referenceAudioUrl.isBlank())profileForRequest.remove("referenceAudioUrl");else profileForRequest.put("referenceAudioUrl",referenceAudioUrl);input.set("voiceProfile",profileForRequest);input.set("voiceState",voiceState);
+        ObjectNode compileRequest=obj().put("dialogueId",dialogueId).put("semanticText",required(line,"semanticText")).put("spokenText",required(line,"spokenText")).put("subtitleText",required(line,"subtitleText")).put("dialect",line.path("dialect").asText("MANDARIN")).put("speed",line.path("speed").asDouble(.95)).put("voiceProfileId",id(profile)).put("voiceReferenceMode",referenceAudioUrl.isBlank()?"PROVIDER_VOICE_ID":"REFERENCE_AUDIO");var compiled=prompts.compileVoice(compileRequest);input.put("prompt",compiled.prompt()).put("compilerVersion",compiled.compilerVersion());input.set("promptIR",compiled.promptIRJson().deepCopy());
         input.set("options",body.path("providerOptions").isObject()?body.path("providerOptions"):obj());
         return jobs.enqueue(project(line),required(line,"shotId"),"TTS",input,requestKey(body));
     }
@@ -48,12 +50,13 @@ public class PostProductionService {
         String videoUrl=required(take,"videoUrl");List<ObjectNode> clips=new ArrayList<>();
         if(body.hasNonNull("audioClipId"))clips.add(store.get(AUDIO_CLIP,body.path("audioClipId").asText()));else for(ObjectNode clip:store.list(AUDIO_CLIP,project(take),required(take,"shotId")))if(clip.path("locked").asBoolean()&&clip.path("selected").asBoolean())clips.add(clip);
         if(clips.isEmpty())throw new WorkflowException("AUDIO_REQUIRED","口型同步需要已采用的对白音频");
-        String prompt="保持参考视频的人物身份、服装、场景、构图、动作和镜头长度；仅根据参考对白音频校正说话口型与面部微表情，不添加台词、人物、镜头或音乐。";
-        ObjectNode promptVersion=store.create(PROMPT_VERSION,obj().put("projectId",project(take)).put("shotId",required(take,"shotId")).put("purpose","LIPSYNC").put("version",store.list(PROMPT_VERSION,project(take),null).size()+1).put("prompt",prompt).put("compilerVersion","lipsync-1.0"));
-        ObjectNode input=obj().put("shotId",required(take,"shotId")).put("sourceTakeId",takeId).put("sourceKeyframeId",required(take,"sourceKeyframeId")).put("promptVersionId",id(promptVersion)).put("prompt",prompt).put("takeNo",store.list(VIDEO_TAKE,project(take),required(take,"shotId")).size()+1);
-        ArrayNode refs=input.putArray("references");refs.add(obj().put("type","video_url").put("url",videoUrl).put("role","reference_video"));
+        ObjectNode compileRequest=obj().put("shotId",required(take,"shotId")).put("sourceTakeId",takeId).put("videoUrl",videoUrl);ArrayNode refs=compileRequest.putArray("references");refs.add(obj().put("type","video_url").put("url",videoUrl).put("role","reference_video"));
         for(ObjectNode clip:clips){String audioUrl=text(clip,"providerUrl");if(audioUrl.isBlank())throw new WorkflowException("PROVIDER_AUDIO_URL_REQUIRED","当前音频只有归档副本，服务商无法访问；请配置能返回临时 URL 的配音或对象存储");refs.add(obj().put("type","audio_url").put("url",audioUrl).put("role","reference_audio"));}
-        input.set("audioClipIds",mapperArray(clips));input.set("providerOptions",body.path("providerOptions").isObject()?body.path("providerOptions"):obj());
+        compileRequest.set("audioClipIds",mapperArray(clips));var compiled=prompts.compileLipSync(compileRequest);
+        ObjectNode promptData=obj().put("projectId",project(take)).put("shotId",required(take,"shotId")).put("purpose","LIPSYNC").put("version",store.list(PROMPT_VERSION,project(take),null).size()+1).put("prompt",compiled.prompt()).put("compilerVersion",compiled.compilerVersion());promptData.set("promptIR",compiled.promptIRJson().deepCopy());
+        ObjectNode promptVersion=store.create(PROMPT_VERSION,promptData);
+        ObjectNode input=obj().put("shotId",required(take,"shotId")).put("sourceTakeId",takeId).put("sourceKeyframeId",required(take,"sourceKeyframeId")).put("promptVersionId",id(promptVersion)).put("prompt",compiled.prompt()).put("compilerVersion",compiled.compilerVersion()).put("takeNo",store.list(VIDEO_TAKE,project(take),required(take,"shotId")).size()+1);input.set("references",refs.deepCopy());input.set("promptIR",compiled.promptIRJson().deepCopy());
+        input.set("audioClipIds",compileRequest.path("audioClipIds").deepCopy());input.set("providerOptions",body.path("providerOptions").isObject()?body.path("providerOptions"):obj());
         return jobs.enqueue(project(take),required(take,"shotId"),"LIPSYNC",input,requestKey(body));
     }
     public JsonNode soundDesign(String episodeId,ObjectNode body){

@@ -14,9 +14,9 @@ import static com.yourapp.drama.workflow.Documents.*;
 public class AutomaticVisualReviewService {
     private static final Object[] LOCKS=new Object[64];static{Arrays.setAll(LOCKS,ignored->new Object());}
     private final DocumentStore store;private final VisualExpectedContextService expectedContexts;private final VisualQualityReviewer reviewer;
-    private final VisualQualityProtocol protocol;private final VisualQualityPolicy policy;private final VisualReviewMediaService media;private final WorkflowService workflow;
-    public AutomaticVisualReviewService(DocumentStore store,VisualExpectedContextService expectedContexts,VisualQualityReviewer reviewer,VisualQualityProtocol protocol,VisualQualityPolicy policy,VisualReviewMediaService media,WorkflowService workflow){
-        this.store=store;this.expectedContexts=expectedContexts;this.reviewer=reviewer;this.protocol=protocol;this.policy=policy;this.media=media;this.workflow=workflow;
+    private final RuleEngine rules;private final VisualQualityProtocol protocol;private final VisualQualityPolicy policy;private final VisualReviewMediaService media;private final WorkflowService workflow;
+    public AutomaticVisualReviewService(DocumentStore store,VisualExpectedContextService expectedContexts,VisualQualityReviewer reviewer,RuleEngine rules,VisualQualityProtocol protocol,VisualQualityPolicy policy,VisualReviewMediaService media,WorkflowService workflow){
+        this.store=store;this.expectedContexts=expectedContexts;this.reviewer=reviewer;this.rules=rules;this.protocol=protocol;this.policy=policy;this.media=media;this.workflow=workflow;
     }
 
     /** Defaults to shadow assessment. Callers must explicitly set apply=true to affect the production gate. */
@@ -29,6 +29,7 @@ public class AutomaticVisualReviewService {
         ObjectNode existing=existingAssessment(project(frame),keyframeId,assessmentKey);if(existing!=null){ObjectNode response=frame.deepCopy();response.set("automaticReview",existing);return response;}
         boolean shadow=!request.path("apply").asBoolean(false);
         if(!generation.path("context").isObject()){ObjectNode job=store.get(GENERATION_JOB,required(frame,"generationJobId"));generation=job.path("inputSnapshot");}
+        try{rules.requireDeterministicPass(generation.path("context"));}catch(DeterministicRuleViolationException failure){throw new WorkflowException("DETERMINISTIC_RULE_FAILED",failure.getMessage());}
         ObjectNode expected=expectedContexts.build(generation.path("context"));addReviewPolicy(expected,frame,generation);
         ObjectNode generated=media.prepare(frame,generation,expected,request);JsonNode result;
         try{result=protocol.validate(reviewer.review(expected,generated),expected);}catch(ProviderException failure){failedAssessment(frame,assessmentKey,shadow,failure);throw failure;}

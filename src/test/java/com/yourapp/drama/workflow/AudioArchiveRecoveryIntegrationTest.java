@@ -38,7 +38,7 @@ class AudioArchiveRecoveryIntegrationTest {
         shot.set("startState",obj()); shot.set("endState",obj().put("reviewed",true));
         shot=store.create(SHOT,shot);
         ObjectNode profile=store.create(VOICE_PROFILE,obj().put("projectId",id(project)).put("providerVoiceId","voice-1").put("approved",true));
-        ObjectNode line=store.create(DIALOGUE_LINE,obj().put("projectId",id(project)).put("shotId",id(shot)).put("displayText","别开门").put("speechText","别开门").put("voiceProfileId",id(profile)));
+        ObjectNode line=store.create(DIALOGUE_LINE,obj().put("projectId",id(project)).put("shotId",id(shot)).put("semanticText","别开门").put("subtitleText","别开门").put("spokenText","别开门").put("voiceProfileId",id(profile)));
         when(voice.generate(any())).thenReturn(new VoiceGenerator.VoiceResult("VOLCENGINE","seed-audio","cgt-audio-1","https://audio.volces.com/result.mp3",new byte[]{1,2,3},"audio/mpeg",2,false));
         when(storage.put(anyString(),any(),anyString())).thenThrow(new RuntimeException("archive down"));
         ObjectNode tts=post.tts(id(line),obj().put("requestKey","audio-archive-recovery"));

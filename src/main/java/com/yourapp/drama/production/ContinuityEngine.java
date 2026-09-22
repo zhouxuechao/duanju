@@ -115,6 +115,7 @@ public class ContinuityEngine {
         for(String characterId:shot.characterIds())if(start.path("characters").path(characterId).has("alive")&&!start.path("characters").path(characterId).path("alive").asBoolean())
             error(risks,"DEAD_CHARACTER_PRESENT","shot.startState.characters."+characterId+".alive","已死亡角色不能作为当前镜头中的正常出场人物");
         validateHolders(start, risks);
+        validateBlockingIr(raw.path("blocking"),shot,start,risks);
         if (shot.relationToPrevious() == ShotRelation.REVERSE_SHOT && sameComposition(request.path("previousShot"), raw))
             risks.add(new Risk("DUPLICATE_COMPOSITION", "WARNING", "shot.shotSize", "正反打应按分镜改变机位、视线或构图；不要复制上一戏剧画面"));
         if (shot.difficulty() == Difficulty.D) risks.add(new Risk("HIGH_DIFFICULTY", "WARNING", "shot.difficulty", "多人或复杂动作应拆镜或提供动作参考"));
@@ -178,6 +179,26 @@ public class ContinuityEngine {
         });
     }
 
+    private void validateBlockingIr(JsonNode blocking,Shot shot,JsonNode start,List<Risk> risks){
+        if(!blocking.isObject()||blocking.isEmpty())return;
+        Set<String> characters=new LinkedHashSet<>();
+        for(JsonNode actor:blocking.path("characters")){
+            String id=text(actor,"characterId");
+            if(!characters.add(id))error(risks,"BLOCKING_CHARACTER_DUPLICATE","shot.blocking.characters","同一人物只能有一个 Blocking 位置");
+            if(!shot.characterIds().contains(id))error(risks,"BLOCKING_CHARACTER_UNKNOWN","shot.blocking.characters."+id,"Blocking 引用了本镜不可见人物");
+            String expected=text(start.path("characters").path(id),"position"),actual=text(actor,"worldPosition");
+            if(!expected.isBlank()&&!actual.isBlank()&&!expected.equals(actual))error(risks,"BLOCKING_CHARACTER_POSITION_CONFLICT","shot.blocking.characters."+id+".worldPosition","Blocking 世界站位必须等于连续性起始状态："+expected);
+        }
+        Set<String> props=new LinkedHashSet<>();
+        for(JsonNode prop:blocking.path("props")){
+            String id=text(prop,"propId");
+            if(!props.add(id))error(risks,"BLOCKING_PROP_DUPLICATE","shot.blocking.props","同一道具只能有一个 Blocking 位置");
+            if(!shot.propIds().contains(id))error(risks,"BLOCKING_PROP_UNKNOWN","shot.blocking.props."+id,"Blocking 引用了本镜不可见道具");
+            String expected=text(start.path("props").path(id),"position"),actual=text(prop,"worldPosition");
+            if(!expected.isBlank()&&!actual.isBlank()&&!expected.equals(actual))error(risks,"BLOCKING_PROP_POSITION_CONFLICT","shot.blocking.props."+id+".worldPosition","Blocking 道具位置必须等于连续性起始状态："+expected);
+        }
+    }
+
     private boolean sameComposition(JsonNode previous, JsonNode current) {
         return previous.isObject() && List.of("shotSize", "cameraAngle", "composition").stream().allMatch(k -> previous.path(k).equals(current.path(k)));
     }
@@ -187,8 +208,8 @@ public class ContinuityEngine {
         if(names.size()!=4||versions.size()!=1)error(risks,"ANCHOR_REVIEW_REQUIRED",path,"必须先生成并批准同一版本的四张素材视图");
     }
     private void validateAtomicShot(Shot shot, JsonNode raw, List<Risk> risks) {
-        if (!Double.isFinite(shot.duration()) || shot.duration() < 2 || shot.duration() > 5)
-            error(risks, "ATOMIC_DURATION", "shot.duration", "原子镜头必须在 2 至 5 秒之间；长对白或复杂动作请拆镜");
+        if (!Double.isFinite(shot.duration()) || shot.duration() < EditorialTiming.MIN_SHOT_SECONDS)
+            error(risks, "ATOMIC_DURATION", "shot.duration", "镜头时长必须至少为 " + EditorialTiming.MIN_SHOT_SECONDS + " 秒；上限由实际视频模型能力决定");
         if (shot.action().isBlank() || shot.action().length() > 180)
             error(risks, "ATOMIC_ACTION", "shot.action", "提供 180 字以内的一项主要动作，不能传大段小说");
         if (shot.shotSize().isBlank() || shot.cameraAngle().isBlank() || shot.cameraMovement().isBlank())
@@ -201,5 +222,26 @@ public class ContinuityEngine {
         if (raw.path("actions").isArray() && raw.path("actions").size() > 1) error(risks, "MULTIPLE_ACTIONS", "shot.actions", "一个镜头只允许一个主要动作");
         if (raw.path("visualFocus").isArray() || raw.path("cameraMovement").isArray()) error(risks, "ATOMIC_FOCUS", "shot", "视觉重点和主要运镜必须为单值");
         if (new HashSet<>(shot.characterIds()).size() != shot.characterIds().size()) error(risks, "DUPLICATE_CHARACTER", "shot.characterIds", "同一身份只能出现一次");
+        validateActionStates(shot,risks);
+    }
+
+    private void validateActionStates(Shot shot,List<Risk> risks){
+        for(String characterId:shot.characterIds()){
+            String path="shot.startState.characters."+characterId+".actionState";
+            ActionState start=actionState(shot.startState().path("characters").path(characterId).path("actionState"),path,risks);
+            ActionState end=actionState(shot.endState().path("characters").path(characterId).path("actionState"),"shot.endState.characters."+characterId+".actionState",risks);
+            if(start!=null&&end!=null&&start.action().equals(end.action())&&start.hand()==end.hand()&&start.object().equals(end.object())&&end.progress()<start.progress())
+                error(risks,"ACTION_PROGRESS_REGRESSION","shot.endState.characters."+characterId+".actionState.progress","同一动作的进度不能从 "+start.progress()+" 回退到 "+end.progress());
+        }
+    }
+    private ActionState actionState(JsonNode value,String path,List<Risk> risks){
+        if(value.isMissingNode()||value.isNull())return null;
+        if(!value.isObject()){error(risks,"ACTION_STATE_INVALID",path,"动作状态必须包含 action、progress、hand、object");return null;}
+        String action=text(value,"action"),object=text(value,"object"),hand=text(value,"hand");double progress=value.path("progress").asDouble(Double.NaN);
+        ActionHand parsedHand=null;try{parsedHand=ActionHand.valueOf(hand);}catch(IllegalArgumentException ignored){}
+        if(action.isBlank()||!Double.isFinite(progress)||progress<0||progress>1||parsedHand==null||!value.path("object").isTextual()){
+            error(risks,"ACTION_STATE_INVALID",path,"action 不能为空，progress 必须在 0 到 1，hand 必须为 NONE/LEFT/RIGHT/BOTH，object 必须是字符串");return null;
+        }
+        return new ActionState(action,progress,parsedHand,object);
     }
 }

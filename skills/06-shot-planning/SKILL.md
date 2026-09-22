@@ -1,7 +1,7 @@
 # 06-shot-planning
 
 - 负责 Agent：`DirectorAgent`
-- 版本：`3.1.0`
+- 版本：`3.2.0`
 - 目标：把场景拆成原子镜头
 
 ## 输入
@@ -21,12 +21,14 @@
 
 ## 硬规则
 
-- 镜头 2 至 5 秒且只有一个主要动作和视觉重点
+- 镜头只承担一个主要动作或视觉重点；时长由该节拍的动作、对白、反应和信息变化决定，不能套用视频模型的单次片段上限
 - 本次只能拆一个连续物理场景，契约不接受 TIME_JUMP 或 LOCATION_CHANGE；换时间、地点先在剧本层拆场。
 - 机位必须结构化记录 position、height、distance、lensMm、horizontalAngle、verticalAngle、subjectPlacement、focusPoint、depthOfField、lightingDirection、movementPath、movementSpeed。
 - cameraMovement 只允许一个主要运镜；完整机位参数不等于多个运镜。
 - referenceViews 为每个可见人物当前定妆、场景、道具指定一个对应机位的已批准视图。
 - 持物或局部肢体镜头必须把人物世界站位、身体在画面内/画面外的来源方向、明确的左/右身体部位、入画方向和道具接触点作为同一个几何关系设计；不能只规定道具在画面中央，让模型自行猜测手的方向和身体站位。
+- Blocking 必须结构化记录每个可见人物的 movementVector 和每个可见道具的 propId/worldPosition；自由文本位置摘要不能替代空间数据。
+- 揭示、侮辱、告白、威胁、死亡和秘密必须结构化判断反应优先级；听者更重要时安排以真实听者为主体的独立 Reaction Shot。
 - 每个可见人物和道具的起终状态必须完整记录 identityId、lookId、位置、朝向、动作阶段和双向道具归属；镜头外资产可省略，由服务端连续性台账继承，重新入画时必须与台账一致，未经授权不得改变。
 - 每次运行记录 projectId、projectVersion、输入版本和产出版本，旧产出不得覆盖。
 

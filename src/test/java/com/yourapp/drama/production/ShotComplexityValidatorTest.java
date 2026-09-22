@@ -18,7 +18,7 @@ class ShotComplexityValidatorTest {
     @Test void rejectsOverloadedPerformanceAndDuration(){
         ObjectNode shot=base().put("duration",2);
         ((ObjectNode)shot.path("performancePlan")).put("actionUnits",3).putArray("propOperations").add("拿铃").add("开门");
-        shot.putArray("dialogues").add(mapper.createObjectNode().put("displayText","这段对白在两秒镜头里根本无法自然说完，还要求人物连续完成多个动作。"));
+        shot.putArray("dialogues").add(mapper.createObjectNode().put("semanticText","这段对白在两秒镜头里根本无法自然说完，还要求人物连续完成多个动作。"));
         assertThat(validator.validate(shot)).extracting(ProductionModels.Risk::code)
             .contains("TOO_MANY_ACTIONS","TOO_MANY_PROP_OPERATIONS","INSUFFICIENT_DURATION");
     }

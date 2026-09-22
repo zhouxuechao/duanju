@@ -72,7 +72,9 @@ class EngineeringGovernanceIntegrationTest {
         assertThat(text(timeline,"finalQaStatus")).isEqualTo("PASSED");
         assertThat(timeline.path("finalCreativeQa").fieldNames()).toIterable().contains(
             "characterConsistency","propContinuity","positionContinuity","actionContinuity","dialogueQuality","bgmFit","sfxAccuracy","hook","midHook","cliffhanger");
-        assertThat(store.list(STORYBOARD,id(project),null)).isNotEmpty();
+        assertThat(store.list(STORYBOARD,id(project),null)).isNotEmpty().allMatch(board->"PREVIS".equals(text(board,"mediaPurpose")));
+        assertThat(store.list(KEYFRAME,id(project),null)).allMatch(frame->"KEYFRAME".equals(text(frame,"mediaPurpose")))
+            .anyMatch(frame->frame.path("locked").asBoolean()&&frame.path("selected").asBoolean()&&"FINAL_REFERENCE".equals(text(frame,"selectedPurpose")));
         assertThat(store.list(QC_RESULT,id(project),null)).anyMatch(review->!review.path("passed").asBoolean());
         assertThat(store.list(DIALOGUE_LINE,id(project),null)).isNotEmpty();
         assertThat(store.list(AUDIO_CLIP,id(project),null)).allMatch(clip->clip.path("locked").asBoolean());
@@ -98,5 +100,18 @@ class EngineeringGovernanceIntegrationTest {
         assertThat(recovered.path("attempt").asInt()).isEqualTo(2);
         assertThat(text(store.get(TIMELINE,id(timeline)),"finalQaStatus")).isEqualTo("PASSED");
         assertThat((int)store.list(GENERATION_JOB,id(project),null).stream().filter(job->"SUCCESS".equals(text(job,"status"))).count()).isEqualTo(completedJobs);
+    }
+
+    @Test
+    void pipelineCanSkipPaidPrevisWithoutBlockingKeyframesOrFinalRender() throws Exception {
+        ObjectNode fixture=(ObjectNode)mapper.readTree(java.nio.file.Files.readString(java.nio.file.Path.of("test-fixtures/e2e/golden-basic/project.json")));
+        fixture.put("idea","一封被雨水浸透的信让两位邻居在车站重逢").put("ratio","9:16").put("previsMode","SKIP");
+        ObjectNode project=store.create(PROJECT,fixture);
+        JsonNode started=mapper.readTree(mvc.perform(post("/api/projects/{id}/pipeline-runs",id(project)).contentType(MediaType.APPLICATION_JSON)
+            .content(obj().put("mode","MOCK").put("scenarioId","skip-previs").toString())).andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        assertThat(started.path("status").asText()).isEqualTo("SUCCESS");
+        assertThat(store.list(STORYBOARD,id(project),null)).isEmpty();
+        assertThat(store.list(KEYFRAME,id(project),null)).isNotEmpty().allMatch(frame->"KEYFRAME".equals(text(frame,"mediaPurpose")));
+        assertThat(store.list(TIMELINE,id(project),null)).anyMatch(timeline->!text(timeline,"finalUrl").isBlank());
     }
 }

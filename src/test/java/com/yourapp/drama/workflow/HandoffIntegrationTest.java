@@ -17,6 +17,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,6 +25,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import java.io.ByteArrayInputStream;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import static com.yourapp.drama.persistence.ResourceKind.*;
 import static com.yourapp.drama.workflow.Documents.*;
 import static org.assertj.core.api.Assertions.*;
@@ -36,7 +38,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ActiveProfiles("test")
 @Transactional
 class HandoffIntegrationTest {
-    @Autowired DocumentStore store;@Autowired WorkflowService workflow;@Autowired GenerationWorker worker;@Autowired JobService jobs;@Autowired StudioService studio;@Autowired AssetViewService assetViews;@Autowired WebApplicationContext web;@Autowired AutomaticVisualReviewService automaticVisualReview;@Autowired AutomaticVideoReviewService automaticVideoReview;@Autowired VisualExpectedContextService visualExpected;@Autowired QualityMetricsService qualityMetrics;@Autowired VisualCalibrationService calibration;@Autowired com.fasterxml.jackson.databind.ObjectMapper mapper;
+    @Autowired DocumentStore store;@Autowired WorkflowService workflow;@Autowired GenerationWorker worker;@MockitoSpyBean JobService jobs;@Autowired StudioService studio;@Autowired AssetViewService assetViews;@Autowired WebApplicationContext web;@Autowired AutomaticVisualReviewService automaticVisualReview;@Autowired AutomaticVideoReviewService automaticVideoReview;@Autowired VisualExpectedContextService visualExpected;@Autowired QualityMetricsService qualityMetrics;@Autowired VisualCalibrationService calibration;@Autowired com.fasterxml.jackson.databind.ObjectMapper mapper;
     @MockitoBean ImageGenerator images;@MockitoBean VideoGenerator videos;@MockitoBean MediaStorage storage;@MockitoBean ProviderMediaFetcher fetcher;@MockitoBean MediaProbeService mediaProbe;@MockitoBean VideoFrameExtractor videoFrames;@MockitoBean VisualQualityReviewer visualReviewer;@MockitoBean VideoQualityReviewer videoReviewer;
     private String projectId,shotId;
     private static final String ORIGINAL="https://image.volces.com/seedream/frame.png?token=a%2Fb+Z&sig=ABC%2B123%3D&x=1";
@@ -65,6 +67,14 @@ class HandoffIntegrationTest {
         lenient().when(videoReviewer.review(any(),anyList())).thenAnswer(call->new FakeVideoQualityReviewer(mapper).review(call.getArgument(0),call.getArgument(1)));
     }
     private ObjectNode generateFrame(){ObjectNode job=workflow.image(shotId,"KEYFRAME",obj());worker.tick();assertThat(text(store.get(GENERATION_JOB,id(job)),"status")).isEqualTo("SUCCESS");return store.list(KEYFRAME,projectId,shotId).getFirst();}
+    @Test void promptVersionPersistsProviderNeutralIrForAuditAndDeterministicRepair(){
+        generateFrame();
+        ObjectNode prompt=store.list(PROMPT_VERSION,projectId,null).stream().filter(item->shotId.equals(text(item,"shotId"))).findFirst().orElseThrow();
+        assertThat(prompt.path("promptIR").path("taskType").asText()).isEqualTo("KEYFRAME");
+        assertThat(prompt.path("promptIR").path("identity")).isNotEmpty();
+        assertThat(prompt.path("promptIR").path("continuity").path("startState").isObject()).isTrue();
+        assertThat(prompt.path("promptIR").path("negativeConstraints").isArray()).isTrue();
+    }
     @Test void seedreamOriginalUrlHandedDirectlyToSeedanceBeforeAnyArchiveAndVideoCompletes(){
         ObjectNode frame=generateFrame();verifyNoInteractions(storage,fetcher);
         workflow.review(KEYFRAME,id(frame),obj().put("passed",true).put("score",95));workflow.lock(KEYFRAME,id(frame),obj().put("generateVideo",false));
@@ -244,6 +254,28 @@ class HandoffIntegrationTest {
         assertThat(text(failed,"failureCode")).isEqualTo("DATA_CONFLICT");
         assertThat(text(failed,"failureReason")).doesNotContain("DataIntegrityViolationException");
     }
+    @Test void persistenceFailureAfterVideoAcceptanceCannotBeRetriedAsAnUnsubmittedRequest(){
+        ObjectNode frame=generateFrame();workflow.review(KEYFRAME,id(frame),obj().put("passed",true));workflow.lock(KEYFRAME,id(frame),obj().put("generateVideo",false));
+        ObjectNode job=workflow.video(id(frame),obj().put("requestKey","accepted-then-db-failed"));
+        AtomicBoolean accepted=new AtomicBoolean();
+        when(videos.submit(any())).thenAnswer(invocation->{accepted.set(true);return new VideoGenerator.Submission("accepted-task","accepted-request",false);});
+        doAnswer(invocation->{if(accepted.getAndSet(false))throw new DataIntegrityViolationException("injected post-submit write failure");return invocation.callRealMethod();})
+            .when(jobs).mutate(eq(id(job)),any());
+        worker.tick();
+        ObjectNode failed=store.get(GENERATION_JOB,id(job));
+        assertThat(text(failed,"status")).isEqualTo("FAILED");
+        assertThat(failed.path("submissionUncertain").asBoolean()).isTrue();
+        assertThatThrownBy(()->jobs.retry(id(job))).isInstanceOf(WorkflowException.class).hasMessageContaining("核对");
+        verify(videos,times(1)).submit(any());
+    }
+    @Test void videoRequestKeyCannotHideChangedProviderOptions(){
+        ObjectNode frame=generateFrame();workflow.review(KEYFRAME,id(frame),obj().put("passed",true));workflow.lock(KEYFRAME,id(frame),obj().put("generateVideo",false));
+        ObjectNode first=obj().put("requestKey","same-video-key");first.putObject("providerOptions").put("resolution","720p");
+        ObjectNode second=obj().put("requestKey","same-video-key");second.putObject("providerOptions").put("resolution","1080p");
+        workflow.video(id(frame),first);
+        assertThatThrownBy(()->workflow.video(id(frame),second)).isInstanceOf(WorkflowException.class).hasMessageContaining("请求标识");
+        assertThat(store.list(GENERATION_JOB,projectId,null).stream().filter(j->"VIDEO".equals(text(j,"type")))).hasSize(1);
+    }
     @Test void uncertainSubmissionBlocksNewGenerationForTheSameShot(){
         ObjectNode uncertain=jobs.enqueue(projectId,shotId,"KEYFRAME",obj().put("shotId",shotId),"uncertain-keyframe");
         jobs.claim();
@@ -263,16 +295,21 @@ class HandoffIntegrationTest {
         assertThat(text(store.get(GENERATION_JOB,id(job)),"status")).isEqualTo("SUCCESS");
         verify(videos).poll("video-task-1");
     }
-    @Test void permanentPollFailureEndsJobWithReconciliationState(){
+    @Test void permanentPollFailureBecomesUnknownAndCanResumeTheExistingPaidTask(){
         ObjectNode frame=generateFrame();workflow.review(KEYFRAME,id(frame),obj().put("passed",true));workflow.lock(KEYFRAME,id(frame),obj().put("generateVideo",false));
         ObjectNode job=workflow.video(id(frame),obj().put("requestKey","poll-auth-failure"));worker.tick();
         when(videos.poll("video-task-1")).thenThrow(new ProviderException("HTTP_401","服务商拒绝查询","poll-401",401,false,false));
         worker.tick();
 
-        assertThat(text(store.get(GENERATION_JOB,id(job)),"status")).isEqualTo("FAILED");
-        assertThat(store.get(GENERATION_JOB,id(job)).path("reconciliationRequired").asBoolean()).isTrue();
+        ObjectNode unknown=store.get(GENERATION_JOB,id(job));
+        assertThat(text(unknown,"status")).isEqualTo("UNKNOWN");
+        assertThat(unknown.path("reconciliationRequired").asBoolean()).isTrue();
+        assertThat(unknown.path("submissionUncertain").asBoolean()).isFalse();
         ObjectNode take=store.list(VIDEO_TAKE,projectId,shotId).getFirst();
         assertThat(text(take,"providerStatus")).isEqualTo("RECONCILIATION_REQUIRED");
+        ObjectNode resumed=jobs.reconcile(id(job),obj().put("decision","CONFIRMED_SUBMITTED").put("evidence","服务商控制台仍有该任务").put("reviewer","TEST"));
+        assertThat(text(resumed,"status")).isEqualTo("RUNNING");
+        assertThat(text(resumed,"providerTaskId")).isEqualTo("video-task-1");
     }
     @Test void unexpectedPollRuntimeFailureEventuallyEndsJobWithReconciliationState(){
         ObjectNode frame=generateFrame();workflow.review(KEYFRAME,id(frame),obj().put("passed",true));workflow.lock(KEYFRAME,id(frame),obj().put("generateVideo",false));
@@ -282,7 +319,7 @@ class HandoffIntegrationTest {
             worker.tick();
             if(attempt<3) jobs.mutate(id(job),j->j.put("nextPollAt",Instant.now().minusSeconds(1).toString()));
         }
-        assertThat(text(store.get(GENERATION_JOB,id(job)),"status")).isEqualTo("FAILED");
+        assertThat(text(store.get(GENERATION_JOB,id(job)),"status")).isEqualTo("UNKNOWN");
         assertThat(store.get(GENERATION_JOB,id(job)).path("reconciliationRequired").asBoolean()).isTrue();
     }
     @Test void keyframeRegenerationReusesOriginalPromptReferencesAndProviderOptions(){
@@ -418,6 +455,16 @@ class HandoffIntegrationTest {
         assertThat(assessment.path("routingDecision").asText()).isNotBlank();
         assertThat(assessment.path("expectedContext").findValues("url")).isEmpty();
     }
+    @Test void deterministicContextFailureStopsBeforePaidVisualReview(){
+        ObjectNode frame=generateFrame(),corrupt=frame.deepCopy();
+        ((ArrayNode)corrupt.path("generationInputSnapshot").path("context").path("shot").path("characterIds")).add("missing-character");
+        store.update(KEYFRAME,id(frame),revision(frame),corrupt);
+
+        assertThatThrownBy(()->automaticVisualReview.review(id(frame),obj()))
+            .isInstanceOf(WorkflowException.class)
+            .extracting(error->((WorkflowException)error).code()).isEqualTo("DETERMINISTIC_RULE_FAILED");
+        verify(visualReviewer,never()).review(any(),any());
+    }
     @Test void shadowAssessmentsDoNotChangeProductionQualityMetrics(){
         ObjectNode frame=generateFrame();ObjectNode expected=visualExpected.build(frame.path("generationInputSnapshot").path("context"));
         ObjectNode observed=obj();observed.set("observedConstraints",expected.path("requiredConstraints").deepCopy());automaticVisualReview.review(id(frame),observed);
@@ -432,6 +479,18 @@ class HandoffIntegrationTest {
         assertThat(text(reviewed,"qcStatus")).isEqualTo("PENDING");
         ObjectNode assessment=store.list(QC_RESULT,projectId,null).getLast();assertThat(assessment.path("targetKind").asText()).isEqualTo("video-takes");assertThat(assessment.path("shadow").asBoolean()).isTrue();
         verify(videoFrames).extract("archive.png");
+    }
+    @Test void deterministicContextFailureStopsBeforePaidVideoReview(){
+        ObjectNode frame=generateFrame();workflow.review(KEYFRAME,id(frame),obj().put("passed",true));workflow.lock(KEYFRAME,id(frame),obj().put("generateVideo",false));
+        workflow.video(id(frame),obj().put("requestKey","video-rule-preflight"));worker.tick();worker.tick();worker.tick();
+        ObjectNode take=store.list(VIDEO_TAKE,projectId,shotId).getFirst(),corrupt=take.deepCopy();
+        ((ArrayNode)corrupt.path("inputSnapshot").path("context").path("shot").path("characterIds")).add("missing-character");
+        store.update(VIDEO_TAKE,id(take),revision(take),corrupt);clearInvocations(videoReviewer,videoFrames);
+
+        assertThatThrownBy(()->automaticVideoReview.review(id(take),obj()))
+            .isInstanceOf(WorkflowException.class)
+            .extracting(error->((WorkflowException)error).code()).isEqualTo("DETERMINISTIC_RULE_FAILED");
+        verifyNoInteractions(videoReviewer,videoFrames);
     }
     @Test void completedVideoArchiveAutomaticallyRunsAppliedVideoQc(){
         ObjectNode frame=generateFrame();workflow.review(KEYFRAME,id(frame),obj().put("passed",true));workflow.lock(KEYFRAME,id(frame),obj().put("generateVideo",false));
@@ -449,13 +508,17 @@ class HandoffIntegrationTest {
         ObjectNode take=store.list(VIDEO_TAKE,projectId,shotId).getFirst();
         doAnswer(call->{
             ObjectNode result=(ObjectNode)new FakeVideoQualityReviewer(mapper).review(call.getArgument(0),call.getArgument(1));
-            result.set("actionAccuracy",obj().put("pass",false).put("score",25).put("confidence",.97).put("reason","动作方向与剧本相反"));
+            result.set("actionAccuracy",obj().put("pass",false).put("score",25).put("confidence",.97).put("reason","动作方向与剧本相反").put("evidence","采样帧中的手臂运动方向与计划相反"));
             result.withArray("failureCodes").add("ACTION_MISMATCH");
             result.put("overallScore",70).put("overallConfidence",.97).put("decision","REGENERATE").put("reason","动作方向与剧本相反");return result;
         }).when(videoReviewer).review(any(),anyList());
         ObjectNode request=obj().put("apply",true).put("requestKey","video-vlm-repair-once");int before=store.list(GENERATION_JOB,projectId,null).size();
         ObjectNode reviewed=automaticVideoReview.review(id(take),request);
         assertThat(text(reviewed.path("automaticRepairJob"),"type")).isEqualTo("VIDEO");
+        JsonNode retake=reviewed.path("automaticRepairJob").path("inputSnapshot").path("context").path("retake");
+        assertThat(retake.path("repairPlan").path("repairDimensions")).extracting(node->node.asText()).containsExactly("ACTION");
+        assertThat(retake.path("repairPlan").path("preserveDimensions")).extracting(node->node.asText()).contains("IDENTITY","COSTUME","BACKGROUND","CAMERA");
+        assertThat(retake.path("changedPromptSections")).extracting(node->node.asText()).containsExactly("TIMED BEATS");
         assertThat(store.list(GENERATION_JOB,projectId,null)).hasSize(before+1);
         automaticVideoReview.review(id(take),request);
         assertThat(store.list(GENERATION_JOB,projectId,null)).hasSize(before+1);
@@ -466,7 +529,7 @@ class HandoffIntegrationTest {
         ObjectNode frame=generateFrame();workflow.review(KEYFRAME,id(frame),obj().put("passed",true));workflow.lock(KEYFRAME,id(frame),obj().put("generateVideo",false));
         workflow.video(id(frame),obj().put("requestKey","video-vlm-limit-source"));worker.tick();worker.tick();worker.tick();ObjectNode take=store.list(VIDEO_TAKE,projectId,shotId).getFirst();
         for(int i=1;i<=2;i++){ObjectNode qc=obj().put("projectId",projectId).put("targetKind","video-takes").put("targetId","previous-take-"+i).put("shotId",shotId).put("reviewer","AUTOMATIC").put("shadow",false).put("passed",false);qc.putObject("diagnosis").putArray("failureCodes").add("ACTION_MISMATCH");store.create(QC_RESULT,qc);}
-        doAnswer(call->{ObjectNode result=(ObjectNode)new FakeVideoQualityReviewer(mapper).review(call.getArgument(0),call.getArgument(1));result.set("actionAccuracy",obj().put("pass",false).put("score",25).put("confidence",.97).put("reason","动作方向与剧本相反"));result.withArray("failureCodes").add("ACTION_MISMATCH");return result.put("overallScore",70).put("overallConfidence",.97).put("decision","REGENERATE").put("reason","动作方向与剧本相反");}).when(videoReviewer).review(any(),anyList());
+        doAnswer(call->{ObjectNode result=(ObjectNode)new FakeVideoQualityReviewer(mapper).review(call.getArgument(0),call.getArgument(1));result.set("actionAccuracy",obj().put("pass",false).put("score",25).put("confidence",.97).put("reason","动作方向与剧本相反").put("evidence","采样帧中的手臂运动方向与计划相反"));result.withArray("failureCodes").add("ACTION_MISMATCH");return result.put("overallScore",70).put("overallConfidence",.97).put("decision","REGENERATE").put("reason","动作方向与剧本相反");}).when(videoReviewer).review(any(),anyList());
         int before=store.list(GENERATION_JOB,projectId,null).size();ObjectNode reviewed=automaticVideoReview.review(id(take),obj().put("apply",true).put("requestKey","video-vlm-third-failure"));
         assertThat(reviewed.path("automaticReview").path("routingDecision").asText()).isEqualTo("MANUAL_REVIEW");
         assertThat(store.list(GENERATION_JOB,projectId,null)).hasSize(before);

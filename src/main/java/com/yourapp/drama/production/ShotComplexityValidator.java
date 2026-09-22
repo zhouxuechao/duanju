@@ -25,7 +25,7 @@ public final class ShotComplexityValidator {
         if(Set.of("CLOSE_UP","EXTREME_CLOSE_UP").contains(size)&&"FULL_BODY".equals(detail))
             error(risks,"SHOT_SIZE_INFORMATION_CONFLICT","shot.shotSize","特写无法同时展示完整身体");
         double duration=shot.path("duration").asDouble();int dialogueChars=0;
-        for(JsonNode line:shot.path("dialogues"))dialogueChars+=text(line,"displayText").codePointCount(0,text(line,"displayText").length());
+        for(JsonNode line:shot.path("dialogues"))dialogueChars+=text(line,"semanticText").codePointCount(0,text(line,"semanticText").length());
         double speechSeconds=dialogueChars/4.5+0.35;
         double actionSeconds=actionUnits<=1?0.8:actionUnits*1.2;
         if(duration+0.01<Math.max(speechSeconds,actionSeconds))error(risks,"INSUFFICIENT_DURATION","shot.duration","对白或动作无法在计划时长内自然完成");

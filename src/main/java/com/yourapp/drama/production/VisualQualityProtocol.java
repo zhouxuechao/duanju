@@ -39,7 +39,7 @@ public final class VisualQualityProtocol {
             4. 核对道具持有人、握持方式、尺寸和状态。每件道具必须先拆分为整体轮廓、主体、连接或握持部件、附件、材质纹理和尺寸比例，再逐项对照道具文字设定与 PROP 参考图；不能因为用途相同或大致像同类物品就判定通过。任一可见结构部件与道具参考不符时，propConsistency 必须失败并报告 PROP_MISMATCH。若 composition.interactionGeometry 存在 holderContacts，必须同时核对指定左/右身体部位、身体世界站位投影、肢体入画来源、身体朝向和实际接触点；左右镜像、手臂从与身体投影相反方向进入、断肢、持物者站位漂移时 spatialConsistency 必须失败并报告 POSITION_MISMATCH，握错部件或接触点错误时 propConsistency 必须失败并报告 PROP_MISMATCH。若存在 previousAcceptedEnd，必须把上一条已采用视频的实际末态与当前视频首帧及 shotStart 比较人物身份、服装、姿态、运动相位、银幕方向、道具持有人、地点和灯光；任何无授权跳变都令 continuityWithPreviousShot 失败并报告 CONTINUITY_MISMATCH。再核对动作和表情。
             5. 水印必须最后检查，且不得掩盖其他失败项。一个画面存在多个偏差时必须全部报告。
             failureOriginHint 只做证据归因：节拍、镜头顺序或镜头骨架本身矛盾选 DIRECTOR_PLAN；单镜机位、构图、调度、表演或参考视角本身矛盾选 SHOT_DETAIL；发送给模型的视觉要求缺项选 PROMPT_BUILD；方案和请求正确但画面未执行选 PROVIDER_OUTPUT；无法判断选 UNKNOWN。
-            每个独立偏差都必须同时反映在对应 metric 和 failureCodes 中。硬约束不符合时，对应 metric 的 pass 必须为 false；无法可靠判断时降低 confidence 并选择 MANUAL_REVIEW。只返回 JSON Schema 规定的对象。
+            每个维度必须在 evidence 中写出当前画面可直接观察到的证据；不得用“符合”“看起来正确”等结论代替证据。每个独立偏差都必须同时反映在对应 metric 和 failureCodes 中。硬约束不符合时，对应 metric 的 pass 必须为 false；无法可靠判断时降低 confidence 并选择 MANUAL_REVIEW。只返回 JSON Schema 规定的对象。
             EXPECTED_CONTEXT=%s""".formatted(subject,expected.path("requiredConstraints"));
     }
 
@@ -87,9 +87,9 @@ public final class VisualQualityProtocol {
 
     private Map<String,Object> metricSchema(){return Map.of("type","object","properties",Map.of(
         "score",Map.of("type","number","minimum",0,"maximum",100),"pass",Map.of("type","boolean"),
-        "confidence",Map.of("type","number","minimum",0,"maximum",1),"reason",Map.of("type","string","minLength",1)),
-        "required",List.of("score","pass","confidence","reason"),"additionalProperties",false);}
-    private void metric(JsonNode value,String name){if(!value.isObject())throw invalid(name+" 缺失");range(value.path("score"),0,100,name+".score");if(!value.path("pass").isBoolean())throw invalid(name+".pass 缺失");range(value.path("confidence"),0,1,name+".confidence");if(!value.path("reason").isTextual()||value.path("reason").asText().isBlank())throw invalid(name+".reason 缺失");}
+        "confidence",Map.of("type","number","minimum",0,"maximum",1),"reason",Map.of("type","string","minLength",1),"evidence",Map.of("type","string","minLength",1)),
+        "required",List.of("score","pass","confidence","reason","evidence"),"additionalProperties",false);}
+    private void metric(JsonNode value,String name){if(!value.isObject())throw invalid(name+" 缺失");range(value.path("score"),0,100,name+".score");if(!value.path("pass").isBoolean())throw invalid(name+".pass 缺失");range(value.path("confidence"),0,1,name+".confidence");if(!value.path("reason").isTextual()||value.path("reason").asText().isBlank())throw invalid(name+".reason 缺失");if(!value.path("evidence").isTextual()||value.path("evidence").asText().isBlank())throw invalid(name+".evidence 缺失");}
     private boolean failureCodeHasFailedMetric(JsonNode result,String code){
         if(Set.of("REFERENCE_FAILURE","OTHER").contains(code))return true;
         if("IDENTITY_MISMATCH".equals(code)){if(!result.path("characterIdentity").path("pass").asBoolean())return true;for(JsonNode character:result.path("characters"))if(!character.path("identity").path("pass").asBoolean())return true;return false;}

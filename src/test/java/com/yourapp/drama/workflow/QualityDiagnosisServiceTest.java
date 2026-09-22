@@ -33,4 +33,12 @@ class QualityDiagnosisServiceTest{
   assertThat(service.diagnose(obj().put("notes","导演节拍不正确").put("failureOrigin","DIRECTOR_PLAN")).path("recommendedRepair").asText()).isEqualTo("REPLAN_SCENE");
   assertThat(service.diagnose(obj().put("notes","单镜机位不正确").put("failureOrigin","SHOT_DETAIL")).path("recommendedRepair").asText()).isEqualTo("REPLAN_SHOT");
  }
+ @Test void buildsDimensionScopedRepairPlanThatPreservesCorrectVisualWork(){
+  var review=obj().put("notes","动作方向与剧本相反").put("failureOrigin","PROVIDER_OUTPUT");review.putArray("failureCodes").add("ACTION_MISMATCH");
+  var plan=new QualityDiagnosisService().diagnose(review).path("repairPlan");
+  assertThat(plan.path("repairDimensions")).extracting(n->n.asText()).containsExactly("ACTION");
+  assertThat(plan.path("preserveDimensions")).extracting(n->n.asText()).contains("IDENTITY","COSTUME","PROP","BACKGROUND","CAMERA","LIGHTING","STYLE");
+  assertThat(plan.path("changedPromptSections")).extracting(n->n.asText()).containsExactly("TIMED BEATS");
+  assertThat(plan.path("scope").asText()).isEqualTo("TAKE");
+ }
 }

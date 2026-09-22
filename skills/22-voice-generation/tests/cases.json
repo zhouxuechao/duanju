@@ -4,10 +4,10 @@
       "projectId": "project-example",
       "projectVersion": 1,
       "payload": {
-        "speechText": {
+        "voiceProfile": {
           "example": true
         },
-        "voiceProfile": {
+        "spokenText": {
           "example": true
         }
       },
@@ -22,10 +22,10 @@
       "value": {
         "projectId": "project-example",
         "payload": {
-          "speechText": {
+          "voiceProfile": {
             "example": true
           },
-          "voiceProfile": {
+          "spokenText": {
             "example": true
           }
         }

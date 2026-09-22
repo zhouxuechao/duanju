@@ -10,6 +10,8 @@ import com.yourapp.drama.production.RulePackFingerprint;
 import com.yourapp.drama.production.RulePackResolver;
 import com.yourapp.drama.production.RuntimeRulePackLoader;
 import com.yourapp.drama.production.CasePatternRetriever;
+import com.yourapp.drama.domain.DramaRulePack;
+import com.yourapp.drama.domain.StoryFormat;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
@@ -41,6 +43,11 @@ public class ScreenwritingRuleResolver {
 
     public ObjectNode resolve(String phase, JsonNode storyProfile, JsonNode episodeFormat, String distributionProfile,
                               String basePromptContent, String modelProfile) {
+        return resolve(phase,storyProfile,episodeFormat,defaultStoryFormat(),distributionProfile,basePromptContent,modelProfile);
+    }
+
+    public ObjectNode resolve(String phase,JsonNode storyProfile,JsonNode episodeFormat,JsonNode storyFormat,String distributionProfile,
+                              String basePromptContent,String modelProfile) {
         String normalizedPhase = normalize(phase, "STORY");
         String storyType = normalize(storyProfile.path("storyType").asText(), "OTHER");
         String family = normalize(episodeFormat.path("family").asText(), "CUSTOM");
@@ -62,14 +69,27 @@ public class ScreenwritingRuleResolver {
         String resolvedFingerprint = fingerprint.compute(new RulePackFingerprint.Context(
                 basePromptContent, selectedPacks, canonicalType, episodeFormat.path("profileId").asText(family),
                 distribution, modelProfile, commits, STORY_COMPILER_VERSION));
+        resolvedFingerprint=sha256(resolvedFingerprint+"|"+storyFormat.toString());
         ObjectNode result = Documents.obj().put("phase", normalizedPhase).put("storyType", storyType)
                 .put("episodeFormatId", episodeFormat.path("profileId").asText()).put("distributionProfile", distribution)
                 .put("fingerprint", resolvedFingerprint).put("compilerVersion", STORY_COMPILER_VERSION)
                 .put("content", budgeted.content()).put("contentChars", budgeted.content().length())
                 .put("budgetChars", RULE_BUDGET_CHARS).put("coreExceededBudget", budgeted.coreExceededBudget());
         result.set("rules", rules);
-        result.set("storyTypeRule", STORY_TYPES.getOrDefault(storyType,
-                STORY_TYPES.getOrDefault(alias(storyType), STORY_TYPES.get("OTHER"))).deepCopy());
+        ObjectNode storyTypeRule=STORY_TYPES.getOrDefault(storyType,
+                STORY_TYPES.getOrDefault(alias(storyType), STORY_TYPES.get("OTHER"))).deepCopy();
+        storyTypeRule.set("episodeEndingPolicy",Documents.obj().put("minimumStrength",endingStrength(canonicalType))
+                .put("allowedTypes","OPEN_QUESTION,UNRESOLVED_CONFLICT,REVEAL,DECISION,DANGER,REVERSAL"));
+        result.set("storyTypeRule",storyTypeRule);
+        ObjectNode formatRule=result.putObject("formatRule");
+        formatRule.set("pacing",Documents.obj().put("targetBeatCount",episodeFormat.path("targetBeatCount").asInt())
+                .put("progressionIntervalSec",episodeFormat.path("progressionIntervalSec").asInt()));
+        formatRule.set("hook",Documents.obj().put("observableWithinSeconds",3));
+        formatRule.set("sceneDensity",Documents.obj().put("maxScenes",episodeFormat.path("sceneLimit").asInt()));
+        formatRule.set("dialogueDensity",Documents.obj().put("policy","DERIVE_FROM_STORY_FORMAT_AND_EPISODE_DURATION"));
+        formatRule.set("shotRhythm",Documents.obj().put("beatMode",episodeFormat.path("beatMode").asText()));
+        formatRule.set("cliffhanger",storyTypeRule.path("episodeEndingPolicy").deepCopy());
+        formatRule.set("visualStyle",storyFormat.path("visualStylePolicy").deepCopy());
         ArrayNode selectedPatterns=result.putArray("casePatterns");String audience=storyProfile.path("audience").asText("GENERAL"),tone=storyProfile.path("tones").path(0).asText("");
         for(var pattern:casePatterns.retrieve(canonicalType,tropes,audience,tone,family,3))selectedPatterns.add(Documents.obj().put("patternId",pattern.id()).put("structure",pattern.structure()).put("rhythm",pattern.rhythm()).put("informationGap",pattern.informationGap()).put("payoffMode",pattern.payoffMode()).put("plotCopied",false));
         ArrayNode sources = JsonNodeFactory.instance.arrayNode(), loaded = JsonNodeFactory.instance.arrayNode(), dropped = JsonNodeFactory.instance.arrayNode();
@@ -84,16 +104,17 @@ public class ScreenwritingRuleResolver {
         result.set("upstreamSources", sources);
         ObjectNode commitNode=Documents.obj();commits.forEach(commitNode::put);
         result.set("loadedRules",loaded);result.set("droppedRuleIds",dropped);result.set("upstreamCommits",commitNode);
-        return result;
+        StoryFormat format=new StoryFormat(storyFormat.path("formatId").asText("SHORT_DRAMA"),storyFormat.path("narrativeForm").asText("SHORT_DRAMA"),
+                storyFormat.path("presentation").asText("LIVE_ACTION"),storyFormat.path("orientation").asText("VERTICAL"));
+        return new DramaRulePack(normalizedPhase,storyType,format,result).toJson();
     }
+
+    private ObjectNode defaultStoryFormat(){return Documents.obj().put("formatId","SHORT_DRAMA").put("narrativeForm","SHORT_DRAMA")
+            .put("presentation","LIVE_ACTION").put("orientation","VERTICAL")
+            .set("visualStylePolicy",Documents.obj().put("source","STORY_BIBLE").put("presentation","LIVE_ACTION").put("orientation","VERTICAL").put("allowNonHumanCharacters",true));}
 
     private void add(ArrayNode rules, String ruleId, String category, String source) {
         rules.add(Documents.obj().put("ruleId", ruleId).put("category", category).put("source", source));
-    }
-
-    private void addSource(ArrayNode sources, String path, String purpose) {
-        sources.add(Documents.obj().put("path", path).put("purpose", purpose)
-                .put("upstreamCommit", "edd0df754320c2f3949fb198cea7847c71d0cde0"));
     }
 
     private static String alias(String type) {
@@ -102,6 +123,14 @@ public class ScreenwritingRuleResolver {
             case "ROMANCE" -> "SWEET_ROMANCE";
             case "FAMILY" -> "FAMILY_ETHICS";
             default -> type;
+        };
+    }
+
+    private static String endingStrength(String canonicalType){
+        return switch(canonicalType){
+            case "SUSPENSE_MYSTERY","REVENGE","IDENTITY_REVERSAL","COUNTERATTACK","SURVIVAL" -> "HIGH";
+            case "OTHER" -> "LOW";
+            default -> "MEDIUM";
         };
     }
 

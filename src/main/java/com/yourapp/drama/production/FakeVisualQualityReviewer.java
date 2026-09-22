@@ -38,7 +38,7 @@ public class FakeVisualQualityReviewer implements VisualQualityReviewer {
             .put("reason",passed?"全部结构化约束一致":String.join("；",reasons));return result;
     }
 
-    private ObjectNode metric(boolean pass,double score,double confidence,String reason){return mapper.createObjectNode().put("score",score).put("pass",pass).put("confidence",confidence).put("reason",reason);}
+    private ObjectNode metric(boolean pass,double score,double confidence,String reason){return mapper.createObjectNode().put("score",score).put("pass",pass).put("confidence",confidence).put("reason",reason).put("evidence",reason);}
     private void verify(JsonNode expected,JsonNode observed,String field,String protocolMetric,String code,ObjectNode result,ArrayNode failures,List<String> reasons){
         if(!expected.has(field))return;if(!expected.path(field).equals(observed.path(field))){result.set(protocolMetric,metric(false,0,.99,field+" 与预期不一致"));add(failures,code);reasons.add(field+" 与预期不一致");}
     }

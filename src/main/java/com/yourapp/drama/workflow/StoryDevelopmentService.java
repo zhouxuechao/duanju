@@ -13,8 +13,8 @@ import com.yourapp.drama.persistence.ResourceKind;
 import com.yourapp.drama.persistence.RevisionConflictException;
 import com.yourapp.drama.provider.StructuredJson;
 import com.yourapp.drama.production.RewriteBoundary;
+import com.yourapp.drama.production.PromptCompiler;
 import jakarta.validation.Validator;
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
@@ -34,7 +34,6 @@ import java.util.Set;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -47,14 +46,16 @@ public class StoryDevelopmentService {
    private final StructuredJson structured;
    private final StoryProfilePolicy storyProfiles;
    private final EpisodeFormatResolver episodeFormats;
+   private final StoryFormatResolver storyFormats;
    private final ScreenwritingRuleResolver ruleResolver;
    private final StoryContractValidator storyContracts;
    private final StoryQualityService storyQuality;
+   private final PromptCompiler prompts;
 
    public StoryDevelopmentService(DocumentStore store, JobService jobs, LlmGateway llm, ObjectMapper mapper, Validator validator,
                                   StoryProfilePolicy storyProfiles, EpisodeFormatResolver episodeFormats,
-                                  ScreenwritingRuleResolver ruleResolver, StoryContractValidator storyContracts,
-                                  StoryQualityService storyQuality) {
+                                  StoryFormatResolver storyFormats, ScreenwritingRuleResolver ruleResolver, StoryContractValidator storyContracts,
+                                  StoryQualityService storyQuality,PromptCompiler prompts) {
       this.store = store;
       this.jobs = jobs;
       this.llm = llm;
@@ -62,9 +63,11 @@ public class StoryDevelopmentService {
       this.structured = new StructuredJson(mapper, validator);
       this.storyProfiles = storyProfiles;
       this.episodeFormats = episodeFormats;
+      this.storyFormats = storyFormats;
       this.ruleResolver = ruleResolver;
       this.storyContracts = storyContracts;
       this.storyQuality = storyQuality;
+      this.prompts=prompts;
    }
 
    public ObjectNode start(String projectId, ObjectNode request) {
@@ -72,6 +75,7 @@ public class StoryDevelopmentService {
          ObjectNode project = this.store.getForUpdate(ResourceKind.PROJECT, projectId);
          ObjectNode normalizedProject = this.storyProfiles.enrich(project);
          normalizedProject.set("episodeFormat", this.episodeFormats.resolve(normalizedProject));
+         normalizedProject.set("storyFormat",this.storyFormats.resolve(normalizedProject));
          if (!normalizedProject.equals(project)) {
             project = this.store.update(ResourceKind.PROJECT, projectId, Documents.revision(project), normalizedProject);
          }
@@ -387,7 +391,8 @@ public class StoryDevelopmentService {
             return;
          }
          ObjectNode schema = StoryDevelopmentSchemas.forDocument(doc);
-         LlmGateway.StructuredRequest request = new LlmGateway.StructuredRequest(this.prompt(Documents.text(doc, "documentType")), input.toString(), this.mapper.convertValue(schema, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {}), Map.of());
+         var compiled=this.prompts.compileStory(Documents.text(doc,"documentType"),input,schema);this.jobs.mutate(Documents.id(job),j->{j.put("promptCompilerVersion",compiled.compilerVersion());j.set("promptIR",compiled.promptIRJson().deepCopy());});
+         LlmGateway.StructuredRequest request = new LlmGateway.StructuredRequest(compiled.systemPrompt(), compiled.userPrompt(), this.mapper.convertValue(compiled.schema(), new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {}), Map.of());
          LlmGateway.StructuredResult<JsonNode> result = this.llm.generate(request, JsonNode.class);
          this.jobs.mutate(Documents.id(job), (j) -> j.put("providerRequestId", result.requestId()).put("model", result.model()).put("simulated", result.simulated()));
          JsonNode generatedContent = this.canonicalizeSystemOwnedFields(doc, result.value());
@@ -543,12 +548,15 @@ public class StoryDevelopmentService {
       ObjectNode input = Documents.obj().put("pipelineVersion", 2).put("documentId", Documents.id(doc)).put("phase", Documents.text(doc, "documentType"));
       ObjectNode project = this.storyProfiles.enrich((ObjectNode)doc.path("projectSnapshot").deepCopy());
       ObjectNode episodeFormat = this.episodeFormats.resolve(project);
+      ObjectNode storyFormat=this.storyFormats.resolve(project);
       project.set("episodeFormat", episodeFormat.deepCopy());
+      project.set("storyFormat",storyFormat.deepCopy());
       input.set("project", project);
       input.set("storyProfile", project.path("storyProfile").deepCopy());
       input.set("episodeFormat", episodeFormat);
-       String documentType=Documents.text(doc,"documentType"),basePrompt=this.prompt(documentType);
-       ObjectNode rulePack=this.ruleResolver.resolve(documentType, project.path("storyProfile"), episodeFormat,
+      input.set("storyFormat",storyFormat);
+       String documentType=Documents.text(doc,"documentType"),basePrompt=this.prompts.storySkillText(documentType);
+       ObjectNode rulePack=this.ruleResolver.resolve(documentType, project.path("storyProfile"), episodeFormat,storyFormat,
                project.path("distributionProfile").asText("GENERAL"),basePrompt,
                project.path("writerModelProfile").asText("DEEPSEEK_WRITER"));
        input.set("rulePack",rulePack);input.put("rulePackFingerprint",Documents.text(rulePack,"fingerprint"))
@@ -584,14 +592,17 @@ public class StoryDevelopmentService {
    private ObjectNode schedulePremise(ObjectNode doc) {
       ObjectNode project = this.storyProfiles.enrich((ObjectNode)doc.path("projectSnapshot").deepCopy());
       ObjectNode format = this.episodeFormats.resolve(project);
+      ObjectNode storyFormat=this.storyFormats.resolve(project);
       project.set("episodeFormat", format.deepCopy());
+      project.set("storyFormat",storyFormat.deepCopy());
       ObjectNode input = Documents.obj().put("pipelineVersion", 2).put("documentId", Documents.id(doc)).put("phase", "PREMISE");
       input.set("project", project);
       input.set("storyProfile", project.path("storyProfile").deepCopy());
       input.set("episodeFormat", format);
+      input.set("storyFormat",storyFormat);
       if(doc.path("storyBriefSnapshot").isObject())input.set("storyBrief",doc.path("storyBriefSnapshot").deepCopy());
-      String basePrompt=this.prompt("PREMISE");
-      ObjectNode rulePack=this.ruleResolver.resolve("PREMISE", project.path("storyProfile"), format,
+      String basePrompt=this.prompts.storySkillText("PREMISE");
+      ObjectNode rulePack=this.ruleResolver.resolve("PREMISE", project.path("storyProfile"), format,storyFormat,
               project.path("distributionProfile").asText("GENERAL"),basePrompt,
               project.path("writerModelProfile").asText("DEEPSEEK_WRITER"));
       input.set("rulePack",rulePack);input.put("rulePackFingerprint",Documents.text(rulePack,"fingerprint"))
@@ -604,8 +615,9 @@ public class StoryDevelopmentService {
    }
 
    private void processPremise(ObjectNode job, ObjectNode doc, JsonNode input) {
-      LlmGateway.StructuredRequest request = new LlmGateway.StructuredRequest(this.prompt("PREMISE"), input.toString(),
-              this.mapper.convertValue(StoryDevelopmentSchemas.premise(), new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {}), Map.of());
+      var compiled=this.prompts.compileStory("PREMISE",input,StoryDevelopmentSchemas.premise());this.jobs.mutate(Documents.id(job),j->{j.put("promptCompilerVersion",compiled.compilerVersion());j.set("promptIR",compiled.promptIRJson().deepCopy());});
+      LlmGateway.StructuredRequest request = new LlmGateway.StructuredRequest(compiled.systemPrompt(), compiled.userPrompt(),
+              this.mapper.convertValue(compiled.schema(), new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {}), Map.of());
       LlmGateway.StructuredResult<JsonNode> result = this.llm.generate(request, JsonNode.class);
       JsonNode premise = this.structured.parse(result.value().toString(), StoryDevelopmentSchemas.premise(), JsonNode.class, result.requestId());
       this.jobs.mutate(Documents.id(job), j -> j.put("providerRequestId", result.requestId()).put("model", result.model()).put("simulated", result.simulated()));
@@ -903,29 +915,6 @@ public class StoryDevelopmentService {
       this.requireCurrent(doc);
       if (!"CONFIRMED".equals(Documents.text(doc, "reviewStatus"))) {
          throw new WorkflowException("UPSTREAM_REVIEW_REQUIRED", "请先确认上游内容");
-      }
-   }
-
-   private String prompt(String type) {
-      if("STORY_BRIEF".equals(type)){
-         try(InputStream stream=(new ClassPathResource("development-skills/vendor/oiuv-ai-short-drama/script-brief/SKILL.md")).getInputStream()){
-            return new String(stream.readAllBytes(),StandardCharsets.UTF_8);
-         }catch(Exception e){throw new IllegalStateException("故事需求技能加载失败",e);}
-      }
-      String var10000;
-      switch (type) {
-         case "PREMISE" -> var10000 = "00-premise-analysis";
-         case "CORE" -> var10000 = "01-story-planning";
-         case "OUTLINE_BATCH" -> var10000 = "03-episode-planning";
-         default -> var10000 = "04-script-writing";
-      }
-
-      String dir = var10000;
-
-      try (InputStream stream = (new ClassPathResource("development-skills/" + dir + "/prompt.md")).getInputStream()) {
-         return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
-      } catch (Exception e) {
-         throw new IllegalStateException("创作技能加载失败：" + dir, e);
       }
    }
 

@@ -75,7 +75,7 @@ class DirectorBenchmarkTest {
             ObjectNode performance=shot.putObject("performancePlan").put("primaryAction",benchmark.beats().get(Math.min(2,i*3/Math.max(1,count)))).put("actionUnits",1);performance.putArray("propOperations");
             String required=Set.of("EXTREME_WIDE","WIDE","FULL","MEDIUM_FULL").contains(size)?"ACTION":size.equals("INSERT")?"PROP_DETAIL":"IDENTITY";
             shot.putObject("visibilityPlan").put("occlusion","NONE").put("requiredDetail",required);
-            ArrayNode dialogue=shot.putArray("dialogues");if(benchmark.dialogue()&&pattern==2)dialogue.add(mapper.createObjectNode().put("displayText","我知道真相。"));shots.add(shot);
+            ArrayNode dialogue=shot.putArray("dialogues");if(benchmark.dialogue()&&pattern==2)dialogue.add(mapper.createObjectNode().put("semanticText","我知道真相。"));shots.add(shot);
         }
         return root;
     }

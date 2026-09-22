@@ -11,8 +11,10 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.annotation.Transactional;
 
 import static com.yourapp.drama.persistence.ResourceKind.PROJECT;
+import static com.yourapp.drama.persistence.ResourceKind.GENERATION_JOB;
 import static com.yourapp.drama.workflow.Documents.*;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
@@ -24,5 +26,27 @@ class JobBudgetReservationIntegrationTest {
         ObjectNode project=store.create(PROJECT,obj().put("name","预算幂等").put("idea","同一请求只预留一次"));ObjectNode input=obj().put("testRun",true).put("testRunId","budget-idempotent");
         ObjectNode first=jobs.enqueue(id(project),null,"STORY",input,"same-request");ObjectNode second=jobs.enqueue(id(project),null,"STORY",input,"same-request");
         assertThat(id(second)).isEqualTo(id(first));verify(budget,times(1)).reserve("STORY",input);
+    }
+    @Test void sameRequestKeyWithDifferentInputCannotSilentlyReturnAnOldPaidJob(){
+        ObjectNode project=store.create(PROJECT,obj().put("name","请求内容校验").put("idea","两次输入不一样"));
+        jobs.enqueue(id(project),null,"STORY",obj().put("idea","first"),"same-key");
+        assertThatThrownBy(()->jobs.enqueue(id(project),null,"STORY",obj().put("idea","second"),"same-key"))
+            .isInstanceOf(WorkflowException.class).hasMessageContaining("请求标识");
+        assertThat(store.list(GENERATION_JOB,id(project),null)).hasSize(1);
+    }
+    @Test void taskCenterFieldsExistFromQueueThroughTerminalState(){
+        ObjectNode project=store.create(PROJECT,obj().put("name","任务中心").put("idea","任务字段完整"));
+        ObjectNode queued=jobs.enqueue(id(project),null,"STORY",obj(),"task-center-fields");
+        assertThat(text(queued,"localTaskId")).isEqualTo(id(queued));
+        assertThat(text(queued,"provider")).isEqualTo("MOCK");
+        assertThat(text(queued,"model")).isEqualTo("mock-writer");
+        assertThat(text(queued,"phase")).isEqualTo("QUEUED");
+        assertThat(queued.path("retryCount").asInt()).isZero();
+        ObjectNode running=jobs.claim(id(project)).orElseThrow();
+        assertThat(text(running,"phase")).isEqualTo("EXECUTING");
+        assertThat(text(running,"startedAt")).isNotBlank();
+        ObjectNode failed=jobs.fail(id(running),"TEST_FAILURE","用于验证任务字段",false,false);
+        assertThat(text(failed,"phase")).isEqualTo("FAILED");
+        assertThat(failed.path("elapsedMs").isIntegralNumber()).isTrue();
     }
 }

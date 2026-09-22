@@ -33,6 +33,8 @@ class StoryProfilePersistenceTest {
         assertThat(saved.path("episodeFormat").path("profileId").asText()).isEqualTo("GENERAL_LONG");
         assertThat(saved.path("episodeFormat").path("family").asText()).isEqualTo("LONG");
         assertThat(saved.path("episodeFormat").path("distributionProfile").asText()).isEqualTo("GENERAL");
+        assertThat(saved.path("storyFormat").path("narrativeForm").asText()).isEqualTo("SHORT_DRAMA");
+        assertThat(saved.path("storyFormat").path("presentation").asText()).isEqualTo("LIVE_ACTION");
         assertThat(saved.path("storyProfileFingerprint").asText()).hasSize(64);
     }
 

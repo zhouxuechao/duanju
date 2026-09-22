@@ -77,4 +77,14 @@ class VolcengineVideoRequestContractTest {
                 .isInstanceOf(com.yourapp.drama.model.ProviderException.class).hasMessageContaining("REFERENCE_LIMIT_EXCEEDED");
         assertThat(captured.get()).isNull();
     }
+    @Test void durationBeyondModelCapacityIsRejectedBeforePaidSubmission() {
+        assertThatThrownBy(()->generator.submit(new VideoGenerator.VideoRequest("continuous action",null,List.of(),Map.of("duration",31))))
+                .isInstanceOf(com.yourapp.drama.model.ProviderException.class)
+                .hasMessageContaining("DURATION_UNSUPPORTED");
+        assertThat(captured.get()).isNull();
+    }
+    @Test void eightSecondEditUsesTheNextSupportedProviderDuration() {
+        generator.submit(new VideoGenerator.VideoRequest("continuous action",null,List.of(),Map.of("duration",8)));
+        assertThat(captured.get().path("duration").asInt()).isEqualTo(10);
+    }
 }

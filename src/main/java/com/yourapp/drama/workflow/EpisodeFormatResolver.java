@@ -91,7 +91,6 @@ public class EpisodeFormatResolver {
         return "CUSTOM";
     }
 
-    private String profileId(String family, int seconds) {return profileId(family,seconds,"GENERAL");}
     private String profileId(String family, int seconds,String distribution) {
         if(distribution.startsWith("HONGGUO")&&Set.of("MANJU","STANDARD","LONG").contains(family))return "HONGGUO_"+family;
         return switch (family) {

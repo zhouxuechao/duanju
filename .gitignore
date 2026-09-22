@@ -13,3 +13,5 @@ logs/
 .vscode/
 test-results/
 playwright-report/
+__pycache__/
+*.py[cod]

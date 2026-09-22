@@ -81,7 +81,7 @@ class ProviderReplayContractTest {
         assertThat(completed.status()).isEqualTo(VideoGenerator.Status.SUCCEEDED);assertThat(completed.providerUrl()).endsWith("/take.mp4");assertThat(completed.requestId()).isEqualTo("video-poll-request-001");
 
         SeedAudioProperties audioProperties=new SeedAudioProperties();audioProperties.setEndpoint(URI.create(base()+"/api/v3/tts/create"));audioProperties.setApiKey("replay-only-audio-key");audioProperties.setModel("seed-audio-replay");audioProperties.setRequestTimeout(Duration.ofSeconds(3));
-        VoiceGenerator.VoiceResult voice=new SeedAudioVoiceGenerator(audioProperties,mapper).generate(new VoiceGenerator.VoiceRequest("replay","别开门。","approved-speaker-replay","普通话",1,Map.of()));
+        VoiceGenerator.VoiceResult voice=new SeedAudioVoiceGenerator(audioProperties,mapper).generate(new VoiceGenerator.VoiceRequest("replay","别开门。","approved-speaker-replay","普通话",1,"[VOICE IDENTITY]\n采用批准音色。\n[SPEECH CONTENT]\n唯一允许说出的对白：别开门。\n[OUTPUT CONSTRAINTS]\n只输出单人干声。",Map.of()));
         assertThat(voice.requestId()).isEqualTo("audio-replay-request-001");assertThat(voice.durationSeconds()).isEqualTo(1.25);assertThat(voice.content()).hasSize(64);
         JsonNode audio=captured.get("audio");assertThat(audio.path("model").asText()).isEqualTo(audioFixture.path("expectedRequest").path("model").asText());assertThat(audio.path("references").get(0).path("speaker").asText()).isEqualTo(audioFixture.path("expectedRequest").path("speaker").asText());assertThat(audio.path("audio_config").path("sample_rate").asInt()).isEqualTo(48000);
     }

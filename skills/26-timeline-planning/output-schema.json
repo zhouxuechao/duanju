@@ -17,7 +17,32 @@
       "type": "object",
       "properties": {
         "timeline": {},
-        "items": {}
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "track": {
+                "enum": ["VIDEO", "DIALOGUE", "AMBIENCE", "SFX", "BGM"]
+              },
+              "startMs": {"type": "integer", "minimum": 0},
+              "durationMs": {"type": "integer", "minimum": 1},
+              "sourceInMs": {"type": "integer", "minimum": 0},
+              "sourceOutMs": {"type": "integer", "minimum": 1},
+              "pauseDurationMs": {"type": "integer", "minimum": 1},
+              "gapBeforeMs": {"type": "integer", "minimum": 1},
+              "editOperations": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "enum": ["TRIM", "CUT", "REACTION_SHOT", "INSERT_SHOT", "J_CUT", "L_CUT", "AUDIO_BRIDGE", "DIALOGUE_GAP", "PAUSE", "CLIP_REPLACE"]
+                }
+              }
+            },
+            "required": ["track", "startMs", "durationMs", "editOperations"]
+          }
+        }
       },
       "required": [
         "timeline",

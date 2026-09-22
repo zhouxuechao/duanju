@@ -36,6 +36,35 @@ class MediaContinuityRegressionTest {
         assertThat(engine.plan(request()).passed()).isTrue();
     }
 
+    @Test void continuityDoesNotImposeTheRemovedTwoToFiveSecondShotRule() throws Exception {
+        ObjectNode longPerformance=request();
+        ((ObjectNode)longPerformance.path("shot")).put("duration",8);
+        assertThat(engine.plan(longPerformance).risks()).noneMatch(r->r.code().equals("ATOMIC_DURATION"));
+
+        ObjectNode editorialMinimum=request();
+        ((ObjectNode)editorialMinimum.path("shot")).put("duration",EditorialTiming.MIN_SHOT_SECONDS);
+        assertThat(engine.plan(editorialMinimum).risks()).noneMatch(r->r.code().equals("ATOMIC_DURATION"));
+    }
+
+    @Test void structuredActionProgressCannotMoveBackwardsInsideAShot() throws Exception {
+        ObjectNode request=request(),shot=(ObjectNode)request.path("shot"),actor=(ObjectNode)shot.path("startState").path("characters").path("actor");
+        actor.set("actionState",obj().put("action","PICK_UP_BELL").put("progress",0.65).put("hand","RIGHT").put("object","bell"));
+        ObjectNode end=(ObjectNode)shot.path("startState").deepCopy();
+        ((ObjectNode)end.path("characters").path("actor")).set("actionState",obj().put("action","PICK_UP_BELL").put("progress",0.40).put("hand","RIGHT").put("object","bell"));
+        shot.set("endState",end);
+
+        assertThat(engine.plan(request).risks()).anyMatch(r->r.code().equals("ACTION_PROGRESS_REGRESSION"));
+    }
+
+    @Test void blockingPropPositionCannotDisagreeWithTheContinuityLedger() throws Exception {
+        ObjectNode request=request(),shot=(ObjectNode)request.path("shot"),blocking=shot.putObject("blocking");
+        blocking.put("cameraWorldPosition","门北侧").put("axis","人物—院门轴线").put("axisSide","A_SIDE");
+        blocking.putArray("characters").add(obj().put("characterId","actor").put("worldPosition","门东侧").put("facing","朝门").put("movementVector","STATIC").put("screenDirection","STATIC").put("eyeLineTarget","门缝"));
+        blocking.putArray("props").add(obj().put("propId","bell").put("worldPosition","左手腰侧"));
+
+        assertThat(engine.plan(request).risks()).anyMatch(r->r.code().equals("BLOCKING_PROP_POSITION_CONFLICT"));
+    }
+
     @Test void positionAndHolderCannotDriftDuringCutaways() throws Exception {
         ObjectNode request=request();
         ((ObjectNode)request.path("shot")).put("relationToPrevious","CUTAWAY");

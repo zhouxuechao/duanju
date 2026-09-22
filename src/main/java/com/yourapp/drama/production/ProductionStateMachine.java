@@ -19,9 +19,11 @@ public class ProductionStateMachine {
     private static final Set<ShotStatus> GENERATING = EnumSet.of(ShotStatus.STORYBOARD_GENERATING, ShotStatus.KEYFRAME_GENERATING, ShotStatus.VIDEO_GENERATING);
     private static final Map<JobStatus, Set<JobStatus>> JOB_TRANSITIONS = Map.of(
         JobStatus.QUEUED, EnumSet.of(JobStatus.RUNNING, JobStatus.CANCELLED),
-        JobStatus.RUNNING, EnumSet.of(JobStatus.SUCCESS, JobStatus.FAILED, JobStatus.CANCELLED),
+        JobStatus.RUNNING, EnumSet.of(JobStatus.SUCCESS, JobStatus.FAILED, JobStatus.CANCELLED, JobStatus.UNKNOWN, JobStatus.WAITING_HUMAN),
         JobStatus.FAILED, EnumSet.of(JobStatus.RETRY_WAIT),
         JobStatus.RETRY_WAIT, EnumSet.of(JobStatus.QUEUED, JobStatus.CANCELLED),
+        JobStatus.UNKNOWN, EnumSet.of(JobStatus.RUNNING, JobStatus.WAITING_HUMAN, JobStatus.CANCELLED),
+        JobStatus.WAITING_HUMAN, EnumSet.of(JobStatus.RUNNING, JobStatus.FAILED, JobStatus.CANCELLED),
         JobStatus.SUCCESS, Set.of(), JobStatus.CANCELLED, Set.of());
     private final ObjectMapper mapper;
     public ProductionStateMachine(ObjectMapper mapper) { this.mapper = mapper; }

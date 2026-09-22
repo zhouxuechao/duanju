@@ -14,6 +14,7 @@ public final class StoryDevelopmentSchemas {
     private static ObjectNode text() { return Documents.obj().put("type", "string").put("minLength", 1); }
     private static ObjectNode optionalText() { return Documents.obj().put("type", "string"); }
     private static ObjectNode bool() { return Documents.obj().put("type", "boolean"); }
+    private static ObjectNode values(String... values) { ObjectNode schema=Documents.obj().put("type","string");ArrayNode choices=schema.putArray("enum");for(String value:values)choices.add(value);return schema; }
     private static ObjectNode number(double min, double max) { return Documents.obj().put("type", "number").put("minimum", min).put("maximum", max); }
     private static ObjectNode integer(int min, int max) { return Documents.obj().put("type", "integer").put("minimum", min).put("maximum", max); }
     private static ObjectNode array(JsonNode item, int min, int max) { return (ObjectNode) Documents.obj().put("type", "array").put("minItems", min).put("maxItems", max).set("items", item); }
@@ -108,12 +109,17 @@ public final class StoryDevelopmentSchemas {
     }
 
     private static ObjectNode scene() {
-        return object("name", text(), "description", text(), "startSec", number(0, 1800),
-                "endSec", number(0, 1800), "duration", number(1, 1800));
+        return object("sceneId",text(),"name", text(), "description", text(),"storyTime",number(0,1_000_000),
+                "locationKey",text(),"sceneGoal",text(),"conflict",text(),"dramaticFunction",text(),
+                "characterKeys",strings(0,30),"propKeys",strings(0,30),"startState",looseObject(),"endState",looseObject(),
+                "informationChange",optionalText(),"relationshipChange",optionalText(),"emotionChange",optionalText(),"characterStateChange",optionalText(),
+                "startSec", number(0, 1800), "endSec", number(0, 1800), "duration", number(1, 1800));
     }
 
     private static ObjectNode beat() {
-        return object("beatId", text(), "purpose", text(), "startSec", number(0, 1800), "endSec", number(0, 1800));
+        return object("beatId", text(), "purpose", text(), "action",optionalText(),"dialogue",optionalText(),
+                "visualInformation",optionalText(),"hookSignals",array(values("CONFLICT","ANOMALY","DANGER","MYSTERY","SECRET","EMOTION","IDENTITY_CONTRAST","QUESTION","VISUAL_SURPRISE"),0,9),
+                "startSec", number(0, 1800), "endSec", number(0, 1800));
     }
 
     private static ObjectNode midHook() {
@@ -125,6 +131,11 @@ public final class StoryDevelopmentSchemas {
         return object("atSec", number(0, 1800), "type", text(), "description", text());
     }
 
+    private static ObjectNode episodeEnding(){
+        return object("primaryType",values("OPEN_QUESTION","UNRESOLVED_CONFLICT","REVEAL","DECISION","DANGER","REVERSAL","NATURAL_CLOSE"),
+                "strength",values("LOW","MEDIUM","HIGH"),"description",text(),"unresolvedPressure",optionalText(),"nextEpisodeQuestion",optionalText());
+    }
+
     public static ObjectNode batch(int start, int end) {
         Map<String, JsonNode> required = new LinkedHashMap<>();
         required.put("episodeNo", integer(start, end)); required.put("title", text());
@@ -134,6 +145,7 @@ public final class StoryDevelopmentSchemas {
         required.put("episodeFormatId", text()); required.put("beatMode", text()); required.put("beats", array(beat(), 2, 24));
         required.put("progressionEvents", array(progression(), 1, 24)); required.put("estimatedDurationSec", number(1, 1800));
         required.put("scenePlan", array(scene(), 1, 20));
+        required.put("episodeEnding",episodeEnding());
         ObjectNode card = object(required, Map.of("midHook", midHook()));
         return object("episodes", array(card, end - start + 1, end - start + 1));
     }
@@ -144,6 +156,7 @@ public final class StoryDevelopmentSchemas {
         required.put("script", text().put("minLength", 80)); required.put("targetDurationSec", number(1, 1800));
         required.put("characterKeys", strings(0, 30)); required.put("locationKeys", strings(0, 30)); required.put("propKeys", strings(0, 30));
         required.put("beatBoundaries", array(beat(), 2, 24)); required.put("scenes", array(scene(), 1, 20));
+        required.put("episodeEnding",episodeEnding());
         ObjectNode formedAtEpisode = integer(1, 10000).put("description", "证据首次形成的集号，必须使用 episodeNo，不是当前集内秒数");
         ObjectNode evidence = object("evidenceId", text(), "type", text(), "formedAt", formedAtEpisode, "verified", bool(),
                 "tampered", bool(), "obtainedBy", strings(0, 30), "knownBy", strings(0, 30), "holder", text(), "supportsFacts", strings(0, 30));

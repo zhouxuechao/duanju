@@ -8,6 +8,7 @@ import com.yourapp.drama.production.ProductionService;
 import com.yourapp.drama.production.DirectorStyleResolver;
 import com.yourapp.drama.production.VideoRequestPlanner;
 import com.yourapp.drama.production.KeyframeSemanticRole;
+import com.yourapp.drama.production.MediaPurpose;
 import com.yourapp.drama.production.ProviderFrameMode;
 import com.yourapp.drama.production.CrossShotQc;
 import com.yourapp.drama.production.AssetDependencyAnalyzer;
@@ -126,7 +127,8 @@ public class WorkflowService {
         if(!Set.of("KEYFRAME","STORYBOARD").contains(type))throw new IllegalArgumentException("图片任务类型无效");
         return store.transaction(()->{
             ObjectNode shot=store.getForUpdate(SHOT,shotId);ObjectNode existing=existingJob(project(shot),type,shotId,body);if(existing!=null)return existing; noActiveGeneration(shotId);
-            ObjectNode context=context(shot);context.put("imageTaskType",type);context.set("providerCapabilities",production.imageCapabilities());context.set("outputProfile",outputProfile(project(shot)));validateCharacters(context.path("assets"),shot);
+            MediaPurpose mediaPurpose="STORYBOARD".equals(type)?MediaPurpose.PREVIS:MediaPurpose.KEYFRAME;
+            ObjectNode context=context(shot);context.put("imageTaskType",mediaPurpose.name()).put("mediaPurpose",mediaPurpose.name());context.set("providerCapabilities",production.imageCapabilities());context.set("outputProfile",outputProfile(project(shot)));validateCharacters(context.path("assets"),shot);
             if(!text(body,"revisionFeedback").isBlank())context.put("revisionFeedback",text(body,"revisionFeedback"));
             if("KEYFRAME".equals(type))for(ObjectNode storyboard:store.list(STORYBOARD,project(shot),shotId))if(storyboard.path("selected").asBoolean()&&storyboard.path("locked").asBoolean()&&"PASSED".equals(text(storyboard,"qcStatus"))&&!storyboard.path("stale").asBoolean()){context.set("approvedStoryboard",storyboard.deepCopy());break;}
             List<ObjectNode> reviews=store.list(QC_RESULT,project(shot),null);
@@ -140,7 +142,7 @@ public class WorkflowService {
             JsonNode compiled=production.compileImage(context);
             int version=store.list(type.equals("KEYFRAME")?KEYFRAME:STORYBOARD,project(shot),shotId).size()+1;
             ObjectNode prompt=savePrompt(shot,type,compiled,context);
-            ObjectNode input=obj().put("shotId",shotId).put("sceneId",required(shot,"sceneId")).put("episodeId",required(store.get(SCENE,required(shot,"sceneId")),"episodeId")).put("version",version).put("promptVersionId",id(prompt)).put("prompt",compiled.path("prompt").asText()).put("assetDependencyLevel",assetDependency(shot).name());copyPromptAudit(input,compiled,context);
+            ObjectNode input=obj().put("shotId",shotId).put("sceneId",required(shot,"sceneId")).put("episodeId",required(store.get(SCENE,required(shot,"sceneId")),"episodeId")).put("version",version).put("promptVersionId",id(prompt)).put("prompt",compiled.path("prompt").asText()).put("assetDependencyLevel",assetDependency(shot).name()).put("mediaPurpose",mediaPurpose.name());copyPromptAudit(input,compiled,context);
             String semanticRole="STORYBOARD".equals(type)?KeyframeSemanticRole.STORYBOARD_GRID.name():body.path("semanticRole").asText(KeyframeSemanticRole.START_FRAME.name());KeyframeSemanticRole role=KeyframeSemanticRole.from(semanticRole);input.put("semanticRole",role.name()).put("providerFrameMode",role.nativeBoundary()?ProviderFrameMode.NATIVE_BOUNDARY.name():ProviderFrameMode.SEMANTIC_REFERENCE.name()).put("timeSec",body.path("timeSec").asDouble(role==KeyframeSemanticRole.END_FRAME?shot.path("duration").asDouble(0):0)).put("stateVersion",body.path("stateVersion").asInt(shot.path("shotPlanVersion").asInt(1)));
             input.set("context",context);
             ObjectNode imageOptions=body.path("providerOptions").isObject()?(ObjectNode)body.path("providerOptions").deepCopy():obj();
@@ -174,6 +176,7 @@ public class WorkflowService {
                 }
                 input.put("regeneratedFromId",id(old));
             }
+            input.set("clientRequestSnapshot",body.deepCopy());
             ObjectNode job=jobs.enqueue(project(shot),shotId,type,input,key(body));
             setShot(shot,type+"_GENERATING");return job;
         });
@@ -272,6 +275,7 @@ public class WorkflowService {
             input.set("references",requestPlan.path("references").deepCopy());input.set("providerOptions",requestPlan.path("providerParameters").deepCopy());input.set("providerParameters",requestPlan.path("providerParameters").deepCopy());
             for(String field:List.of("modelId","modelProfileVersion","capabilityFingerprint","taskType","lockMode","route","activatedMaterials","excludedMaterials","referenceMapping","referenceAuthority","referenceBudget","rulePackFingerprint","rulePackUpstreamCommit","runtimeRuleIds","audioGenerationPolicy","modelProfile","preflight"))if(requestPlan.has(field))input.set(field,requestPlan.path(field).deepCopy());
             input.set("assetReferences",requestPlan.path("activatedMaterials").deepCopy());input.set("assetViewIds",shot.path("assetViewIds").deepCopy());
+            input.set("clientRequestSnapshot",body.deepCopy());
             ObjectNode job=jobs.enqueue(project(shot),id(shot),"VIDEO",input,key(body));
             setShot(shot,"VIDEO_GENERATING");return job;
         });
@@ -356,7 +360,7 @@ public class WorkflowService {
             if(kind==AUDIO_CLIP){
                 for(ObjectNode old:store.list(AUDIO_CLIP,project(item),required(item,"shotId")))if(!id(old).equals(id)&&text(old,"dialogueLineId").equals(text(item,"dialogueLineId"))&&old.path("selected").asBoolean())store.update(AUDIO_CLIP,id(old),revision(old),old.deepCopy().put("selected",false));
             }
-            ObjectNode next=item.deepCopy().put("locked",true).put("selected",true).put("lockedAt",Instant.now().toString());if(kind==CHARACTER)next.put("identityLocked",true);
+            ObjectNode next=item.deepCopy().put("locked",true).put("selected",true).put("lockedAt",Instant.now().toString());if(kind==CHARACTER)next.put("identityLocked",true);if(kind==KEYFRAME)next.put("selectedPurpose",MediaPurpose.FINAL_REFERENCE.name());
             return store.update(kind,id,revision(item),next);
         });
         if(kind==KEYFRAME&&body.path("generateVideo").asBoolean(true)){
@@ -444,35 +448,27 @@ public class WorkflowService {
     private ObjectNode savePrompt(ObjectNode shot,String purpose,JsonNode compiled,JsonNode context){
         int version=store.list(PROMPT_VERSION,project(shot),null).size()+1;
         ObjectNode prompt=obj().put("projectId",project(shot)).put("shotId",id(shot)).put("purpose",purpose).put("version",version)
-            .put("prompt",compiled.path("prompt").asText()).put("compilerVersion",compiled.path("compilerVersion").asText("1.0"));copyPromptAudit(prompt,compiled,context);prompt.set("inputSnapshot",context.deepCopy());return store.create(PROMPT_VERSION,prompt);
+            .put("prompt",compiled.path("prompt").asText()).put("compilerVersion",compiled.path("compilerVersion").asText("1.0"));
+        if(compiled.path("promptIR").isObject())prompt.set("promptIR",compiled.path("promptIR").deepCopy());
+        copyPromptAudit(prompt,compiled,context);prompt.set("inputSnapshot",context.deepCopy());return store.create(PROMPT_VERSION,prompt);
     }
     private ObjectNode outputProfile(String projectId){ObjectNode project=store.get(PROJECT,projectId);return obj().put("ratio",project.path("ratio").asText("9:16")).put("resolution",project.path("resolution").asText("1080p")).put("fps",project.path("fps").asInt(30));}
     private void copyPromptAudit(ObjectNode target,JsonNode compiled,JsonNode context){String references=hash(compiled.path("references").toString()),continuity=hash(context.path("continuitySnapshot").toString());ObjectNode sequence=obj();for(String field:List.of("previousState","previousTake","sceneContinuityPolicy"))if(context.has(field))sequence.set(field,context.path(field).deepCopy());for(String field:List.of("startState","endState","sequenceRelation","completedBeats","currentBeat","reservedFutureBeats"))if(context.path("shot").has(field))sequence.set(field,context.path("shot").path(field).deepCopy());target.put("normalizedPromptHash",hash(compiled.path("prompt").asText().replaceAll("\\s+"," ").trim())).put("referenceBindingsHash",references).put("referenceAuthorityFingerprint",references).put("continuitySnapshotHash",continuity).put("sequenceStateFingerprint",hash(sequence.toString())).put("providerCapabilitiesVersion",context.path("providerCapabilities").path("version").asText("UNKNOWN")).put("sequenceCompilerVersion",compiled.path("compilerVersion").asText("1.0"));}
     private String hash(String value){try{return HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)));}catch(Exception e){throw new IllegalStateException(e);}}
-    private void attachRetake(ObjectNode context,ObjectNode shot){List<ObjectNode> reviews=store.list(QC_RESULT,project(shot),null);for(int i=reviews.size()-1;i>=0;i--){ObjectNode review=reviews.get(i);if(id(shot).equals(text(review,"shotId"))&&"video-takes".equals(text(review,"targetKind"))&&!review.path("passed").asBoolean()){JsonNode diagnosis=review.path("diagnosis");String issue=diagnosis.path("failureCodes").path(0).asText("VISUAL_QC_FAILED"),repair=diagnosis.path("recommendedRepair").asText("REGENERATE");ObjectNode retake=obj().put("sourceReviewId",id(review)).put("issueCode",issue).put("repairStrategy",repair);retake.putArray("changedPromptSections").add(retakeSection(issue));context.set("retake",retake);return;}}}
+    private void attachRetake(ObjectNode context,ObjectNode shot){List<ObjectNode> reviews=store.list(QC_RESULT,project(shot),null);for(int i=reviews.size()-1;i>=0;i--){ObjectNode review=reviews.get(i);if(id(shot).equals(text(review,"shotId"))&&"video-takes".equals(text(review,"targetKind"))&&!review.path("passed").asBoolean()){JsonNode diagnosis=review.path("diagnosis");String issue=diagnosis.path("failureCodes").path(0).asText("VISUAL_QC_FAILED"),repair=diagnosis.path("recommendedRepair").asText("REGENERATE");ObjectNode retake=obj().put("sourceReviewId",id(review)).put("issueCode",issue).put("repairStrategy",repair);retake.set("issueCodes",diagnosis.path("failureCodes").deepCopy());JsonNode plan=diagnosis.path("repairPlan");if(plan.isObject()){retake.set("repairPlan",plan.deepCopy());retake.set("changedPromptSections",plan.path("changedPromptSections").deepCopy());}else retake.putArray("changedPromptSections").add(retakeSection(issue));context.set("retake",retake);return;}}}
     static String retakeSection(String issue){
-        String value=issue.toUpperCase(Locale.ROOT);
-        if(value.contains("IDENTITY")||value.contains("CHARACTER_COUNT")||value.contains("AGE")||value.contains("HAIR")||value.contains("CLOTHING")||value.contains("LOCATION"))return "HIGH-RISK CONTINUITY LOCKS";
-        if(value.contains("PROP")||value.contains("HAND"))return "PHYSICS / INTERACTION";
-        if(value.contains("MOTION")||value.contains("ACTION"))return "TIMED BEATS";
-        if(value.contains("CAMERA")||value.contains("COMPOSITION"))return "CAMERA / MOTION PHASE";
-        if(value.contains("EXPRESSION")||value.contains("AFFECT"))return "SHOT INTENT / CARRIERS";
-        if(value.contains("POSITION")||value.contains("STATE")||value.contains("CONTINUITY"))return "ACTUAL OPENING STATE";
-        if(value.contains("REFERENCE"))return "REFERENCE AUTHORITY";
-        if(value.contains("TEXT")||value.contains("WATERMARK"))return "OUTPUT CONSTRAINTS";
-        if(value.contains("STYLE")||value.contains("LIGHT"))return "DYNAMIC AVOID";
-        return "CURRENT ACTION / ENDPOINT";
+        return QualityDiagnosisService.promptSection(issue);
     }
     private void noActiveGeneration(String shotId){for(ObjectNode job:store.list(GENERATION_JOB,null,null))if(shotId.equals(text(job,"shotId"))&&!Set.of("ARCHIVE","VIDEO_QC").contains(text(job,"type"))){
         if(job.path("submissionUncertain").asBoolean())throw new WorkflowException("SUBMISSION_UNCERTAIN","此镜头已有服务商结果不确定的请求，请先核对请求记录，避免重复提交");
-        if(Set.of("QUEUED","RUNNING","RETRY_WAIT").contains(text(job,"status")))throw new WorkflowException("GENERATION_ACTIVE","此镜头已有任务运行，请等待完成或取消");
+        if(Set.of("QUEUED","RUNNING","RETRY_WAIT","UNKNOWN","WAITING_HUMAN").contains(text(job,"status")))throw new WorkflowException("GENERATION_ACTIVE","此镜头已有任务运行或等待对账，请先处理该任务");
     }}
     public void setShot(ObjectNode shot,String status){ObjectNode next=shot.deepCopy();String from=text(shot,"status");next.put("status",status);if(!from.equals(status))next.withArray("statusHistory").add(obj().put("from",from).put("to",status).put("at",Instant.now().toString()));store.update(SHOT,id(shot),revision(shot),next);}
     private String key(JsonNode body){return body.path("requestKey").asText(UUID.randomUUID().toString());}
     private ObjectNode existingJob(String projectId,String type,String shotId,JsonNode body){
         if(text(body,"requestKey").isBlank())return null;
         for(ObjectNode job:store.list(GENERATION_JOB,projectId,null))if(text(body,"requestKey").equals(text(job,"requestKey"))){
-            if(!type.equals(text(job,"type"))||!shotId.equals(text(job,"shotId")))throw new WorkflowException("IDEMPOTENCY_CONFLICT","请求标识已用于其他操作");return job;
+            if(!type.equals(text(job,"type"))||!shotId.equals(text(job,"shotId"))||!job.path("inputSnapshot").path("clientRequestSnapshot").equals(body))throw new WorkflowException("IDEMPOTENCY_CONFLICT","请求标识已用于不同操作或输入");return job;
         }return null;
     }
 }

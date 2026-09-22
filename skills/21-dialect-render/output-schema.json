@@ -16,13 +16,15 @@
     "payload": {
       "type": "object",
       "properties": {
-        "dialectText": {},
-        "speechText": {},
-        "confidence": {}
+        "confidence": {},
+        "spokenText": {},
+        "semanticText": {},
+        "subtitleText": {}
       },
       "required": [
-        "dialectText",
-        "speechText",
+        "semanticText",
+        "spokenText",
+        "subtitleText",
         "confidence"
       ],
       "additionalProperties": true

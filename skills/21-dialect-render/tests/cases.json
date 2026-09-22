@@ -4,10 +4,13 @@
       "projectId": "project-example",
       "projectVersion": 1,
       "payload": {
-        "displayText": {
+        "knowledgeBase": {
           "example": true
         },
-        "knowledgeBase": {
+        "semanticText": {
+          "example": true
+        },
+        "subtitleText": {
           "example": true
         }
       },
@@ -22,10 +25,13 @@
       "value": {
         "projectId": "project-example",
         "payload": {
-          "displayText": {
+          "knowledgeBase": {
             "example": true
           },
-          "knowledgeBase": {
+          "semanticText": {
+            "example": true
+          },
+          "subtitleText": {
             "example": true
           }
         }

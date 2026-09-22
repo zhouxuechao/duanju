@@ -20,7 +20,7 @@ class DirectorContractTest {
           {"scene":{"duration":6,"state":{}},"assets":{
             "characters":[{"id":"actor","baseLookId":"look"}],
             "looks":[{"id":"look","characterId":"actor"}],
-            "locations":[{"id":"yard"}],"props":[{"id":"bell"}]},"dialogues":[]}
+            "locations":[{"id":"yard","locationBible":{"fixedFeatures":[{"featureId":"NORTH_DOOR_RING","name":"北侧门环"},{"featureId":"WELL","name":"水井"}]}}],"props":[{"id":"bell"}]},"dialogues":[]}
           """);
         ObjectNode shot=(ObjectNode)mapper.readTree("""
           {"purpose":"老人听见门铃","feltIntent":"让观众意识到门外的声音不属于熟人","duration":3,"action":"老人凝视铁铃","visualFocus":"老人的眼睛","emotion":"警觉",
@@ -29,7 +29,7 @@ class DirectorContractTest {
           "characterIds":["actor"],"propIds":["bell"],"dialogues":[],"authorizedChanges":[],
           "referenceViews":{"look":"FRONT","yard":"FRONT","bell":"SIDE"},
           "startState":{
-          "characters":{"actor":{"identityId":"actor","lookId":"look","position":"院门南侧一米","lookDirection":"北侧门环","holding":"bell","pose":"站立","actionState":"观察门环"}},
+          "characters":{"actor":{"identityId":"actor","lookId":"look","position":"院门南侧一米","lookDirection":"北侧门环","holding":"bell","pose":"站立","actionState":{"action":"OBSERVE_BELL","progress":1,"hand":"RIGHT","object":"bell"}}},
           "props":{"bell":{"holder":"actor","position":"老人右手","state":"完整"}}}}
           """);
         shot.put("beatId","beat-1").put("directorIntent","BUILD_TENSION").put("shotPurpose","让观众注意到门外异常")
@@ -37,8 +37,9 @@ class DirectorContractTest {
         shot.set("blocking",mapper.createObjectNode().put("cameraWorldPosition","院门南侧2米").put("axis","院门—老人轴线")
             .put("keyObjectPositions","铁铃在老人右手，院门在北侧").put("doorWindowState","院门关闭，仅门缝透光").put("axisSide","A_SIDE").put("axisChangeReason","")
             .set("characters",mapper.createArrayNode().add(mapper.createObjectNode().put("characterId","actor").put("worldPosition","院门南侧一米")
-                .put("facing","朝北").put("framePosition","画面左侧").put("screenDirection","FRAME_RIGHT").put("eyeLineTarget","北侧门环")
+                .put("facing","朝北").put("movementVector","STATIC").put("framePosition","画面左侧").put("screenDirection","FRAME_RIGHT").put("eyeLineTarget","北侧门环").put("eyeLineTargetType","LOCATION_FEATURE").put("eyeLineTargetId","NORTH_DOOR_RING")
                 .put("visibleBodyPart","RIGHT_HAND").put("bodyFrameSide","IN_FRAME_LEFT").put("limbEntrySide","FRAME_LEFT").put("contactPoint","右手握住铃柄"))));
+        ((ObjectNode)shot.path("blocking")).putArray("props").add(mapper.createObjectNode().put("propId","bell").put("worldPosition","老人右手"));
         ((ObjectNode)shot.path("blocking")).putArray("spatialAnchors").add(mapper.createObjectNode().put("subject","actor").put("anchorObject","院门").put("relation","SOUTH_OF").put("facing","NORTH").put("distance","1米").put("side","SOUTH"));
         shot.set("performancePlan",mapper.createObjectNode().put("primaryAction","凝视铁铃").put("microExpression","眉间收紧")
             .put("bodyLanguage","肩背微僵").put("gaze","视线锁定门环").put("gesture","右手稳握铃柄").put("actionUnits",1)
@@ -56,12 +57,16 @@ class DirectorContractTest {
                 .put("compositionStyle","利用门框形成遮挡").put("tensionStyle","逐步缩小信息范围")));
         ObjectNode beat=mapper.createObjectNode().put("beatId","beat-1").put("beatPurpose","察觉异常")
             .put("action","老人观察铁铃").put("conflict","想确认声音又不敢开门").put("emotionBefore","平静")
-            .put("emotionAfter","警觉").put("informationReveal","门外存在异常动静").put("importance","HIGH").put("suggestedDuration",6);
+            .put("emotionAfter","警觉").put("informationReveal","门外存在异常动静").put("setup","铁铃此前只会被熟人触碰").put("payoff","").put("eventType","REVEAL").put("reactionPriority","NONE").put("reactionSubjectId","").put("reactionReason","本节拍只有一名在场人物").put("importance","HIGH").put("suggestedDuration",6);
+        ObjectNode knowledge=beat.putObject("knowledgeChange");knowledge.putArray("audienceLearns").add("门外动静异常");knowledge.putArray("characterChanges");
         beat.putArray("activeCharacters").add("actor");beat.putArray("storyFactChanges");beat.putArray("relationshipChanges");output.putArray("dramaticBeats").add(beat);
         output.putObject("sceneState").put("locationId","yard").put("time","午夜").put("lighting","西侧月光").put("spatialRelations","院门在北侧，井在东侧");
         output.putArray("presenceLedger").add(mapper.createObjectNode().put("characterId","actor").put("presence","PRESENT").put("visibility","FOREGROUND").put("anchor","院门南侧一米"));
         shot.putArray("offscreenCharacterIds");shot.putArray("exitedCharacterIds");
-        output.putArray("shots").add(shot).add(shot.deepCopy().put("relationToPrevious","REACTION"));
+        ObjectNode reaction=shot.deepCopy().put("relationToPrevious","REACTION").put("directorIntent","SHOW_REACTION")
+            .put("purpose","老人压住恐惧确认门外异常").put("shotPurpose","让观众看到老人意识到门外并非熟人")
+            .put("action","老人停止摇铃并抬眼看向门缝").put("visualFocus","老人骤停的右手和抬起的视线");
+        output.putArray("shots").add(shot).add(reaction);
     }
     @AfterEach void close(){validatorFactory.close();}
     @Test void requestSchemaAndValidationUseTheSameRelationEnum() {
@@ -76,6 +81,17 @@ class DirectorContractTest {
         assertThat(root.has("directorPlan")).isTrue();
         assertThat(root.has("dramaticBeats")).isTrue();
         assertThat(shot.fieldNames()).toIterable().contains("beatId","directorIntent","subject","secondarySubjects","blocking","performancePlan","dialogueOwner");
+        assertThat(root.path("dramaticBeats").path("items").path("properties").fieldNames()).toIterable()
+            .contains("eventType","reactionPriority","reactionSubjectId","reactionReason");
+    }
+    @Test void characterActionStateIsAProviderNeutralStructuredContract(){
+        JsonNode actionState=contract.schema(input).path("properties").path("shots").path("items").path("properties")
+            .path("startState").path("properties").path("characters").path("properties").path("actor").path("properties").path("actionState");
+        assertThat(actionState.path("type").asText()).isEqualTo("object");
+        assertThat(actionState.path("required")).extracting(JsonNode::asText)
+            .containsExactlyInAnyOrder("action","progress","hand","object");
+        assertThat(actionState.path("properties").path("progress").path("minimum").asDouble()).isZero();
+        assertThat(actionState.path("properties").path("progress").path("maximum").asDouble()).isEqualTo(1);
     }
     @Test void formalContractCarriesPresencePerformanceAndTimingGuards(){
         JsonNode root=contract.schema(input).path("properties"),shotSchema=root.path("shots").path("items").path("properties");
@@ -84,7 +100,7 @@ class DirectorContractTest {
         assertThat(shotSchema.path("performancePlan").path("properties").fieldNames()).toIterable()
             .contains("detailLevel","microExpressionStage","performanceCues","facsUnits");
         input.putObject("episodeScript").put("script","周伯：别开门，他没有影子。");
-        ObjectNode line=mapper.createObjectNode().put("characterId","actor").put("displayText","别开门，他没有影子。")
+        ObjectNode line=mapper.createObjectNode().put("characterId","actor").put("semanticText","别开门，他没有影子。").put("subtitleText","别开门，他没有影子。")
             .put("sourceScript","周伯：别开门，他没有影子。").put("emotion","恐惧中克制").put("startMs",0).put("endMs",900);
         shot(0).withArray("dialogues").add(line);shot(0).put("dialogueOwner","actor");
         assertThatThrownBy(()->contract.validate(output,input,"timing-request")).hasMessageContaining("DIALOGUE_ESTIMATED_OVERRUN");
@@ -105,6 +121,13 @@ class DirectorContractTest {
         assertThat(full.path("items").path("required")).extracting(JsonNode::asText)
                 .containsExactlyInAnyOrder("subject","anchorObject","relation","facing","distance","side");
     }
+    @Test void blockingIrCarriesStructuredPropPositionsAndMovementVectors(){
+        JsonNode blocking=contract.planSchema(input).path("properties").path("shotSkeletons").path("items").path("properties").path("basicBlocking").path("properties");
+        assertThat(blocking.path("characters").path("items").path("properties").has("movementVector")).isTrue();
+        assertThat(blocking.path("props").path("type").asText()).isEqualTo("array");
+        assertThat(blocking.path("props").path("items").path("required")).extracting(JsonNode::asText)
+            .containsExactlyInAnyOrder("propId","worldPosition");
+    }
     @Test void directorContractRejectsWorldAnchorFlipAcrossAdjacentShots() {
         ((ObjectNode)shot(1).path("blocking").path("spatialAnchors").path(0)).put("relation","NORTH_OF").put("side","NORTH");
         assertThatThrownBy(()->contract.validate(output,input,"provider-spatial"))
@@ -122,17 +145,41 @@ class DirectorContractTest {
         input.with("scene").put("duration",24);input.putObject("directorStyleProfile").put("averageShotLength",2.6);
         JsonNode schema=contract.schema(input),root=schema.path("properties");
         assertThat(root.path("shots").path("minItems").asInt()).isEqualTo(8);
-        assertThat(root.path("shots").path("maxItems").asInt()).isEqualTo(12);
-        assertThat(root.path("dramaticBeats").path("maxItems").asInt()).isEqualTo(12);
+        assertThat(root.path("shots").path("maxItems").asInt()).isEqualTo(13);
+        assertThat(root.path("dramaticBeats").path("maxItems").asInt()).isEqualTo(13);
         assertThat(root.path("shots").path("items").path("properties").path("shotPurpose").path("maxLength").asInt()).isBetween(40,300);
         assertThat(root.path("shots").path("items").path("properties").path("cameraPlan").path("properties").path("position").path("maxLength").asInt()).isBetween(40,300);
+    }
+    @Test void twentyFourSecondSceneCanUseThreeEightSecondNarrativeShots(){
+        input.with("scene").put("duration",24);
+        input.putObject("directorStyleProfile").put("averageShotLength",8);
+        JsonNode planShots=contract.planSchema(input).path("properties").path("shotSkeletons");
+        JsonNode finalShots=contract.schema(input).path("properties").path("shots");
+        assertThat(planShots.path("minItems").asInt()).isLessThanOrEqualTo(3);
+        assertThat(planShots.path("maxItems").asInt()).isGreaterThanOrEqualTo(3);
+        assertThat(finalShots.path("minItems").asInt()).isLessThanOrEqualTo(3);
+        assertThat(finalShots.path("maxItems").asInt()).isGreaterThanOrEqualTo(3);
+        assertThat(planShots.path("items").path("properties").path("duration").path("maximum").asDouble()).isGreaterThanOrEqualTo(8);
+        assertThat(finalShots.path("items").path("properties").path("duration").path("maximum").asDouble()).isGreaterThanOrEqualTo(8);
+    }
+    @Test void editDurationKeepsTheAuthoredShotDurationBeyondProviderClipLimits(){
+        shot(0).put("duration",8);
+        ArrayNode materialized=contract.materialize(output,input);
+        assertThat(materialized.path(0).path("editDuration").asDouble()).isEqualTo(8);
+    }
+    @Test void planningNeverOffersMoreShotsThanTheEditorCanAssemble(){
+        input.putObject("directorStyleProfile").put("averageShotLength",1);
+        JsonNode shots=contract.planSchema(input).path("properties").path("shotSkeletons");
+        assertThat(shots.path("maxItems").asInt()).isLessThanOrEqualTo(4);
+        assertThat(shots.path("minItems").asInt()).isLessThanOrEqualTo(shots.path("maxItems").asInt());
+        assertThat(shots.path("items").path("properties").path("duration").path("minimum").asDouble()).isEqualTo(1.25);
     }
     @Test void stagedSchemasKeepRepeatedWorldStateOutOfEveryShot(){
         input.put("sceneTargetDurationSeconds",24);input.putObject("directorStyleProfile").put("averageShotLength",2.6);
         JsonNode plan=contract.planSchema(input),root=plan.path("properties"),skeleton=root.path("shotSkeletons").path("items").path("properties");
         assertThat(root.fieldNames()).toIterable().contains("directorPlan","dramaticBeats","sceneState","sceneInitialState","shotSkeletons");
         assertThat(root.path("shotSkeletons").path("minItems").asInt()).isEqualTo(8);
-        assertThat(root.path("shotSkeletons").path("maxItems").asInt()).isEqualTo(12);
+        assertThat(root.path("shotSkeletons").path("maxItems").asInt()).isEqualTo(13);
         assertThat(skeleton.fieldNames()).toIterable().doesNotContain("cameraPlan","performancePlan","startState","endState","referenceViews");
         Set<String> screenDirections=new LinkedHashSet<>();skeleton.path("basicBlocking").path("properties").path("characters").path("items").path("properties").path("screenDirection").path("enum").forEach(value->screenDirections.add(value.asText()));
         assertThat(screenDirections).containsExactlyInAnyOrder("FRAME_LEFT","FRAME_RIGHT","INTO_DEPTH","OUT_OF_DEPTH","STATIC");
@@ -166,9 +213,9 @@ class DirectorContractTest {
         JsonNode actor=contract.detailSchema(detailInput).path("properties").path("shots").path("items").path("properties")
             .path("blocking").path("properties").path("characters").path("items");
         assertThat(actor.path("properties").fieldNames()).toIterable()
-            .contains("visibleBodyPart","bodyFrameSide","limbEntrySide","contactPoint");
+            .contains("eyeLineTargetType","eyeLineTargetId","visibleBodyPart","bodyFrameSide","limbEntrySide","contactPoint");
         assertThat(actor.path("required")).extracting(JsonNode::asText)
-            .contains("visibleBodyPart","bodyFrameSide","limbEntrySide","contactPoint");
+            .contains("eyeLineTargetType","eyeLineTargetId","visibleBodyPart","bodyFrameSide","limbEntrySide","contactPoint");
     }
     @Test void stateDeltasAndBlockingStartValuesComeFromTheServerContinuityLedger(){
         ObjectNode skeleton=mapper.createObjectNode().put("shotIndex",1).put("purpose","老人走向水井").put("feltIntent","让观众注意老人正在接近危险来源").put("action","老人从门边走到水井旁")
@@ -181,9 +228,9 @@ class DirectorContractTest {
         ObjectNode detail=mapper.createObjectNode().put("shotIndex",1).put("visualFocus","老人移动的脚步").put("emotion","警觉").put("expression","眉间收紧").put("eyeLine","看向水井").put("focus","老人脚步").put("difficulty","B");
         for(String field:List.of("performancePlan","visibilityPlan"))detail.set(field,shot(0).path(field).deepCopy());
         ObjectNode selectedCamera=((ObjectNode)shot(0).path("cameraPlan")).deepCopy();selectedCamera.remove("lensMm");selectedCamera.put("lensPreset","LENS_50MM");detail.set("cameraPlan",selectedCamera);
-        detail.putArray("dialogues").add(mapper.createObjectNode().put("characterId","actor").put("displayText","门外有人。").put("emotion","压低声音警告").put("startMs",100).put("endMs",1800));
+        detail.putArray("dialogues").add(mapper.createObjectNode().put("characterId","actor").put("semanticText","门外有人。").put("subtitleText","门外有人。").put("emotion","压低声音警告").put("startMs",100).put("endMs",1800));
         ObjectNode selectedViews=detail.putObject("referenceViews");selectedViews.putArray("characterViews").add("FRONT");selectedViews.put("locationView","FRONT");selectedViews.putArray("propViews").add("SIDE");
-        ObjectNode framing=detail.putObject("blocking");framing.putArray("characters").addObject().put("characterId","actor").put("framePosition","画面左三分之一").put("eyeLineTarget","水井")
+        ObjectNode framing=detail.putObject("blocking");framing.putArray("characters").addObject().put("characterId","actor").put("framePosition","画面左三分之一").put("eyeLineTarget","水井").put("eyeLineTargetType","LOCATION_FEATURE").put("eyeLineTargetId","WELL")
             .put("visibleBodyPart","WHOLE_BODY").put("bodyFrameSide","IN_FRAME_LEFT").put("limbEntrySide","NONE").put("contactPoint","");
         detail.putArray("stateChanges").add(mapper.createObjectNode().put("path","characters.actor.position").put("to","水井旁").put("reason","本镜明确拍摄老人走到水井旁").put("atSeconds",2.2));
         ObjectNode details=mapper.createObjectNode();details.putArray("shots").add(detail);
@@ -302,6 +349,10 @@ class DirectorContractTest {
         ((ObjectNode)shot(1).path("blocking").path("characters").path(0)).put("screenDirection","INTO_DEPTH");
         assertThatCode(()->contract.validate(output,input,"p")).doesNotThrowAnyException();
     }
+    @Test void eyelineTargetMustResolveToADeclaredCharacterPropOrLocationFeature(){
+        ((ObjectNode)shot(0).path("blocking").path("characters").path(0)).put("eyeLineTarget","不存在的影子").put("eyeLineTargetType","CHARACTER").put("eyeLineTargetId","missing-character");
+        assertThatThrownBy(()->contract.validate(output,input,"p")).hasMessageContaining("eyeLineTarget");
+    }
     @Test void directorCannotInventStoryFactsOrRelationshipChanges(){
         ((ObjectNode)output.path("dramaticBeats").path(0)).withArray("storyFactChanges").add("fact-not-in-script");
         assertThatThrownBy(()->contract.validate(output,input,"p")).hasMessageContaining("storyFactChanges");
@@ -318,13 +369,14 @@ class DirectorContractTest {
         for(int i=0;i<2;i++){
             ObjectNode s=shot(i);s.withArray("characterIds").add("listener");s.withObject("referenceViews").put("listener-look","FRONT");
             ObjectNode listenerState=mapper.createObjectNode().put("identityId","listener").put("lookId","listener-look").put("position","供桌右侧")
-                .put("lookDirection","朝周伯").put("holding","").put("pose","站立").put("actionState","倾听");
+                .put("lookDirection","朝周伯").put("holding","").put("pose","站立");
+            listenerState.set("actionState",mapper.createObjectNode().put("action","LISTEN").put("progress",1).put("hand","NONE").put("object",""));
             s.withObject("startState").withObject("characters").set("listener",listenerState);s.withObject("endState").withObject("characters").set("listener",listenerState.deepCopy());
             s.withObject("blocking").withArray("characters").add(mapper.createObjectNode().put("characterId","listener").put("worldPosition","供桌右侧")
-                .put("facing","朝周伯").put("framePosition","画面右侧").put("screenDirection","FRAME_LEFT").put("eyeLineTarget","周伯")
+                .put("facing","朝周伯").put("movementVector","STATIC").put("framePosition","画面右侧").put("screenDirection","FRAME_LEFT").put("eyeLineTarget","周伯").put("eyeLineTargetType","CHARACTER").put("eyeLineTargetId","actor")
                 .put("visibleBodyPart","FACE").put("bodyFrameSide","IN_FRAME_RIGHT").put("limbEntrySide","NONE").put("contactPoint",""));
         }
-        ObjectNode line=mapper.createObjectNode().put("characterId","actor").put("displayText","门外的人不是老李。")
+        ObjectNode line=mapper.createObjectNode().put("characterId","actor").put("semanticText","门外的人不是老李。").put("subtitleText","门外的人不是老李。")
             .put("sourceScript","周伯：门外的人不是老李。").put("emotion","压低声音揭示线索").put("startMs",100).put("endMs",2800);
         shot(1).withArray("dialogues").add(line);shot(1).put("dialogueOwner","").put("subject","listener").put("directorIntent","SHOW_REACTION");
         assertThatThrownBy(()->contract.validate(output,input,"p")).hasMessageContaining("$.shots[1].dialogueOwner");
@@ -407,24 +459,24 @@ class DirectorContractTest {
         }
         assertThat(output).isEqualTo(raw);
     }
-    @Test void materializationAddsAutomaticEditDurationAndItsBasis(){
+    @Test void materializationKeepsAuthoredEditDurationWithoutInventingProviderDuration(){
         contract.validate(output,input,"p");ArrayNode saved=contract.materialize(output,input);
         assertThat(saved).allSatisfy(shot->{
-            assertThat(shot.path("editDuration").asDouble()).isBetween(1.25,shot.path("duration").asDouble());
-            assertThat(shot.path("providerDuration").asDouble()).isEqualTo(shot.path("duration").asDouble());
+            assertThat(shot.path("editDuration").asDouble()).isEqualTo(shot.path("duration").asDouble());
+            assertThat(shot.has("providerDuration")).isFalse();
             assertThat(shot.path("durationBasis").asText()).contains("intent=");
         });
     }
     @Test void dialogueMustComeFromApprovedScriptAndFitTheShot() {
         input.putObject("episodeScript").put("script","周伯压低声音：别开门，他没有影子。");
-        ObjectNode line=mapper.createObjectNode().put("characterId","actor").put("displayText","别开门，他没有影子。")
+        ObjectNode line=mapper.createObjectNode().put("characterId","actor").put("semanticText","别开门，他没有影子。").put("subtitleText","别开门，他没有影子。")
             .put("sourceScript","周伯压低声音：别开门，他没有影子。").put("emotion","压住恐惧提醒同伴").put("startMs",200).put("endMs",2900);
         shot(0).withArray("dialogues").add(line);
         shot(0).put("dialogueOwner","actor");
         assertThatCode(()->contract.validate(output,input,"p")).doesNotThrowAnyException();
-        line.put("displayText","大家跟我打僵尸！");
+        line.put("semanticText","大家跟我打僵尸！").put("subtitleText","大家跟我打僵尸！");
         assertThatThrownBy(()->contract.validate(output,input,"p")).hasMessageContaining("$.shots[0].dialogues[0].sourceScript");
-        line.put("displayText","别开门，他没有影子。").put("endMs",5000);
+        line.put("semanticText","别开门，他没有影子。").put("subtitleText","别开门，他没有影子。").put("endMs",5000);
         assertThatThrownBy(()->contract.validate(output,input,"p")).hasMessageContaining("$.shots[0].dialogues[0].startMs");
     }
     @Test void offscreenCharacterStateIsRetainedAndCheckedOnReentry() {

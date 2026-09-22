@@ -26,6 +26,13 @@ class VisualQualityProtocolTest {
     @Test void acceptsTheCompleteStrictContract(){
         assertThatCode(()->new VisualQualityProtocol().validate(valid(),expected())).doesNotThrowAnyException();
     }
+    @Test void everyQualityDimensionRequiresObservableEvidence(){
+        var properties=(java.util.Map<?,?>)new VisualQualityProtocol().schema().get("properties");
+        var metric=(java.util.Map<?,?>)properties.get("propConsistency");
+        assertThat(((java.util.List<?>)metric.get("required")).stream().map(Object::toString)).contains("evidence");
+        ObjectNode result=valid();result.withObject("propConsistency").put("evidence","");
+        assertThatThrownBy(()->new VisualQualityProtocol().validate(result,expected())).hasMessageContaining("propConsistency.evidence");
+    }
     @Test void requiresAttributionForDirectorComplianceFailures(){
         ObjectNode result=valid();result.remove("failureOriginHint");
         assertThatThrownBy(()->new VisualQualityProtocol().validate(result,expected())).hasMessageContaining("failureOriginHint");
@@ -114,5 +121,5 @@ class VisualQualityProtocolTest {
         result.putArray("failureCodes");result.put("overallScore",96).put("overallConfidence",.96).put("decision","PASS").put("failureOriginHint","UNKNOWN").put("reason","全部约束符合");
         return result;
     }
-    private ObjectNode metric(boolean pass,double score,double confidence,String reason){return mapper.createObjectNode().put("score",score).put("pass",pass).put("confidence",confidence).put("reason",reason);}
+    private ObjectNode metric(boolean pass,double score,double confidence,String reason){return mapper.createObjectNode().put("score",score).put("pass",pass).put("confidence",confidence).put("reason",reason).put("evidence",reason);}
 }

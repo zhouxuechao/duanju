@@ -9,11 +9,13 @@ public enum ResourceKind {
     STORY_BIBLE("story_bible", "story-bibles", null, null),
     STORY_DOCUMENT("story_document", "story-documents", null, null),
     STORY_FACT("story_fact", "story-facts", null, null),
+    STORY_FACT_MUTATION("story_fact_mutation", "story-fact-mutations", STORY_FACT, "factId"),
     CHARACTER_KNOWLEDGE("character_knowledge", "character-knowledge", null, null),
     ENTITY_ALIAS("entity_alias", "entity-aliases", null, null),
     RELATIONSHIP("relationship", "relationships", null, null),
     EPISODE("episode", "episodes", null, null),
     SCENE("scene", "scenes", EPISODE, "episodeId"),
+    BEAT("beat", "beats", SCENE, "sceneId"),
     SHOT("shot", "shots", SCENE, "sceneId"),
     CHARACTER("character", "characters", null, null),
     CHARACTER_STATE("character_state", "character-states", CHARACTER, "characterId"),
@@ -59,7 +61,7 @@ public enum ResourceKind {
     public String path() { return path; }
     public ResourceKind parentKind() { return parent; }
     public String parentField() { return parentField; }
-    public boolean immutable() { return this == PROMPT_VERSION || this == COST_RECORD || this == PRICE_SNAPSHOT || this == HUMAN_EDIT_FEEDBACK || this == QC_RESULT; }
+    public boolean immutable() { return this == STORY_FACT_MUTATION || this == PROMPT_VERSION || this == COST_RECORD || this == PRICE_SNAPSHOT || this == HUMAN_EDIT_FEEDBACK || this == QC_RESULT; }
     public static ResourceKind fromPath(String value) {
         String normalized = value.toLowerCase(Locale.ROOT).replace('_', '-');
         return Arrays.stream(values()).filter(k -> k.path.equals(normalized)

@@ -6,18 +6,21 @@
 
 ## 输入
 
-- `displayText`
+- `semanticText`
+- `subtitleText`
 - `knowledgeBase`
 
 ## 输出
 
-- `dialectText`
-- `speechText`
+- `spokenText`
+- `semanticText`（原样保留）
+- `subtitleText`（原样保留）
 - `confidence`
 
 ## 硬规则
 
 - 知识库无可靠匹配时必须请求人工修正，不得臆造方言
+- 不得修改 semanticText 或 subtitleText；方言转换只能写入 spokenText
 - 每次运行记录 projectId、projectVersion、输入版本和产出版本，旧产出不得覆盖。
 
 ## 失败处理

@@ -29,6 +29,6 @@ class VisualQualityPolicyTest {
 
     private ObjectNode expected(){return mapper.createObjectNode();}
     private ObjectNode result(boolean pass,double confidence){ObjectNode r=mapper.createObjectNode();for(String name:VisualQualityProtocol.METRICS)r.set(name,metric(pass,pass?95:40,confidence));r.put("overallScore",pass?95:40).put("overallConfidence",confidence).put("decision",pass?"PASS":"REGENERATE");r.putArray("failureCodes");return r;}
-    private ObjectNode metric(boolean pass,double score,double confidence){return mapper.createObjectNode().put("pass",pass).put("score",score).put("confidence",confidence).put("reason",pass?"符合":"不符合");}
+    private ObjectNode metric(boolean pass,double score,double confidence){String reason=pass?"画面要素与结构化预期逐项一致":"画面要素与结构化预期不一致";return mapper.createObjectNode().put("pass",pass).put("score",score).put("confidence",confidence).put("reason",reason).put("evidence",reason);}
     private void fail(ObjectNode result,String metric,double confidence,String code){result.set(metric,metric(false,35,confidence));result.put("decision","REGENERATE").put("overallScore",60).put("overallConfidence",confidence);result.withArray("failureCodes").add(code);}
 }

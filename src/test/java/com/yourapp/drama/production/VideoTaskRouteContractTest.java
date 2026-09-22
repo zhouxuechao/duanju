@@ -32,6 +32,28 @@ class VideoTaskRouteContractTest {
         assertThatThrownBy(()->resolver.resolve(VideoTaskType.FIRST_FRAME_GENERATE,ProviderTaskLockMode.UNLOCKED,profile,mapper.createArrayNode(),mapper.createObjectNode(),mapper.createArrayNode())).hasMessageContaining("VIDEO_TASK_LOCK_MODE_MISMATCH");
         assertThatThrownBy(()->resolver.resolve(VideoTaskType.VIDEO_EDIT,ProviderTaskLockMode.LOCKED,profile,mapper.createArrayNode(),mapper.createObjectNode(),mapper.createArrayNode())).hasMessageContaining("VIDEO_TASK_NOT_IMPLEMENTED");
     }
+    @Test void continuousReferenceRouteRequiresUsablePreviousVideoMedia() {
+        var previous=mapper.createObjectNode().put("selected",true).put("locked",true).put("qcStatus","PASSED");
+        assertThatThrownBy(()->resolver.resolve(VideoTaskType.REFERENCE_GENERATE,ProviderTaskLockMode.UNLOCKED,profile,
+            mapper.createArrayNode(),previous,mapper.createArrayNode()))
+            .hasMessageContaining("PREVIOUS_VIDEO_REQUIRED");
+    }
+    @Test void unrelatedVideoReferenceCannotReplaceTheSelectedPreviousTake(){
+        var previous=mapper.createObjectNode().put("selected",true).put("locked",true).put("qcStatus","PASSED")
+            .put("videoUrl","https://media.example.com/selected-previous.mp4");
+        var bindings=mapper.createArrayNode().add(mapper.createObjectNode().put("mediaType","video_url")
+            .put("url","https://media.example.com/unrelated-motion.mp4"));
+        var route=resolver.resolve(VideoTaskType.REFERENCE_GENERATE,ProviderTaskLockMode.UNLOCKED,profile,
+            mapper.createArrayNode(),previous,bindings);
+        assertThat(route.references()).extracting(r->r.url()).contains("https://media.example.com/selected-previous.mp4");
+    }
+    @Test void arbitraryVideoBindingDoesNotMakeAnEmptyPreviousTakeUsable(){
+        var previous=mapper.createObjectNode().put("selected",true).put("locked",true).put("qcStatus","PASSED");
+        var bindings=mapper.createArrayNode().add(mapper.createObjectNode().put("mediaType","video_url")
+            .put("url","https://media.example.com/unrelated-motion.mp4"));
+        assertThatThrownBy(()->resolver.resolve(VideoTaskType.REFERENCE_GENERATE,ProviderTaskLockMode.UNLOCKED,profile,
+            mapper.createArrayNode(),previous,bindings)).hasMessageContaining("PREVIOUS_VIDEO_REQUIRED");
+    }
 
     private com.fasterxml.jackson.databind.node.ObjectNode frame(String role,String name){return mapper.createObjectNode().put("semanticRole",role).put("providerUrl","https://media.example.com/"+name);}
 }

@@ -8,6 +8,7 @@ import static com.yourapp.drama.workflow.Documents.*;
 
 @Service
 public class QualityDiagnosisService {
+    private static final List<String> REPAIR_DIMENSIONS=List.of("FACE","IDENTITY","COSTUME","PROP","ACTION","BLOCKING","CAMERA","BACKGROUND","LIGHTING","LIP_SYNC","STYLE","CONTINUITY");
     public ObjectNode diagnose(JsonNode review){
         String reason=review.path("failureReason").asText(review.path("notes").asText(""));
         String normalized=reason.toLowerCase(Locale.ROOT);LinkedHashSet<String> codes=new LinkedHashSet<>();review.path("failureCodes").forEach(code->codes.add(code.asText()));boolean explicit=!codes.isEmpty();
@@ -34,8 +35,28 @@ public class QualityDiagnosisService {
         String repair=repair(origin,codes);
         ObjectNode diagnosis=obj().put("failureOrigin",origin).put("failureReason",reason).put("failureCodesSource",explicit?"EXPLICIT":"INFERRED")
             .put("recommendedRepair",review.path("recommendedRepair").asText(repair));
-        ArrayNode failures=diagnosis.putArray("failureCodes");codes.forEach(failures::add);return diagnosis;
+        ArrayNode failures=diagnosis.putArray("failureCodes");codes.forEach(failures::add);diagnosis.set("repairPlan",repairPlan(codes,text(diagnosis,"recommendedRepair")));return diagnosis;
     }
+
+    private ObjectNode repairPlan(Set<String> codes,String repair){
+        LinkedHashSet<String> changed=new LinkedHashSet<>(),sections=new LinkedHashSet<>();for(String code:codes){changed.add(dimension(code));sections.add(promptSection(code));}
+        ObjectNode plan=obj().put("scope",scope(repair));ArrayNode repairDimensions=plan.putArray("repairDimensions");changed.forEach(repairDimensions::add);ArrayNode preserve=plan.putArray("preserveDimensions");REPAIR_DIMENSIONS.stream().filter(value->!changed.contains(value)).forEach(preserve::add);ArrayNode promptSections=plan.putArray("changedPromptSections");sections.forEach(promptSections::add);return plan;
+    }
+    static String promptSection(String issue){
+        String value=issue.toUpperCase(Locale.ROOT);
+        if(value.contains("IDENTITY")||value.contains("CHARACTER_COUNT")||value.contains("AGE")||value.contains("HAIR")||value.contains("CLOTHING")||value.contains("LOCATION"))return "HIGH-RISK CONTINUITY LOCKS";
+        if(value.contains("PROP")||value.contains("HAND"))return "PHYSICS / INTERACTION";
+        if(value.contains("MOTION")||value.contains("ACTION"))return "TIMED BEATS";
+        if(value.contains("CAMERA")||value.contains("COMPOSITION"))return "CAMERA / MOTION PHASE";
+        if(value.contains("EXPRESSION")||value.contains("AFFECT"))return "SHOT INTENT / CARRIERS";
+        if(value.contains("POSITION")||value.contains("STATE")||value.contains("CONTINUITY"))return "ACTUAL OPENING STATE";
+        if(value.contains("REFERENCE"))return "REFERENCE AUTHORITY";
+        if(value.contains("TEXT")||value.contains("WATERMARK"))return "OUTPUT CONSTRAINTS";
+        if(value.contains("STYLE")||value.contains("LIGHT"))return "DYNAMIC AVOID";
+        return "CURRENT ACTION / ENDPOINT";
+    }
+    private String dimension(String code){return switch(code){case "IDENTITY_MISMATCH","AGE_MISMATCH","HAIR_MISMATCH","CHARACTER_COUNT_ERROR"->"IDENTITY";case "CLOTHING_MISMATCH"->"COSTUME";case "PROP_MISMATCH"->"PROP";case "ACTION_MISMATCH","EXPRESSION_MISMATCH"->"ACTION";case "POSITION_MISMATCH","COMPOSITION_ERROR"->"BLOCKING";case "CAMERA_MISMATCH"->"CAMERA";case "LOCATION_MISMATCH"->"BACKGROUND";case "STYLE_MISMATCH"->"STYLE";case "CONTINUITY_MISMATCH"->"CONTINUITY";default->"CONTINUITY";};}
+    private String scope(String repair){return switch(repair){case "REPLAN_SCENE"->"SCENE";case "REPLAN_SHOT"->"SHOT";case "UPDATE_LOCATION_STATE","UPDATE_PROP_STATE","UPDATE_CHARACTER_STATE","REBUILD_PROMPT","RESELECT_REFERENCE"->"CONTEXT";case "MANUAL_FIX"->"MANUAL";default->"TAKE";};}
 
     private String repair(String origin,Set<String> codes){
         if("REFERENCE_SELECTION".equals(origin))return "RESELECT_REFERENCE";

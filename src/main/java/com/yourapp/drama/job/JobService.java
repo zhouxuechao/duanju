@@ -26,16 +26,16 @@ public class JobService {
         ObjectNode job=store.transaction(()->{
             ObjectNode projectDocument=store.getForUpdate(PROJECT,projectId);
             if(requestKey!=null&&!requestKey.isBlank())for(ObjectNode old:store.list(GENERATION_JOB,projectId,null))if(requestKey.equals(text(old,"requestKey"))){
-                if(!type.equals(text(old,"type"))||!Objects.equals(shotId,old.hasNonNull("shotId")?text(old,"shotId"):null))throw new WorkflowException("IDEMPOTENCY_CONFLICT","此请求标识已用于其他操作");
+                if(!type.equals(text(old,"type"))||!Objects.equals(shotId,old.hasNonNull("shotId")?text(old,"shotId"):null)||!old.path("inputSnapshot").equals(input))throw new WorkflowException("IDEMPOTENCY_CONFLICT","此请求标识已用于不同操作或输入");
                 return old;
             }
             enforceBudget(projectDocument,shotId,type,input);
             boolean reserved=testBudget.reserve(type,input);
-            ObjectNode next=obj().put("projectId",projectId).put("type",type).put("status","QUEUED").put("progress",0)
-                .put("attempts",0).put("maxAttempts",3).put("cost",0).put("costKnown",false).put("requestKey",requestKey==null?UUID.randomUUID().toString():requestKey);
+            String localTaskId=UUID.randomUUID().toString();ObjectNode next=obj().put("id",localTaskId).put("localTaskId",localTaskId).put("projectId",projectId).put("type",type).put("status","QUEUED").put("phase","QUEUED").put("progress",0)
+                .put("attempts",0).put("retryCount",0).put("maxAttempts",3).put("cost",0).put("costKnown",false).put("requestKey",requestKey==null?UUID.randomUUID().toString():requestKey);
             if(reserved)next.put("testBudgetReserved",true).put("testBudgetReservationStatus","RESERVED");
             if(shotId!=null)next.put("shotId",shotId);
-            ObjectNode routingDecision=routing.decide(type,input.path("complexity").asText("MEDIUM"),input.path("qualityTier").asText("BALANCED"));next.set("routingDecision",routingDecision);next.put("plannedModel",routingDecision.path("plannedModel").asText()).put("qualityTier",routingDecision.path("qualityTier").asText());
+            ObjectNode routingDecision=routing.decide(type,input.path("complexity").asText("MEDIUM"),input.path("qualityTier").asText("BALANCED"));next.set("routingDecision",routingDecision);next.put("provider",routingDecision.path("chosenProvider").asText()).put("model",routingDecision.path("chosenModel").asText()).put("plannedModel",routingDecision.path("plannedModel").asText()).put("qualityTier",routingDecision.path("qualityTier").asText());
             for(String field:List.of("compilerVersion","sequenceCompilerVersion","normalizedPromptHash","referenceBindingsHash","referenceAuthorityFingerprint","continuitySnapshotHash","sequenceStateFingerprint","providerCapabilitiesVersion","sequenceStrategy","sequenceRelation","parentTakeId","continuationDepth","reanchorReason"))if(input.has(field))next.set(field,input.path(field).deepCopy());
             next.set("inputSnapshot",input.deepCopy()); next.set("outputSnapshot",obj());
             next.putArray("statusHistory").add(obj().put("to","QUEUED").put("at",java.time.Instant.now().toString()));
@@ -62,7 +62,7 @@ public class JobService {
             ObjectNode result=store.transaction(()->{
                 ObjectNode current=store.getForUpdate(GENERATION_JOB,id(candidate));
                 if(!Set.of("QUEUED","RETRY_WAIT").contains(text(current,"status")))return null;
-                ObjectNode next=current.deepCopy().put("status","RUNNING").put("startedAt",Instant.now().toString()).put("attempts",current.path("attempts").asInt()+1).put("progress",5);
+                int attempts=current.path("attempts").asInt();ObjectNode next=current.deepCopy().put("status","RUNNING").put("phase","EXECUTING").put("startedAt",Instant.now().toString()).put("attempts",attempts+1).put("retryCount",Math.max(0,attempts)).put("progress",5);
                 recordTransition(current,next);
                 next.remove("failureReason");return store.update(GENERATION_JOB,id(current),revision(current),next);
             });
@@ -72,16 +72,21 @@ public class JobService {
     }
     public ObjectNode succeed(String id,JsonNode output){ObjectNode saved=mutate(id,j->{
         if(text(j,"status").equals("CANCELLED"))return;
-        j.put("status","SUCCESS").put("progress",100).put("completedAt",Instant.now().toString());j.set("outputSnapshot",output.deepCopy());
+        j.put("status","SUCCESS").put("phase","COMPLETED").put("progress",100).put("completedAt",Instant.now().toString()).put("elapsedMs",elapsedMs(j));j.set("outputSnapshot",output.deepCopy());
     });settleReservation(saved,false);recordTerminalCost(saved);return store.get(GENERATION_JOB,id);}
     public ObjectNode fail(String id,String code,String reason,boolean retryable,boolean uncertain){ObjectNode saved=mutate(id,j->{
         if(Set.of("CANCELLED","SUCCESS").contains(text(j,"status")))return;
         boolean unresolved=uncertain||j.path("submissionUncertain").asBoolean();
         boolean retry=retryable&&!unresolved&&!j.path("cancelRequested").asBoolean()&&j.path("attempts").asInt()<j.path("maxAttempts").asInt(3);
-        j.put("status",retry?"RETRY_WAIT":"FAILED").put("failureCode",code).put("failureReason",reason)
+        j.put("status",retry?"RETRY_WAIT":"FAILED").put("phase",retry?"WAITING_RETRY":"FAILED").put("failureCode",code).put("failureReason",reason).put("elapsedMs",elapsedMs(j))
             .put("submissionUncertain",unresolved).put("retryable",retryable&&!unresolved);
         if(retry)j.put("retryAt",Instant.now().plusSeconds(5L*(1L<<Math.min(j.path("attempts").asInt(),5))).toString());
     });if("FAILED".equals(text(saved,"status")))settleFailedReservation(saved);recordTerminalCost(saved);return store.get(GENERATION_JOB,id);}
+    public ObjectNode unknown(String id,String code,String reason){return mutate(id,j->{
+        if(Set.of("SUCCESS","CANCELLED").contains(text(j,"status")))return;
+        j.put("status","UNKNOWN").put("phase","RECONCILIATION").put("failureCode",code).put("failureReason",reason).put("elapsedMs",elapsedMs(j))
+            .put("retryable",false).put("submissionUncertain",false).put("reconciliationRequired",true);
+    });}
     public ObjectNode retry(String id){return store.transaction(()->{
         ObjectNode j=store.getForUpdate(GENERATION_JOB,id);
         if(!Set.of("FAILED","CANCELLED").contains(text(j,"status")))throw new WorkflowException("NOT_RETRYABLE","仅失败或取消的任务可以重试");
@@ -96,9 +101,11 @@ public class JobService {
     public ObjectNode reconcile(String id,ObjectNode request){
         ObjectNode saved=store.transaction(()->{
             ObjectNode old=store.getForUpdate(GENERATION_JOB,id);
-            if(!"FAILED".equals(text(old,"status"))||!old.path("submissionUncertain").asBoolean())throw new WorkflowException("RECONCILIATION_NOT_REQUIRED","只有提交状态不确定的失败任务需要对账");
+            boolean unknown="UNKNOWN".equals(text(old,"status"))&&old.path("reconciliationRequired").asBoolean();
+            if(!unknown&&(!"FAILED".equals(text(old,"status"))||!old.path("submissionUncertain").asBoolean()))throw new WorkflowException("RECONCILIATION_NOT_REQUIRED","只有提交状态不确定或服务商状态未知的任务需要对账");
             String decision=required(request,"decision").toUpperCase(Locale.ROOT),evidence=required(request,"evidence"),reviewer=required(request,"reviewer");
             if(!Set.of("CONFIRMED_SUBMITTED","CONFIRMED_NOT_SUBMITTED","UNRESOLVED").contains(decision))throw new WorkflowException("RECONCILIATION_DECISION_INVALID","对账结论无效");
+            if(unknown&&"CONFIRMED_NOT_SUBMITTED".equals(decision))throw new WorkflowException("RECONCILIATION_DECISION_INVALID","任务已有服务商任务号，不能标记为未提交");
             ObjectNode next=old.deepCopy().put("reconciliationStatus",decision).put("reconciledAt",Instant.now().toString());
             next.withArray("reconciliationHistory").add(obj().put("decision",decision).put("evidence",evidence).put("reviewer",reviewer).put("at",Instant.now().toString()));
             if("CONFIRMED_SUBMITTED".equals(decision)){
@@ -106,7 +113,7 @@ public class JobService {
                 String taskId=text(request,"providerTaskId");if(taskId.isBlank())taskId=text(old,"providerTaskId");
                 if(taskId.isBlank())throw new WorkflowException("PROVIDER_TASK_ID_REQUIRED","确认服务商已接单时必须填写服务商任务号");
                 String takeId=ensureRecoveredTake(old,request,taskId);
-                next.put("providerTaskId",taskId).put("status","RUNNING").put("progress",20).put("submissionUncertain",false).put("retryable",false).put("reconciliationRequired",false).put("resumedAt",Instant.now().toString());
+                next.put("providerTaskId",taskId).put("status","RUNNING").put("phase","PROVIDER_POLLING").put("progress",20).put("submissionUncertain",false).put("retryable",false).put("reconciliationRequired",false).put("resumedAt",Instant.now().toString());
                 next.set("outputSnapshot",obj().put("takeId",takeId));next.remove(List.of("failureReason","retryAt"));
             }else if("CONFIRMED_NOT_SUBMITTED".equals(decision)){
                 next.put("submissionUncertain",false).put("retryable",true).put("reconciliationRequired",false);
@@ -144,16 +151,20 @@ public class JobService {
     public ObjectNode cancel(String id){ObjectNode saved=mutate(id,j->{
         if(Set.of("SUCCESS","FAILED","CANCELLED").contains(text(j,"status")))return;
         j.put("cancelRequested",true);
-        if(!text(j,"status").equals("RUNNING"))j.put("status","CANCELLED");
+        if(!text(j,"status").equals("RUNNING"))j.put("status","CANCELLED").put("phase","CANCELLED").put("completedAt",Instant.now().toString()).put("elapsedMs",elapsedMs(j));
     });if("CANCELLED".equals(text(saved,"status"))&&text(saved,"providerRequestId").isBlank()&&text(saved,"providerTaskId").isBlank())releaseReservation(saved,"CANCELLED_BEFORE_SUBMIT");return store.get(GENERATION_JOB,id);}
+    public ObjectNode cancelled(String id){return mutate(id,j->j.put("status","CANCELLED").put("phase","CANCELLED").put("completedAt",Instant.now().toString()).put("elapsedMs",elapsedMs(j)));}
     private void recordTransition(ObjectNode old,ObjectNode next){
         String from=text(old,"status"),to=text(next,"status");if(from.equals(to))return;
         List<String> path;
         if(from.equals("RUNNING")&&to.equals("RETRY_WAIT"))path=List.of("FAILED","RETRY_WAIT");
         else if(from.equals("RETRY_WAIT")&&to.equals("RUNNING"))path=List.of("QUEUED","RUNNING");
-        else if(from.equals("FAILED")&&to.equals("RUNNING")&&"CONFIRMED_SUBMITTED".equals(text(next,"reconciliationStatus")))path=List.of("RUNNING");
+        else if(Set.of("FAILED","UNKNOWN","WAITING_HUMAN").contains(from)&&to.equals("RUNNING")&&"CONFIRMED_SUBMITTED".equals(text(next,"reconciliationStatus")))path=List.of("RUNNING");
         else if((from.equals("QUEUED")&&Set.of("RUNNING","CANCELLED").contains(to)) ||
                 (from.equals("RUNNING")&&Set.of("SUCCESS","FAILED","CANCELLED").contains(to)) ||
+                (from.equals("RUNNING")&&Set.of("UNKNOWN","WAITING_HUMAN").contains(to)) ||
+                (from.equals("UNKNOWN")&&Set.of("WAITING_HUMAN","CANCELLED").contains(to)) ||
+                (from.equals("WAITING_HUMAN")&&Set.of("FAILED","CANCELLED").contains(to)) ||
                 (from.equals("RETRY_WAIT")&&to.equals("CANCELLED")))path=List.of(to);
         else throw new WorkflowException("ILLEGAL_JOB_TRANSITION","任务状态不能从 "+from+" 改为 "+to);
         String previous=from;for(String status:path){next.withArray("statusHistory").add(obj().put("from",previous).put("to",status).put("at",Instant.now().toString()));previous=status;}
@@ -173,4 +184,5 @@ public class JobService {
     }
     private boolean reservationOpen(ObjectNode job){return job.path("testBudgetReserved").asBoolean()&&"RESERVED".equals(text(job,"testBudgetReservationStatus"));}
     private void recordTerminalCost(ObjectNode job){if(!Set.of("SUCCESS","FAILED","CANCELLED").contains(text(job,"status")))return;store.transaction(()->{for(ObjectNode record:store.list(COST_RECORD,project(job),null))if(id(job).equals(text(record,"generationJobId")))return null;ObjectNode priceSnapshot=store.list(PRICE_SNAPSHOT,project(job),null).stream().max(Comparator.comparingInt(value->value.path("version").asInt())).orElseGet(()->store.create(PRICE_SNAPSHOT,obj().put("projectId",project(job)).put("version",1).put("currency","CNY").put("status","UNPRICED").put("source","LOCAL_CONFIG").set("prices",obj())));JsonNode usage=job.path("providerUsage");double amount=job.path("cost").asDouble(0);boolean known=job.path("costKnown").asBoolean(false),wasted=!"SUCCESS".equals(text(job,"status"));ObjectNode record=obj().put("projectId",project(job)).put("generationJobId",id(job)).put("taskId",id(job)).put("taskType",text(job,"type")).put("provider",job.path("provider").asText("UNKNOWN")).put("model",job.path("model").asText("UNKNOWN")).put("inputTokens",usage.path("promptTokens").asLong(usage.path("inputTokens").asLong(0))).put("outputTokens",usage.path("completionTokens").asLong(usage.path("outputTokens").asLong(0))).put("totalTokens",usage.path("totalTokens").asLong(0)).put("estimatedCost",amount).put("currency",job.path("currency").asText("CNY")).put("billingStatus",job.path("submissionUncertain").asBoolean()?"POSSIBLY_BILLED":known?"ACTUAL":"ESTIMATED").put("selectedResult",false).put("wastedCost",wasted?amount:0).put("priceSnapshotId",id(priceSnapshot)).put("terminalStatus",text(job,"status"));if(known)record.put("actualCost",amount);if(job.hasNonNull("shotId"))record.put("shotId",text(job,"shotId"));JsonNode input=job.path("inputSnapshot");for(String field:List.of("episodeId","sceneId","episodeNo"))if(input.hasNonNull(field))record.set(field,input.path(field));for(String field:List.of("providerRequestId","providerTaskId"))if(job.hasNonNull(field))record.set(field,job.path(field));store.create(COST_RECORD,record);return null;});}
+    private long elapsedMs(JsonNode job){String stamp=text(job,"startedAt");if(stamp.isBlank())stamp=text(job,"createdAt");if(stamp.isBlank())return 0;try{return Math.max(0,java.time.Duration.between(Instant.parse(stamp),Instant.now()).toMillis());}catch(RuntimeException ignored){return 0;}}
 }

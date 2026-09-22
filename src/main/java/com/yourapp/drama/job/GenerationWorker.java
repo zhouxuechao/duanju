@@ -57,7 +57,7 @@ public class GenerationWorker {
     }
     public void process(ObjectNode job){
         try{
-            if(store.get(GENERATION_JOB,id(job)).path("cancelRequested").asBoolean()){jobs.mutate(id(job),j->j.put("status","CANCELLED"));return;}
+            if(store.get(GENERATION_JOB,id(job)).path("cancelRequested").asBoolean()){jobs.cancelled(id(job));return;}
             creative.checkProductionInput(job);
             if(Set.of("DIRECTOR_PLAN","SHOT_DETAIL","KEYFRAME","STORYBOARD","VIDEO").contains(text(job,"type")))workflow.checkReferenceSnapshot(job.path("inputSnapshot"));
             switch(text(job,"type")){
@@ -91,7 +91,7 @@ public class GenerationWorker {
             if(result.expiresAt()!=null)asset.put("providerUrlExpiresAt",result.expiresAt().toString());
             if(result.simulated())asset.put("previewUrl","/demo/keyframe.png");
             JsonNode plannedShot=input.path("context").path("shot");for(String field:List.of("directorPlanVersion","dramaticBeatVersion","shotPlanVersion"))if(plannedShot.has(field))asset.set(field,plannedShot.path(field).deepCopy());
-            for(String field:List.of("semanticRole","providerFrameMode","timeSec","stateVersion"))if(input.has(field))asset.set(field,input.path(field).deepCopy());
+            for(String field:List.of("semanticRole","providerFrameMode","timeSec","stateVersion","mediaPurpose"))if(input.has(field))asset.set(field,input.path(field).deepCopy());
             if(input.has("assetDependencyLevel"))asset.set("assetDependencyLevel",input.path("assetDependencyLevel").deepCopy());
             for(String field:List.of("sequenceCompilerVersion","normalizedPromptHash","referenceBindingsHash","referenceAuthorityFingerprint","continuitySnapshotHash","sequenceStateFingerprint","providerCapabilitiesVersion"))if(input.has(field))asset.set(field,input.path(field).deepCopy());
             asset.set("assetViewIds",input.path("assetViewIds").deepCopy());asset.set("assetReferences",input.path("assetReferences").deepCopy());
@@ -126,8 +126,8 @@ public class GenerationWorker {
         // The exact String returned by Seedream is the first frame. No storage call occurs on this path.
         List<VideoGenerator.Reference> references=new ArrayList<>();for(JsonNode ref:input.path("references"))references.add(new VideoGenerator.Reference(required(ref,"type"),required(ref,"url"),required(ref,"role")));
         VideoGenerator.Submission submission=videos.submit(new VideoGenerator.VideoRequest(required(input,"prompt"),lipsync||url.isBlank()?null:url,references,map(input.path("providerOptions"))));
-        jobs.mutate(id(job),j->j.put("providerTaskId",submission.taskId()).put("providerRequestId",submission.requestId()).put("providerAcceptedAt",Instant.now().toString()).put("simulated",submission.simulated()));
         try{
+            jobs.mutate(id(job),j->j.put("providerTaskId",submission.taskId()).put("providerRequestId",submission.requestId()).put("providerAcceptedAt",Instant.now().toString()).put("phase","PROVIDER_POLLING").put("simulated",submission.simulated()));
             store.transaction(()->{
                 ObjectNode take=obj().put("projectId",project(job)).put("shotId",required(job,"shotId")).put("takeNo",input.path("takeNo").asInt(1))
                     .put("provider","VOLCENGINE").put("sourceKeyframeId",id(frame)).put("sourceProviderUrlSnapshot",required(frame,"providerUrl"))
@@ -172,7 +172,7 @@ public class GenerationWorker {
                 });
             }else{
                 store.update(VIDEO_TAKE,takeId,revision(take),take.deepCopy().put("providerStatus",result.status().name()));
-                if(result.status()==VideoGenerator.Status.CANCELLED)jobs.mutate(id(job),j->j.put("status","CANCELLED"));
+                if(result.status()==VideoGenerator.Status.CANCELLED)jobs.cancelled(id(job));
                 else jobs.fail(id(job),result.errorCode()==null?"VIDEO_FAILED":result.errorCode(),result.errorMessage()==null?"视频生成失败，可局部重拍":redact(result.errorMessage()),false,false);
                 ObjectNode shot=store.get(SHOT,required(job,"shotId"));workflow.setShot(shot,"NEEDS_REPAIR");
             }
@@ -190,9 +190,8 @@ public class GenerationWorker {
         if(!terminal){jobs.mutate(id(job),j->j.put("pollErrorCount",count).put("lastPollError",message).put("lastPollAt",Instant.now().toString()).put("nextPollAt",Instant.now().plusSeconds(Math.min(30,1L<<count)).toString()));return;}
         String takeId=text(job.path("outputSnapshot"),"takeId");
         if(!takeId.isBlank()){ObjectNode take=store.get(VIDEO_TAKE,takeId);store.update(VIDEO_TAKE,takeId,revision(take),take.deepCopy().put("providerStatus","RECONCILIATION_REQUIRED"));}
-        jobs.fail(id(job),error.code(),message,false,false);
-        jobs.mutate(id(job),j->j.put("pollErrorCount",count).put("lastPollError",message).put("lastPollAt",Instant.now().toString()).put("reconciliationRequired",true));
-        if(job.hasNonNull("shotId")){ObjectNode shot=store.get(SHOT,required(job,"shotId"));workflow.setShot(shot,"NEEDS_REPAIR");}
+        jobs.unknown(id(job),error.code(),message);
+        jobs.mutate(id(job),j->j.put("pollErrorCount",count).put("lastPollError",message).put("lastPollAt",Instant.now().toString()));
     }
     private void archive(ObjectNode job){
         JsonNode input=job.path("inputSnapshot");ResourceKind kind=ResourceKind.fromPath(required(input,"targetKind"));String targetId=required(input,"targetId");ObjectNode target=store.get(kind,targetId);

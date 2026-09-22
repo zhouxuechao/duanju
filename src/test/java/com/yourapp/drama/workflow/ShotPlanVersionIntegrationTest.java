@@ -21,6 +21,7 @@ import static org.assertj.core.api.Assertions.*;
 class ShotPlanVersionIntegrationTest {
     @Autowired DocumentStore store;
     @Autowired WorkflowService workflow;
+    @Autowired StudioService studio;
     @Autowired AssetViewService assets;
     @Autowired CreativeJobs creative;
     @Autowired JobService jobs;
@@ -39,6 +40,20 @@ class ShotPlanVersionIntegrationTest {
         ObjectNode script=store.create(STORY_DOCUMENT,obj().put("projectId",projectId).put("coreId",coreId).put("documentType","EPISODE_SCRIPT").put("reviewStatus","CONFIRMED").put("version",2).set("content",content));
         store.update(EPISODE,id(currentEpisode),revision(currentEpisode),currentEpisode.deepCopy().put("storyDocumentId",id(script)));
         sceneId=id(store.create(SCENE,obj().put("projectId",projectId).put("episodeId",id(episode)).put("name","院门").put("description","老人听门环声").put("duration",6)));
+    }
+
+    @Test void authoredEightSecondShotCanBePersistedWithoutProviderSpecificDurationLimit(){
+        ObjectNode shot=studio.create(SHOT,obj().put("projectId",projectId).put("sceneId",sceneId)
+            .put("purpose","持续观察门口的变化").put("action","老人缓慢走向门口并停下")
+            .put("duration",8).put("relationToPrevious","ESTABLISHING"));
+        assertThat(shot.path("duration").asDouble()).isEqualTo(8);
+    }
+    @Test void uneditableSubsecondShotIsRejectedBeforePersistence(){
+        ObjectNode body=obj().put("projectId",projectId).put("sceneId",sceneId)
+            .put("purpose","极短闪帧").put("action","画面闪现")
+            .put("duration",1).put("relationToPrevious","ESTABLISHING");
+        assertThatThrownBy(()->studio.create(SHOT,body)).hasMessageContaining("1.25");
+        assertThat(store.list(SHOT,projectId,sceneId)).isEmpty();
     }
 
     @Test void unchangedConfirmedScriptAndReferencesReuseTheQueuedAndSuccessfulPlan(){
@@ -61,10 +76,72 @@ class ShotPlanVersionIntegrationTest {
         assertThat(shot.path("dramaticBeatSnapshot").path("beatId").asText()).isEqualTo(shot.path("beatId").asText());
         assertThat(shot.path("shotPlanSnapshot").path("directorIntent").asText()).isEqualTo(shot.path("directorIntent").asText());
     }
+    @Test void savedShotsExposeCanonicalNarrativeSemanticsWithoutReinterpretingTheBeat(){
+        ObjectNode plan=workflow.plan(sceneId,obj());run(plan);ObjectNode shot=store.list(SHOT,projectId,sceneId).getFirst();
+        assertThat(text(shot,"shotPurpose")).isNotBlank();
+        assertThat(text(shot,"narrativeFunction")).isNotBlank();
+        assertThat(text(shot,"visualInformation")).isNotBlank();
+        assertThat(shot.path("audienceLearn").isArray()).isTrue();
+        assertThat(shot.path("emotionChange").path("from").asText()).isNotBlank();
+        assertThat(shot.path("emotionChange").path("to").asText()).isNotBlank();
+        assertThat(shot.path("audienceLearn")).isEqualTo(shot.path("dramaticBeatSnapshot").path("knowledgeChange").path("audienceLearns"));
+    }
+    @Test void completedPlanPersistsVersionedBeatsAndLinksEveryShot(){
+        ObjectNode plan=workflow.plan(sceneId,obj());run(plan);
+        var kind=com.yourapp.drama.persistence.ResourceKind.fromPath("beats");
+        List<ObjectNode> beats=store.list(kind,projectId,sceneId);
+        assertThat(beats).isNotEmpty().allSatisfy(beat->{
+            assertThat(text(beat,"directorPlanJobId")).isEqualTo(id(plan));
+            assertThat(text(beat,"beatId")).isNotBlank();
+            assertThat(text(beat,"action")).isNotBlank();
+            assertThat(beat.path("knowledgeChange").isObject()).isTrue();
+            assertThat(beat.path("knowledgeChange").path("audienceLearns").isArray()).isTrue();
+            assertThat(beat.path("knowledgeChange").path("characterChanges").isArray()).isTrue();
+            assertThat(beat.path("setup").isTextual()).isTrue();
+            assertThat(beat.path("payoff").isTextual()).isTrue();
+        });
+        assertThat(store.list(SHOT,projectId,sceneId)).allSatisfy(shot->{
+            assertThat(text(shot,"beatResourceId")).isIn(beats.stream().map(Documents::id).toList());
+            ObjectNode beat=beats.stream().filter(candidate->id(candidate).equals(text(shot,"beatResourceId"))).findFirst().orElseThrow();
+            assertThat(text(shot,"beatId")).isEqualTo(text(beat,"beatId"));
+        });
+    }
+    @Test void validatedBeatsSurviveWhenShotDetailsHaveNotCompleted(){
+        ObjectNode plan=workflow.plan(sceneId,obj());
+        ObjectNode running=jobs.mutate(id(plan),job->job.put("status","RUNNING").put("attempts",1));
+        creative.process(running);
+        var kind=com.yourapp.drama.persistence.ResourceKind.fromPath("beats");
+        assertThat(store.list(kind,projectId,sceneId)).isNotEmpty().allSatisfy(beat->{
+            assertThat(text(beat,"directorPlanJobId")).isEqualTo(id(plan));
+            assertThat(text(beat,"status")).isEqualTo("PLANNED");
+        });
+        assertThat(store.list(SHOT,projectId,sceneId)).isEmpty();
+    }
     @Test void longSceneDemoUsesVariableDurationsInsteadOfEqualSlices(){
         ObjectNode scene=store.get(SCENE,sceneId);store.update(SCENE,sceneId,revision(scene),scene.deepCopy().put("duration",24));
         ObjectNode plan=workflow.plan(sceneId,obj());run(plan);List<ObjectNode> shots=store.list(SHOT,projectId,sceneId);
         assertThat(shots).hasSizeGreaterThanOrEqualTo(6);assertThat(shots.stream().map(s->s.path("duration").asDouble()).distinct()).hasSizeGreaterThan(1);
+    }
+    @Test void twentyFourSecondSceneCanPersistThreeNarrativeShots(){
+        ObjectNode scene=store.get(SCENE,sceneId);
+        ObjectNode revision=scene.deepCopy().put("duration",24);
+        revision.putObject("directorStyleOverride").put("averageShotLength",8);
+        store.update(SCENE,sceneId,revision(scene),revision);
+        ObjectNode plan=workflow.plan(sceneId,obj());run(plan);
+        List<ObjectNode> shots=store.list(SHOT,projectId,sceneId);
+        assertThat(shots).hasSize(3);
+        assertThat(shots.stream().mapToDouble(s->s.path("duration").asDouble()).sum()).isCloseTo(24,within(.01));
+        assertThat(shots).allSatisfy(s->assertThat(s.path("editDuration").asDouble()).isEqualTo(s.path("duration").asDouble()));
+    }
+    @Test void fiveSecondSceneNeverCreatesShotsShorterThanEditorMinimum(){
+        ObjectNode scene=store.get(SCENE,sceneId);
+        ObjectNode revision=scene.deepCopy().put("duration",5);
+        revision.putObject("directorStyleOverride").put("averageShotLength",1);
+        store.update(SCENE,sceneId,revision(scene),revision);
+        ObjectNode plan=workflow.plan(sceneId,obj());run(plan);
+        List<ObjectNode> shots=store.list(SHOT,projectId,sceneId);
+        assertThat(shots).isNotEmpty().allSatisfy(s->assertThat(s.path("duration").asDouble()).isGreaterThanOrEqualTo(1.25));
+        assertThat(shots.stream().mapToDouble(s->s.path("duration").asDouble()).sum()).isCloseTo(5,within(.01));
     }
     @Test void twentyFourSecondSceneUsesPersistedDirectorPlanAndRecoverableDetailBatches(){
         ObjectNode scene=store.get(SCENE,sceneId);store.update(SCENE,sceneId,revision(scene),scene.deepCopy().put("duration",24));
@@ -115,6 +192,8 @@ class ShotPlanVersionIntegrationTest {
 
     @Test void replacingAReferenceCreatesANewPlanAndRetiresOldShotsWithoutDeletingHistory(){
         ObjectNode first=workflow.plan(sceneId,obj());run(first);List<ObjectNode> oldShots=store.list(SHOT,projectId,sceneId);
+        var beatKind=com.yourapp.drama.persistence.ResourceKind.fromPath("beats");
+        List<ObjectNode> oldBeats=store.list(beatKind,projectId,sceneId);
         String episodeId=text(store.get(SCENE,sceneId),"episodeId");
         ObjectNode timeline=store.create(TIMELINE,obj().put("projectId",projectId).put("episodeId",episodeId));
         store.create(TIMELINE_ITEM,obj().put("projectId",projectId).put("timelineId",id(timeline)).put("shotId",id(oldShots.getFirst())));
@@ -123,6 +202,10 @@ class ShotPlanVersionIntegrationTest {
         assertThat(store.get(TIMELINE,id(timeline)).path("stale").asBoolean()).isTrue();
         assertThat(oldShots).allSatisfy(s->assertThat(store.get(SHOT,id(s)).path("stale").asBoolean()).isTrue());
         run(second);List<ObjectNode> current=store.list(SHOT,projectId,sceneId).stream().filter(s->!s.path("stale").asBoolean()).sorted(Comparator.comparingInt(s->s.path("shotNo").asInt())).toList();assertPersistedSceneState(current);
+        assertThat(oldBeats).allSatisfy(beat->assertThat(store.get(beatKind,id(beat)).path("stale").asBoolean()).isTrue());
+        List<ObjectNode> currentBeats=store.list(beatKind,projectId,sceneId).stream().filter(beat->!beat.path("stale").asBoolean()).toList();
+        assertThat(currentBeats).isNotEmpty().allSatisfy(beat->assertThat(text(beat,"directorPlanJobId")).isEqualTo(id(second)));
+        assertThat(current).allSatisfy(shot->assertThat(text(shot,"beatResourceId")).isIn(currentBeats.stream().map(Documents::id).toList()));
         assertThat(store.list(SHOT,projectId,sceneId)).hasSize(4);assertThat(current).hasSize(2);
         assertThat(current.getFirst().path("shotNo").asInt()).isEqualTo(1);
         assertThat(id(workflow.context(current.get(1)).path("previousShot"))).isEqualTo(id(current.getFirst()));
