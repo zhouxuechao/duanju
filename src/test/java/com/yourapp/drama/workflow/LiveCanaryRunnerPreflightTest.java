@@ -36,11 +36,13 @@ class LiveCanaryRunnerPreflightTest {
         String runner=Files.readString(Path.of("scripts","run-provider-canary.ps1"));
         int dryRunExit=runner.indexOf("DRY RUN ONLY");
         int normalTests=runner.indexOf("test.ps1");
+        int canaryEnvironment=runner.indexOf("Import-CanaryEnvironment -Path $EnvFile");
         int authorization=runner.indexOf("$env:CANARY_RUNNER_PREFLIGHT_OK='true'");
         int liveTest=runner.indexOf("-Dtest=LiveProviderCanaryIT");
 
         assertThat(dryRunExit).isGreaterThanOrEqualTo(0);
-        assertThat(authorization).isGreaterThan(normalTests).isGreaterThan(dryRunExit);
+        assertThat(canaryEnvironment).isGreaterThan(normalTests).isGreaterThan(dryRunExit);
+        assertThat(authorization).isGreaterThan(canaryEnvironment);
         assertThat(liveTest).isGreaterThan(authorization);
         assertThat(runner.substring(0,dryRunExit)).doesNotContain("CANARY_RUNNER_PREFLIGHT_OK='true'");
         assertThat(runner.split("\\$env:CANARY_RUNNER_PREFLIGHT_OK='true'",-1)).hasSize(2);

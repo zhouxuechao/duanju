@@ -8,6 +8,8 @@ spring:
 drama:
   provider:
     mode: mock
+  quality:
+    visual-reviewer: fake
   jobs:
     enabled: false
   storage:

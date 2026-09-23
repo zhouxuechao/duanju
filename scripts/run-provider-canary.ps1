@@ -5,6 +5,15 @@ param(
 )
 $ErrorActionPreference='Stop'
 Remove-Item Env:CANARY_RUNNER_PREFLIGHT_OK -ErrorAction SilentlyContinue
+function Import-CanaryEnvironment {
+  param([Parameter(Mandatory=$true)][string]$Path)
+  foreach($taskLine in Get-Content -LiteralPath $Path){
+    if($taskLine -match '^\s*([^#][^=]+)=(.*)$'){
+      $taskName=$matches[1].Trim();$taskValue=$matches[2].Trim().Trim('"')
+      [Environment]::SetEnvironmentVariable($taskName,$taskValue,'Process')
+    }
+  }
+}
 $root=Split-Path -Parent $PSScriptRoot
 $target=Join-Path $root 'target\canary'
 New-Item -ItemType Directory -Force -Path $target | Out-Null
@@ -37,24 +46,12 @@ if(-not $liveRequested){
 }
 if($EnvFile){
   if(-not (Test-Path -LiteralPath $EnvFile)){throw "Env file not found: $EnvFile"}
-  Get-Content -LiteralPath $EnvFile | ForEach-Object {if($_ -match '^\s*([^#][^=]+)=(.*)$'){[Environment]::SetEnvironmentVariable($matches[1].Trim(),$matches[2].Trim().Trim('"'),[EnvironmentVariableTarget]::Process)}}
 }
 Remove-Item Env:CANARY_RUNNER_PREFLIGHT_OK -ErrorAction SilentlyContinue
 $env:RUN_LIVE_PROVIDER_CANARY='false'
-$env:CANARY_GENERATION_PROFILE='TEST'
-if(-not $env:ARK_IMAGE_MODEL){$env:ARK_IMAGE_MODEL='doubao-seedream-5-0-260128'}
-if(-not $env:ARK_IMAGE_SIZE){$env:ARK_IMAGE_SIZE='2K'}
-if(-not $env:ARK_VIDEO_MODEL){$env:ARK_VIDEO_MODEL='doubao-seedance-2-0-fast-260128'}
-if(-not $env:ARK_VIDEO_RESOLUTION){$env:ARK_VIDEO_RESOLUTION='480p'}
-$env:TEST_MAX_REAL_IMAGE_REQUESTS='1'
-$env:TEST_MAX_REAL_VIDEO_REQUESTS='1'
-$env:TEST_MAX_REAL_AUDIO_REQUESTS='0'
-$env:TEST_MAX_REAL_LLM_REQUESTS='0'
-if(-not $env:TEST_MAX_COST_CNY){$env:TEST_MAX_COST_CNY='5'}
-$env:DRAMA_TEST_RUN='true'
-$env:DRAMA_TEST_RUN_ID="provider-canary-$([guid]::NewGuid())"
-if(-not $env:ARK_API_KEY){throw 'ARK_API_KEY must be present in the local process environment.'}
-if($env:ARK_IMAGE_MODEL -ne $plan.imageModel -or $env:ARK_IMAGE_SIZE -ne '2K' -or $env:ARK_VIDEO_MODEL -ne $plan.videoModel -or $env:ARK_VIDEO_RESOLUTION -ne '480p'){throw 'Canary model/profile check failed. Only TEST + Seedream 5.0 + Seedance 2.0 Fast + 480p is allowed.'}
+$env:RUN_LIVE_PIPELINE_CANARY='false'
+$env:DRAMA_PROVIDER_MODE='mock'
+$env:VISUAL_REVIEWER='fake'
 
 try{$jobs=Invoke-RestMethod -Method Get -Uri "$BaseUrl/api/resources/jobs" -TimeoutSec 10}catch{throw 'The local app must be running so unresolved provider submissions can be checked before Live Canary.'}
 $unresolved=@($jobs | Where-Object {$_.status -eq 'UNKNOWN' -or $_.submissionUncertain -eq $true -or $_.reconciliationRequired -eq $true})
@@ -70,6 +67,21 @@ $env:FFPROBE_PATH=$ffprobe
 Push-Location $root
 try{
   & (Join-Path $PSScriptRoot 'test.ps1');if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+  if($EnvFile){Import-CanaryEnvironment -Path $EnvFile}
+  $env:CANARY_GENERATION_PROFILE='TEST'
+  if(-not $env:ARK_IMAGE_MODEL){$env:ARK_IMAGE_MODEL='doubao-seedream-5-0-260128'}
+  if(-not $env:ARK_IMAGE_SIZE){$env:ARK_IMAGE_SIZE='2K'}
+  if(-not $env:ARK_VIDEO_MODEL){$env:ARK_VIDEO_MODEL='doubao-seedance-2-0-fast-260128'}
+  if(-not $env:ARK_VIDEO_RESOLUTION){$env:ARK_VIDEO_RESOLUTION='480p'}
+  $env:TEST_MAX_REAL_IMAGE_REQUESTS='1'
+  $env:TEST_MAX_REAL_VIDEO_REQUESTS='1'
+  $env:TEST_MAX_REAL_AUDIO_REQUESTS='0'
+  $env:TEST_MAX_REAL_LLM_REQUESTS='0'
+  if(-not $env:TEST_MAX_COST_CNY){$env:TEST_MAX_COST_CNY='5'}
+  $env:DRAMA_TEST_RUN='true'
+  $env:DRAMA_TEST_RUN_ID="provider-canary-$([guid]::NewGuid())"
+  if(-not $env:ARK_API_KEY){throw 'ARK_API_KEY must be present in the local process environment.'}
+  if($env:ARK_IMAGE_MODEL -ne $plan.imageModel -or $env:ARK_IMAGE_SIZE -ne '2K' -or $env:ARK_VIDEO_MODEL -ne $plan.videoModel -or $env:ARK_VIDEO_RESOLUTION -ne '480p'){throw 'Canary model/profile check failed. Only TEST + Seedream 5.0 + Seedance 2.0 Fast + 480p is allowed.'}
   $env:RUN_LIVE_PROVIDER_CANARY='true'
   $env:CANARY_RUNNER_PREFLIGHT_OK='true'
   & $maven -q '-Dtest=LiveProviderCanaryIT' test;if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
