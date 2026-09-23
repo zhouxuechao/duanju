@@ -36,6 +36,7 @@ public final class PipelineCanaryState {
         ObjectNode value=obj().put("runId",safe(runId)).put("phase","PIPELINE").put("status","READY").put("currentStep","READY")
                 .put("generationProfile","TEST").put("commit",safe(commit)).put("createdAt",now).put("updatedAt",now)
                 .put("projectId","").put("episodeId","").put("sceneId","").put("timelineArtifactId","").put("renderArtifactId","");
+        value.set("production",obj());
         ArrayNode shots=value.putArray("shots");
         for(String shotId:shotIds)shots.add(obj().put("shotId",safe(shotId)).put("keyframeStatus","NOT_STARTED")
                 .put("keyframeRequestId","").put("keyframeArtifactId","").put("keyframeProviderUrlHost","").put("keyframeProviderUrlFingerprint","")
@@ -56,6 +57,29 @@ public final class PipelineCanaryState {
 
     public synchronized ObjectNode snapshot(){return state.deepCopy();}
     public synchronized ObjectNode shot(String shotId){return findShot(shotId).deepCopy();}
+
+    /** Stores only URL-free production identifiers. The production database remains the source of truth. */
+    public synchronized void productionSnapshot(ObjectNode inspection){
+        ObjectNode cursor=obj();
+        for(String field:List.of("projectId","episodeId","sceneId","pipelineRunId","status","resumeFromStage","lastErrorCode","timelineId","renderArtifactId"))
+            cursor.put(field,safe(inspection.path(field).asText()));
+        for(String field:List.of("beatIds","shotIds","keyframeArtifactIds","videoTakeIds","selectedTakeIds","audioArtifactIds","timelineIds","timelineClipIds")){
+            ArrayNode values=cursor.putArray(field);for(var value:inspection.path(field))values.add(safe(value.asText()));
+        }
+        ArrayNode jobs=cursor.putArray("providerJobs");for(var value:inspection.path("providerJobs")){
+            ObjectNode job=obj();for(String field:List.of("generationJobId","type","status","shotId","providerRequestId","providerTaskId"))job.put(field,safe(value.path(field).asText()));jobs.add(job);
+        }
+        if(inspection.path("productionCounts").isObject())cursor.set("productionCounts",inspection.path("productionCounts").deepCopy());
+        ObjectNode next=state.deepCopy();next.set("production",cursor);
+        for(String field:List.of("projectId","episodeId","sceneId","timelineId","renderArtifactId"))if(!cursor.path(field).asText().isBlank())next.put(field,cursor.path(field).asText());
+        String productionStatus=cursor.path("status").asText(),errorCode=cursor.path("lastErrorCode").asText();
+        if("SUCCESS".equals(productionStatus))persist(next,"SUCCEEDED","SUCCEEDED");
+        else if("RECONCILIATION_REQUIRED".equals(productionStatus)||"RECONCILIATION_REQUIRED".equals(errorCode))persist(next,"RECONCILIATION_REQUIRED","DOMAIN_RECONCILIATION");
+        else if("FAILED".equals(productionStatus))persist(next,"FAILED",cursor.path("resumeFromStage").asText("PRODUCTION"));
+        else persist(next,"STORY_PLANNING",cursor.path("resumeFromStage").asText("PRODUCTION"));
+    }
+
+    public synchronized void productionReconciliationRequired(String code){ObjectNode next=state.deepCopy().put("failureCode",safe(code));persist(next,"RECONCILIATION_REQUIRED","DOMAIN_RECONCILIATION");}
 
     public synchronized void storyPlanning(){top("STORY_PLANNING","STORY_PLANNING");}
     public synchronized void storyReady(String projectId,String episodeId,String sceneId){

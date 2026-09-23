@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.yourapp.drama.persistence.DocumentStore;
 import com.yourapp.drama.persistence.ResourceKind;
 import com.yourapp.drama.job.GenerationWorker;
+import com.yourapp.drama.job.DirectorGenerationService;
 import com.yourapp.drama.production.AssetDependencyAnalyzer;
 import org.springframework.stereotype.Service;
 
@@ -30,9 +31,12 @@ public class PipelineRunService {
     private final PostProductionService post;
     private final StudioService studio;
     private final GenerationWorker worker;
+    private final DirectorGenerationService director;
+    private final AutomaticVisualReviewService visualReview;
     public PipelineRunService(DocumentStore store,PipelinePreflightService preflight,ObjectMapper mapper,StoryDevelopmentService development,
-                              AssetViewService assetViews,WorkflowService workflow,PostProductionService post,StudioService studio,GenerationWorker worker){
-        this.store=store;this.preflight=preflight;this.mapper=mapper;this.development=development;this.assetViews=assetViews;this.workflow=workflow;this.post=post;this.studio=studio;this.worker=worker;
+                              AssetViewService assetViews,WorkflowService workflow,PostProductionService post,StudioService studio,GenerationWorker worker,
+                              DirectorGenerationService director,AutomaticVisualReviewService visualReview){
+        this.store=store;this.preflight=preflight;this.mapper=mapper;this.development=development;this.assetViews=assetViews;this.workflow=workflow;this.post=post;this.studio=studio;this.worker=worker;this.director=director;this.visualReview=visualReview;
     }
 
     public ObjectNode start(String projectId,ObjectNode request){
@@ -41,13 +45,13 @@ public class PipelineRunService {
         String scenario=text(request,"scenarioId").isBlank()?"golden-basic":text(request,"scenarioId");
         ObjectNode run=store.create(PIPELINE_RUN,obj().put("projectId",projectId).put("scenarioId",scenario).put("mode",mode)
             .put("status","RUNNING").put("attempt",1).put("startedAt",Instant.now().toString()).put("plannedCost",0).put("actualCost",0).put("wasteCost",0));
-        if(Set.of("MOCK","MEDIA").contains(mode))try{drive(run);}catch(RuntimeException error){run=recordFailure(id(run),error);}
+        if(Set.of("MOCK","MEDIA","CANARY").contains(mode))try{drive(run);}catch(RuntimeException error){run=recordFailure(id(run),error);}
         return audit(run,false);
     }
 
     public ObjectNode resume(String runId){
         ObjectNode run=store.transaction(()->{ObjectNode current=store.getForUpdate(PIPELINE_RUN,runId);if("SUCCESS".equals(text(current,"status")))return current;return store.update(PIPELINE_RUN,runId,revision(current),current.deepCopy().put("status","RUNNING").put("attempt",current.path("attempt").asInt(1)+1).put("resumedAt",Instant.now().toString()));});
-        if(!"SUCCESS".equals(text(run,"status"))&&Set.of("MOCK","MEDIA").contains(text(run,"mode")))try{drive(run);}catch(RuntimeException error){run=recordFailure(id(run),error);}
+        if(!"SUCCESS".equals(text(run,"status"))&&Set.of("MOCK","MEDIA","CANARY").contains(text(run,"mode")))try{drive(run);}catch(RuntimeException error){run=recordFailure(id(run),error);}
         return audit(run,true);
     }
 
@@ -65,7 +69,7 @@ public class PipelineRunService {
         driveStory(projectId);
         driveAssetViews(projectId);
         driveShotPlans(projectId);
-        driveKeyframes(projectId,"golden-basic".equals(text(run,"scenarioId")));
+        driveKeyframes(projectId,"golden-basic".equals(text(run,"scenarioId")),"MOCK".equals(mode),"phase-b-production".equals(text(run,"scenarioId")));
         driveVideos(projectId);
         driveAudio(projectId);
         driveTimelines(projectId);
@@ -108,11 +112,11 @@ public class PipelineRunService {
     private void driveShotPlans(String projectId){
         List<ObjectNode> scenes=ordered(SCENE,projectId,null,"sceneNo");
         for(ObjectNode scene:scenes)if(store.list(SHOT,projectId,id(scene)).stream().noneMatch(s->!s.path("stale").asBoolean()))workflow.plan(id(scene),obj().put("requestKey","pipeline-plan-"+id(scene)));
-        drain(projectId,1024);
+        for(int pass=0;pass<8;pass++){drain(projectId,1024);if(!director.reconcileProject(projectId))break;}
         for(ObjectNode scene:scenes)if(store.list(SHOT,projectId,id(scene)).stream().noneMatch(s->!s.path("stale").asBoolean()))throw new WorkflowException("SHOT_PLAN_MISSING","导演任务结束后仍没有镜头");
     }
 
-    private void driveKeyframes(String projectId,boolean exerciseRetake){
+    private void driveKeyframes(String projectId,boolean exerciseRetake,boolean deterministicAcceptance,boolean canaryAcceptance){
         List<ObjectNode> shots=orderedShots(projectId);boolean first=true,skipPrevis=skipPrevis(projectId);
         for(ObjectNode shot:shots){
             if(first&&!skipPrevis&&!approved(projectId,id(shot),STORYBOARD).isPresent()){
@@ -126,7 +130,9 @@ public class PipelineRunService {
                 complete(job);ObjectNode frame=latest(projectId,id(shot),KEYFRAME);
                 boolean alreadyExercised=frames.stream().anyMatch(f->"FAILED".equals(text(f,"qcStatus")));
                 if(first&&exerciseRetake&&!alreadyExercised){workflow.review(KEYFRAME,id(frame),obj().put("passed",false).put("score",35).put("reviewer","HUMAN").put("decision","REGENERATE").put("notes","Golden Flow 故障注入：构图不满足验收"));job=workflow.regenerateLatestKeyframe(id(frame),obj().put("requestKey","pipeline-keyframe-retake-"+id(shot)));complete(job);frame=latest(projectId,id(shot),KEYFRAME);}
-                workflow.review(KEYFRAME,id(frame),visualPass());workflow.lock(KEYFRAME,id(frame),obj().put("generateVideo",false));
+                visualReview.review(id(frame),obj().put("apply",true).put("allowAutomaticRepair",false).put("deterministicAcceptance",deterministicAcceptance).put("canaryAcceptance",canaryAcceptance).put("requestKey","pipeline-keyframe-qc-"+id(frame)));frame=store.get(KEYFRAME,id(frame));
+                if(!"PASSED".equals(text(frame,"qcStatus")))throw new WorkflowException("KEYFRAME_QC_PENDING","关键帧自动质检未通过，Pipeline 不会自动返修");
+                workflow.lock(KEYFRAME,id(frame),obj().put("generateVideo",false));
             }
             first=false;
         }
@@ -136,7 +142,7 @@ public class PipelineRunService {
         for(ObjectNode shot:orderedShots(projectId))if(approved(projectId,id(shot),VIDEO_TAKE).isEmpty()){
             ObjectNode frame=approved(projectId,id(shot),KEYFRAME).orElseThrow();
             List<ObjectNode> takes=store.list(VIDEO_TAKE,projectId,id(shot));ObjectNode take=takes.stream().filter(t->"SUCCEEDED".equals(text(t,"providerStatus"))&&"PENDING".equals(text(t,"qcStatus"))).findFirst().orElse(null);
-            if(take==null){ObjectNode job=workflow.video(id(frame),obj().put("requestKey","pipeline-video-"+id(shot)+"-"+takes.size()));complete(job);take=latest(projectId,id(shot),VIDEO_TAKE);}
+            if(take==null){ObjectNode job=workflow.video(id(frame),obj().put("requestKey","pipeline-video-"+id(shot)+"-"+takes.size()).put("allowAutomaticRepair",false));complete(job);take=latest(projectId,id(shot),VIDEO_TAKE);}
             drain(projectId,64);take=store.get(VIDEO_TAKE,id(take));
             if(!"PASSED".equals(text(take,"qcStatus")))throw new WorkflowException("VIDEO_QC_PENDING","视频自动质检尚未通过");
             workflow.lock(VIDEO_TAKE,id(take),obj());

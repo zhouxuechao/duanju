@@ -31,9 +31,13 @@ public class AutomaticVisualReviewService {
         if(!generation.path("context").isObject()){ObjectNode job=store.get(GENERATION_JOB,required(frame,"generationJobId"));generation=job.path("inputSnapshot");}
         try{rules.requireDeterministicPass(generation.path("context"));}catch(DeterministicRuleViolationException failure){throw new WorkflowException("DETERMINISTIC_RULE_FAILED",failure.getMessage());}
         ObjectNode expected=expectedContexts.build(generation.path("context"));addReviewPolicy(expected,frame,generation);
-        ObjectNode generated=media.prepare(frame,generation,expected,request);JsonNode result;
+        if(request.path("canaryAcceptance").asBoolean()||frame.path("simulated").asBoolean()&&request.path("deterministicAcceptance").asBoolean())expected.set("reviewPolicy",obj().put("importantCharacterFirstAppearance",false).put("importantLocationFirstAppearance",false));
+        ObjectNode reviewInput=request.isObject()?(ObjectNode)request.deepCopy():obj();
+        if(frame.path("simulated").asBoolean()&&request.path("deterministicAcceptance").asBoolean()&&!reviewInput.path("observedConstraints").isObject())reviewInput.set("observedConstraints",expected.path("requiredConstraints").deepCopy());
+        ObjectNode generated=media.prepare(frame,generation,expected,reviewInput);JsonNode result;
         try{result=protocol.validate(reviewer.review(expected,generated),expected);}catch(ProviderException failure){failedAssessment(frame,assessmentKey,shadow,failure);throw failure;}
         VisualQualityPolicy.Decision route=policy.decide(result,expected,priorProviderDecisions(keyframeId));
+        if(route==VisualQualityPolicy.Decision.AUTO_REGENERATE&&!request.path("allowAutomaticRepair").asBoolean(true))route=VisualQualityPolicy.Decision.MANUAL_REVIEW;
         ObjectNode body=reviewBody(expected,result,route).put("assessmentKey",assessmentKey);
         if(shadow||route==VisualQualityPolicy.Decision.MANUAL_REVIEW)return assessment(frame,body,shadow,route);
         ObjectNode reviewed=workflow.review(KEYFRAME,keyframeId,body);

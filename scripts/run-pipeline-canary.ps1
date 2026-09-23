@@ -23,7 +23,7 @@ $plan=[ordered]@{
   imageModel='doubao-seedream-5-0-260128';imageSize='2K';aspectRatioIntent='9:16'
   videoModel='doubao-seedance-2-0-fast-260128';videoResolution='480p';videoDurationSeconds=5
   requests=[ordered]@{storyDirectorLlm=2;image=4;video=4;audio=2;vlmQc=8}
-  automaticRetry=$false;automaticSecondTake=$false;resume=$true
+  automaticRetry=$false;automaticSecondTake=$false;resume=$true;productionIntegration='PRODUCTION_PIPELINE_READY'
 }
 $plan | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $target 'pipeline-canary-dry-run.json') -Encoding utf8
 @"
@@ -43,6 +43,7 @@ $plan | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $target 'p
 - Automatic retry: false
 - Automatic second take: false
 - Resume: enabled
+- Production integration: PRODUCTION_PIPELINE_READY
 - Real Provider requests: 0
 "@ | Set-Content -LiteralPath (Join-Path $target 'pipeline-canary-dry-run.md') -Encoding utf8
 
@@ -57,8 +58,6 @@ if(Test-Path -LiteralPath $statePath){
   $pipelineState=Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
   if($pipelineState.status -eq 'RECONCILIATION_REQUIRED'){throw 'Pipeline Canary requires reconciliation. Do not resume or submit another Provider request.'}
   if($pipelineState.status -eq 'SUCCEEDED'){throw 'Pipeline Canary already succeeded. Do not run it again.'}
-  $vaultPath=Join-Path $root 'target\live-canary\private\pipeline-canary-runtime.json'
-  if(-not (Test-Path -LiteralPath $vaultPath)){throw 'Pipeline Canary runtime vault is missing; resume is blocked without the original provider URL handoff data.'}
   Write-Host "RESUMING PIPELINE CANARY from $($pipelineState.currentStep)" -ForegroundColor Yellow
 }
 if($EnvFile -and -not (Test-Path -LiteralPath $EnvFile)){throw "Env file not found: $EnvFile"}
@@ -96,6 +95,8 @@ try{
   if(-not $env:PIPELINE_TEST_VIDEO_ESTIMATED_COST_CNY){$env:PIPELINE_TEST_VIDEO_ESTIMATED_COST_CNY='12'}
   $env:DRAMA_TEST_RUN='true'
   $env:DRAMA_TEST_RUN_ID="pipeline-canary-$([guid]::NewGuid())"
+  $env:SPRING_PROFILES_ACTIVE='demo,live'
+  $env:SPRING_DATASOURCE_URL='jdbc:h2:file:./target/live-canary/production-db;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;AUTO_SERVER=TRUE'
   $env:FFMPEG_PATH=$ffmpeg;$env:FFPROBE_PATH=$ffprobe
   $env:CANARY_PIPELINE_RUNNER_PREFLIGHT_OK='true'
   & $maven -q '-Dtest=LivePipelineCanaryIT' test;if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}

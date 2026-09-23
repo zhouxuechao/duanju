@@ -28,6 +28,7 @@ public class AutomaticVideoReviewService {
         List<VideoQualityReviewer.Frame> frames=take.path("simulated").asBoolean()?simulatedFrames():extractor.extract(media.requiredArchiveKey(take));
         JsonNode result;try{result=protocol.validate(reviewer.review(expected,frames),expected);}catch(ProviderException failure){failedAssessment(take,assessmentKey,shadow,failure);throw failure;}
         VisualQualityPolicy.Decision route=policy.decide(result,expected,priorProviderDecisions(takeId));
+        if(route==VisualQualityPolicy.Decision.AUTO_REGENERATE&&!request.path("allowAutomaticRepair").asBoolean(true))route=VisualQualityPolicy.Decision.MANUAL_REVIEW;
         if(route==VisualQualityPolicy.Decision.AUTO_REGENERATE&&reachesRepairLimit(take,result))route=VisualQualityPolicy.Decision.MANUAL_REVIEW;
         ObjectNode body=body(expected,result,route).put("assessmentKey",assessmentKey);
         if(shadow||route==VisualQualityPolicy.Decision.MANUAL_REVIEW)return assessment(take,body,shadow,route);

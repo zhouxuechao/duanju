@@ -73,4 +73,23 @@ class PipelineCanaryStateTest {
         assertThat(state.shot("shot-1").path("keyframeStatus").asText()).isEqualTo("FAILED");
         assertThat(state.shot("shot-1").path("failureCode").asText()).isEqualTo("KEYFRAME_REJECTED");
     }
+
+    @Test void storesAUrlFreeProductionCursorAndUsesProductionStatus() throws Exception {
+        Path file=temporary.resolve("pipeline-canary-state.json");
+        PipelineCanaryState state=PipelineCanaryState.start(file,"pipeline-run-1","commit-1",List.of("intent-1","intent-2","intent-3","intent-4"));
+        ObjectNode production=new ObjectNode(com.fasterxml.jackson.databind.node.JsonNodeFactory.instance)
+                .put("projectId","project-1").put("episodeId","episode-1").put("sceneId","scene-1")
+                .put("pipelineRunId","production-run-1").put("status","SUCCESS").put("timelineId","timeline-1").put("renderArtifactId","render-1");
+        production.putArray("shotIds").add("real-shot-1").add("real-shot-2").add("real-shot-3").add("real-shot-4");
+        production.putArray("providerJobs").addObject().put("generationJobId","job-1").put("type","VIDEO").put("status","SUCCESS")
+                .put("providerRequestId","request-1").put("providerTaskId","task-1");
+
+        state.productionSnapshot(production);
+
+        ObjectNode reopened=PipelineCanaryState.open(file).snapshot();
+        assertThat(reopened.path("status").asText()).isEqualTo("SUCCEEDED");
+        assertThat(reopened.path("production").path("pipelineRunId").asText()).isEqualTo("production-run-1");
+        assertThat(reopened.path("production").path("shotIds")).hasSize(4);
+        assertThat(Files.readString(file)).doesNotContain("https://","Authorization","Bearer");
+    }
 }

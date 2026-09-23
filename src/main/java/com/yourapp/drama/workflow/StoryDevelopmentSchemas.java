@@ -162,7 +162,7 @@ public final class StoryDevelopmentSchemas {
                 "tampered", bool(), "obtainedBy", strings(0, 30), "knownBy", strings(0, 30), "holder", text(), "supportsFacts", strings(0, 30));
         return object(required, Map.of("midHook", midHook(), "evidenceLedger", array(evidence,0,100),
                 "storyFacts", looseObject(), "characterKnowledge", looseObject(),
-                "relationships", array(text(),0,100), "unrevealedSecrets", strings(0,100)));
+                "relationships", array(text(),0,100), "unrevealedSecrets", strings(0,100), "stateLedger", looseObject()));
     }
 
     public static ObjectNode forDocument(JsonNode doc) {

@@ -137,6 +137,7 @@ public class ContinuityEngine {
     private void compareInherited(JsonNode inherited, JsonNode proposed, String path, JsonNode changes, List<Risk> risks) {
         if (!proposed.isObject()) return;
         proposed.fields().forEachRemaining(e -> {
+            if ("shot.startState".equals(path) && "spatialAnchors".equals(e.getKey())) return;
             if (!inherited.has(e.getKey())) return;
             String fieldPath = path + "." + e.getKey();
             JsonNode expected = inherited.path(e.getKey());

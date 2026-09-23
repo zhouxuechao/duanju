@@ -28,6 +28,10 @@ public class JobService {
         ObjectNode job=store.transaction(()->{
             ObjectNode projectDocument=store.getForUpdate(PROJECT,projectId);
             ObjectNode settings=generationProfiles.resolved(projectDocument),frozen=input.isObject()?((ObjectNode)input).deepCopy():obj();String currentProfile=settings.path("generationProfile").asText("TEST");frozen.putIfAbsent("generationProfile",com.fasterxml.jackson.databind.node.TextNode.valueOf(currentProfile));String generationProfile=frozen.path("generationProfile").asText(currentProfile);
+            if(projectDocument.path("testRun").asBoolean(false)){
+                frozen.put("testRun",true);
+                for(String field:List.of("testRunId","testPhase"))if(projectDocument.hasNonNull(field))frozen.set(field,projectDocument.path(field).deepCopy());
+            }
             if(Set.of("STORYBOARD","KEYFRAME","ASSET_IMAGE").contains(type)){frozen.putIfAbsent("modelId",settings.path("imageModel"));frozen.putIfAbsent("imageSize",settings.path("imageSize"));}
             if(Set.of("VIDEO","LIPSYNC").contains(type)){frozen.putIfAbsent("modelId",settings.path("videoModel"));frozen.putIfAbsent("resolution",settings.path("videoResolution"));}
             if(requestKey!=null&&!requestKey.isBlank())for(ObjectNode old:store.list(GENERATION_JOB,projectId,null))if(requestKey.equals(text(old,"requestKey"))){

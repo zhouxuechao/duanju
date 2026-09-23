@@ -82,7 +82,7 @@ final class StoryDevelopmentDemo {
                 .put("audienceKnowledge", "知道钥匙与失踪案相连").put("nextStageReason", "物证来源仍未查清"));
         core.putArray("unitArcs").add(unit);
 
-        ObjectNode person = obj().put("characterKey", "lead").put("name", "周伯")
+        ObjectNode person = obj().put("characterKey", "lead-1").put("name", "周伯")
                 .put("description", "珍惜邻里情分、习惯独自承担问题的老人");
         ObjectNode narrative = obj().put("storyRole", "主角").put("want", "查清钥匙来源")
                 .put("need", "学会向邻里求助").put("fear", "连累别人").put("weakness", "凡事独自承担")
@@ -116,7 +116,8 @@ final class StoryDevelopmentDemo {
         prop.set("propBible", obj().put("appearance", "铁灰色、齿部有两道缺口").put("scale", "长六厘米").put("ownership", "周伯右侧衣袋"));
         core.putArray("props").add(prop);
         core.putArray("foreshadowingRules").add("旧钥匙开场出现，终局打开关联柜门");
-        core.putArray("continuityRules").add("换装、受伤与钥匙移交必须写出原因");
+        core.putArray("continuityRules").add("换装、受伤与道具移交必须写出原因");
+        useAuthoredAssets(core,project);
         return core;
     }
 
@@ -134,13 +135,13 @@ final class StoryDevelopmentDemo {
                     .put("cliffhanger", "祠堂内传出刚停止的脚步声").put("summary", "周伯在阻碍中作出选择并改变嫌疑方向")
                     .put("startState", start).put("endState", end);
             addFormat(card, format, seconds, "beats");
-            refs(card);
+            refs(card, input.path("project"));
             card.set("foreshadowing", obj());
             card.withObject("foreshadowing").putArray("plant");
             card.withObject("foreshadowing").putArray("advance").add("钥匙泥迹");
             card.withObject("foreshadowing").putArray("resolve");
             card.putArray("progressionEvents").add(obj().put("atSec", Math.max(1, seconds / 2)).put("type", "NEW_INFORMATION").put("description", "确认泥迹来源"));
-            card.putArray("scenePlan").add(scene(seconds));
+            card.putArray("scenePlan").add(scene(seconds,input.path("project")));
             card.set("episodeEnding",obj().put("primaryType","DANGER").put("strength","HIGH").put("description","祠堂内刚刚停止的脚步声表明有人仍在现场")
                     .put("unresolvedPressure","暗处来访者可能已经发现周伯").put("nextEpisodeQuestion","祠堂里的人是谁"));
             cards.add(card);
@@ -153,12 +154,16 @@ final class StoryDevelopmentDemo {
         JsonNode outline = input.path("sourceSnapshot").path("episodeOutline");
         ObjectNode out = obj().put("title", text(outline, "title")).put("summary", text(outline, "summary"))
                 .put("startState", text(outline, "startState")).put("endState", text(outline, "endState"))
-                .put("script", "【本地演示剧本】黄昏，村口院子。周伯穿靛蓝棉布外套，右手按住口袋里的旧钥匙。他在南门停步，听见北侧屋檐下传来敲击声，先回头确认身后没有人，再慢慢走向柜门。周伯：这把钥匙留了这么久，今天总要试一试。他举起钥匙，却在锁孔边发现一道新鲜划痕，手停在半空，决定先查清谁刚刚来过。")
+                .put("script", input.path("project").path("storyScript").asText("【本地演示剧本】黄昏，村口院子。周伯穿靛蓝棉布外套，右手按住口袋里的旧钥匙。他在南门停步，听见北侧屋檐下传来敲击声，先回头确认身后没有人，再慢慢走向柜门。周伯：这把钥匙留了这么久，今天总要试一试。他举起钥匙，却在锁孔边发现一道新鲜划痕，手停在半空，决定先查清谁刚刚来过。"))
                 .put("targetDurationSec", seconds);
         addFormat(out, format, seconds, "beatBoundaries");
-        refs(out);
-        out.putArray("scenes").add(scene(seconds));
+        refs(out,input.path("project"));
+        out.putArray("scenes").add(scene(seconds,input.path("project")));
         out.set("episodeEnding",outline.path("episodeEnding").deepCopy());
+        JsonNode continuity=input.path("project").path("continuityIntent");
+        if(continuity.path("storyFacts").isObject())out.set("storyFacts",continuity.path("storyFacts").deepCopy());
+        if(continuity.path("characterKnowledge").isObject())out.set("characterKnowledge",continuity.path("characterKnowledge").deepCopy());
+        if(continuity.path("stateLedger").isObject())out.set("stateLedger",continuity.path("stateLedger").deepCopy());
         return out;
     }
 
@@ -183,22 +188,42 @@ final class StoryDevelopmentDemo {
         var signals=beat.putArray("hookSignals");if(id.equals("OPENING_HOOK"))signals.add("ANOMALY").add("QUESTION");return beat;
     }
 
-    private static void refs(ObjectNode value) {
-        value.putArray("characterKeys").add("lead");
-        value.putArray("locationKeys").add("yard");
-        value.putArray("propKeys").add("key");
+    private static void refs(ObjectNode value,JsonNode project) {
+        var characters=value.putArray("characterKeys");var locations=value.putArray("locationKeys");var props=value.putArray("propKeys");
+        if(project.path("characters").isArray()&&!project.path("characters").isEmpty())project.path("characters").forEach(item->characters.add(assetKey(item,"characterKey")));else characters.add("lead-1");
+        if(project.path("locations").isArray()&&!project.path("locations").isEmpty())project.path("locations").forEach(item->locations.add(assetKey(item,"locationKey")));else locations.add("yard");
+        if(project.path("props").isArray()&&!project.path("props").isEmpty())project.path("props").forEach(item->props.add(assetKey(item,"propKey")));else props.add("key");
     }
 
-    private static ObjectNode scene(double seconds) {
+    private static ObjectNode scene(double seconds,JsonNode project) {
+        String locationKey=project.path("locations").isEmpty()?"yard":assetKey(project.path("locations").path(0),"locationKey");
         ObjectNode scene=obj().put("sceneId","yard-investigation").put("name", "院内追查").put("description", "周伯穿田间装，带旧钥匙从南门走到北侧屋檐，发现划痕并停步观察。")
-                .put("storyTime",0).put("locationKey","yard").put("sceneGoal","确认是谁动过柜门").put("conflict","新划痕表明有人抢先到过")
+                .put("storyTime",0).put("locationKey",locationKey).put("sceneGoal","确认关键信息并完成一次有因果的选择").put("conflict","人物掌握的信息不同")
                 .put("dramaticFunction","获得新证据并改变调查顺序").put("informationChange","发现锁孔边的新鲜划痕")
                 .put("relationshipChange","").put("emotionChange","从犹豫转为警觉").put("characterStateChange","周伯决定暂停开锁并先寻找来访者")
                 .put("startSec", 0).put("endSec", seconds).put("duration", seconds);
-        scene.putArray("characterKeys").add("lead");scene.putArray("propKeys").add("key");
+        var characterKeys=scene.putArray("characterKeys");if(project.path("characters").isArray()&&!project.path("characters").isEmpty())project.path("characters").forEach(item->characterKeys.add(assetKey(item,"characterKey")));else characterKeys.add("lead-1");
+        var propKeys=scene.putArray("propKeys");if(project.path("props").isArray()&&!project.path("props").isEmpty())project.path("props").forEach(item->propKeys.add(assetKey(item,"propKey")));else propKeys.add("key");
         scene.set("startState",obj().put("knowledge","不知道有人来过").put("goal","用钥匙开柜"));
         scene.set("endState",obj().put("knowledge","确认刚有人动过锁").put("goal","先查来访者"));return scene;
     }
+
+    private static void useAuthoredAssets(ObjectNode core,JsonNode project){
+        if(project.path("characters").isArray()&&!project.path("characters").isEmpty()){
+            JsonNode identityFallback=core.path("characters").path(0).path("identityTraits").deepCopy(),looksFallback=core.path("characters").path(0).path("looks").deepCopy();
+            var target=core.putArray("characters");for(JsonNode source:project.path("characters")){
+                ObjectNode person=obj().put("characterKey",assetKey(source,"characterKey")).put("name",text(source,"name")).put("description",source.path("description").asText("稳定身份人物"));
+                ObjectNode narrative=obj().put("storyRole",target.isEmpty()?"主角":"关键关系人物").put("want","理解事实并作出选择").put("need","在信息变化后与对方协作").put("fear","错误判断伤害关系").put("weakness","信息不足时容易犹豫").put("secret","没有超出剧本的隐藏秘密").put("motivation","保护双方共同利益").put("decisionPattern","先确认事实，再采取行动").put("speechStyle","自然普通话短句");
+                ObjectNode arc=obj().put("start","掌握信息不完整").put("end","基于新信息作出决定");arc.putArray("turningPoints").add("关键道具完成交接");narrative.set("arc",arc);narrative.putArray("behaviorRules").add("动作和知情状态必须服从故事时间");narrative.putArray("relationships").add("与对方通过信息交接建立信任");person.set("narrativeBible",narrative);
+                person.set("identityTraits",source.path("identityTraits").isObject()?source.path("identityTraits").deepCopy():identityFallback.deepCopy());
+                person.set("looks",source.path("looks").isArray()&&!source.path("looks").isEmpty()?source.path("looks").deepCopy():looksFallback.deepCopy());target.add(person);
+            }
+        }
+        if(project.path("locations").isArray()&&!project.path("locations").isEmpty()){JsonNode fallback=core.path("locations").path(0).path("locationBible").deepCopy();var target=core.putArray("locations");project.path("locations").forEach(source->target.add(obj().put("locationKey",assetKey(source,"locationKey")).put("name",text(source,"name")).put("description",source.path("description").asText("稳定复用的主要场景")).set("locationBible",source.path("locationBible").isObject()?source.path("locationBible").deepCopy():fallback.deepCopy())));}
+        if(project.path("props").isArray()&&!project.path("props").isEmpty()){JsonNode fallback=core.path("props").path(0).path("propBible").deepCopy();var target=core.putArray("props");project.path("props").forEach(source->target.add(obj().put("propKey",assetKey(source,"propKey")).put("name",text(source,"name")).put("description",source.path("description").asText("剧情中的关键道具")).put("state",source.path("state").asText("完好")).set("propBible",source.path("propBible").isObject()?source.path("propBible").deepCopy():fallback.deepCopy())));}
+    }
+
+    private static String assetKey(JsonNode source,String canonical){String value=text(source,canonical);return value.isBlank()?text(source,"key"):value;}
 
     private static ObjectNode quality(){
         ObjectNode qa=obj().put("passed",true).put("watchReason","人物发现新线索并作出会增加风险的选择")

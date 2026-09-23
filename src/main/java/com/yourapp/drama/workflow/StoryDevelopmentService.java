@@ -24,6 +24,7 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -955,17 +956,19 @@ public class StoryDevelopmentService {
       ObjectNode places = bindings.putObject("locations");
       ObjectNode props = bindings.putObject("props");
 
+      int characterOrder = 0;
       for(JsonNode p : core.path("content").path("characters")) {
          ObjectNode actor = (ObjectNode)p.deepCopy();
-         actor.put("projectId", Documents.project(core)).put("storyBibleId", Documents.id(core)).put("provider", "SEEDREAM").put("sourceType", "IMAGE_REFERENCE").put("providerStatus", "UNBOUND");
+         actor.put("projectId", Documents.project(core)).put("storyBibleId", Documents.id(core)).put("storyOrder", ++characterOrder).put("provider", "SEEDREAM").put("sourceType", "IMAGE_REFERENCE").put("providerStatus", "UNBOUND");
          actor.putArray("requiredViews").add("FRONT").add("LEFT").add("RIGHT").add("BACK");
          ObjectNode saved = this.store.create(ResourceKind.CHARACTER, actor);
          chars.put(Documents.text(p, "characterKey"), Documents.id(saved));
          String firstLook = null;
 
+         int lookOrder = 0;
          for(JsonNode l : p.path("looks")) {
             ObjectNode look = (ObjectNode)l.deepCopy();
-            look.put("projectId", Documents.project(core)).put("characterId", Documents.id(saved)).put("storyBibleId", Documents.id(core));
+            look.put("projectId", Documents.project(core)).put("characterId", Documents.id(saved)).put("storyBibleId", Documents.id(core)).put("storyOrder", ++lookOrder);
             ObjectNode created = this.store.create(ResourceKind.CHARACTER_LOOK, look);
             if (firstLook == null) {
                firstLook = Documents.id(created);
@@ -975,17 +978,19 @@ public class StoryDevelopmentService {
          this.store.update(ResourceKind.CHARACTER, Documents.id(saved), Documents.revision(saved), saved.deepCopy().put("baseLookId", firstLook));
       }
 
+      int locationOrder = 0;
       for(JsonNode p : core.path("content").path("locations")) {
          ObjectNode value = (ObjectNode)p.deepCopy();
-         value.put("projectId", Documents.project(core)).put("storyBibleId", Documents.id(core));
+         value.put("projectId", Documents.project(core)).put("storyBibleId", Documents.id(core)).put("storyOrder", ++locationOrder);
          value.putArray("requiredViews").add("LAYOUT").add("FRONT").add("REVERSE").add("SIDE");
          ObjectNode saved = this.store.create(ResourceKind.LOCATION, value);
          places.put(Documents.text(p, "locationKey"), Documents.id(saved));
       }
 
+      int propOrder = 0;
       for(JsonNode p : core.path("content").path("props")) {
          ObjectNode value = (ObjectNode)p.deepCopy();
-         value.put("projectId", Documents.project(core)).put("storyBibleId", Documents.id(core));
+         value.put("projectId", Documents.project(core)).put("storyBibleId", Documents.id(core)).put("storyOrder", ++propOrder);
          value.putArray("requiredViews").add("FRONT").add("SIDE").add("BACK").add("SCALE");
          ObjectNode saved = this.store.create(ResourceKind.PROP, value);
          props.put(Documents.text(p, "propKey"), Documents.id(saved));
@@ -1009,7 +1014,20 @@ public class StoryDevelopmentService {
          this.store.create(ResourceKind.SCENE, scene);
       }
 
+      this.materializeTemporalContinuity(doc);
+
    }
+
+   private void materializeTemporalContinuity(ObjectNode doc){
+      JsonNode content=doc.path("content"),bindings=this.store.get(ResourceKind.STORY_DOCUMENT,Documents.text(doc,"coreId")).path("continuitySnapshot").path("assetBindings");
+      Map<String,String> factIds=new LinkedHashMap<>();
+      content.path("storyFacts").fields().forEachRemaining(entry->{JsonNode source=entry.getValue();ObjectNode fact=Documents.obj().put("projectId",Documents.project(doc)).put("factKey",entry.getKey()).put("predicate",Documents.text(source,"predicate")).put("statement",Documents.text(source,"statement")).put("status","ACTIVE").put("validFromStoryTime",source.path("validFromStoryTime").asDouble(0)).put("narrativeRole",source.path("narrativeRole").asText("KNOWN_FACT"));
+         if(source.path("revealedAtStoryTime").isNumber())fact.set("revealedAtStoryTime",source.path("revealedAtStoryTime").deepCopy());String subject=resolveBinding(bindings,source.path("subjectCharacterKey").asText());if(!subject.isBlank())fact.put("subjectEntityId",subject);String object=resolveBinding(bindings,source.path("objectPropKey").asText());if(!object.isBlank())fact.put("objectEntityId",object);factIds.put(entry.getKey(),Documents.id(this.store.create(ResourceKind.STORY_FACT,fact)));});
+      content.path("characterKnowledge").fields().forEachRemaining(character->{String characterId=resolveBinding(bindings.path("characters"),character.getKey());character.getValue().fields().forEachRemaining(fact->{String factId=factIds.get(fact.getKey());if(characterId.isBlank()||factId==null)return;for(JsonNode interval:fact.getValue()){ObjectNode knowledge=Documents.obj().put("projectId",Documents.project(doc)).put("characterId",characterId).put("factId",factId).put("knowledgeState",interval.path("knowledgeState").asText("UNKNOWN")).put("validFromStoryTime",interval.path("validFromStoryTime").asDouble(0)).put("knownFromStoryTime",interval.path("validFromStoryTime").asDouble(0));if(interval.path("validToStoryTime").isNumber())knowledge.set("validToStoryTime",interval.path("validToStoryTime").deepCopy());this.store.create(ResourceKind.CHARACTER_KNOWLEDGE,knowledge);}});});
+      content.path("stateLedger").path("props").fields().forEachRemaining(prop->{String propId=resolveBinding(bindings.path("props"),prop.getKey());if(propId.isBlank())return;for(JsonNode interval:prop.getValue()){ObjectNode state=Documents.obj().put("projectId",Documents.project(doc)).put("propId",propId).put("state",interval.path("state").asText("PRESENT")).put("condition",interval.path("condition").asText("INTACT")).put("visible",interval.path("visible").asBoolean(true)).put("validFromStoryTime",interval.path("validFromStoryTime").asDouble(0));String holder=resolveBinding(bindings.path("characters"),interval.path("carriedByCharacterKey").asText());if(!holder.isBlank())state.put("carriedBy",holder);if(interval.hasNonNull("heldByHand"))state.set("heldByHand",interval.path("heldByHand").deepCopy());if(interval.path("validToStoryTime").isNumber())state.set("validToStoryTime",interval.path("validToStoryTime").deepCopy());this.store.create(ResourceKind.PROP_STATE,state);}});
+   }
+
+   private String resolveBinding(JsonNode bindings,String key){if(key==null||key.isBlank())return "";String direct=Documents.text(bindings,key);if(!direct.isBlank())return direct;for(String kind:List.of("characters","locations","props")){String value=Documents.text(bindings.path(kind),key);if(!value.isBlank())return value;}return "";}
 
    private void invalidate(ObjectNode source) {
       Set<String> invalidDocs = new HashSet();

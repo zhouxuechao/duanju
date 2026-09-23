@@ -75,6 +75,17 @@ class MediaContinuityRegressionTest {
         assertThat(engine.plan(request).risks()).anyMatch(r->r.code().equals("STATE_CONFLICT")&&r.path().endsWith("holder"));
     }
 
+    @Test void aNewVisibleSubjectMayAddAnAnchorWithoutConflictingWithTheInheritedAnchorArray() throws Exception {
+        ObjectNode request=request(),shot=(ObjectNode)request.path("shot");
+        ObjectNode actorAnchor=obj().put("subject","actor").put("anchorObject","DOOR").put("relation","LEFT_OF").put("facing","EAST").put("distance","1.2m").put("side","A_SIDE");
+        ObjectNode listenerAnchor=obj().put("subject","listener").put("anchorObject","DOOR").put("relation","RIGHT_OF").put("facing","WEST").put("distance","1.5m").put("side","A_SIDE");
+        ((ObjectNode)request.path("previousState")).putArray("spatialAnchors").add(actorAnchor.deepCopy());
+        shot.with("startState").putArray("spatialAnchors").add(actorAnchor.deepCopy()).add(listenerAnchor.deepCopy());
+        shot.putObject("blocking").putArray("spatialAnchors").add(actorAnchor.deepCopy()).add(listenerAnchor.deepCopy());
+
+        assertThat(engine.plan(request).risks()).noneMatch(r->r.code().equals("STATE_CONFLICT")&&r.path().equals("shot.startState.spatialAnchors"));
+    }
+
     @Test void continuousActionMustInheritPerformanceAndMultipleActionsStillFail() throws Exception {
         ObjectNode request=request();
         ((ObjectNode)request.path("shot")).put("relationToPrevious","CONTINUOUS");

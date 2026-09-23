@@ -128,7 +128,8 @@ public final class DirectorContract {
         p.set("startState",stateSchema(assets));p.set("endState",stateSchema(assets));
         ObjectNode change=object();ObjectNode changeProperties=change.withObject("properties");
         changeProperties.set("path",string().put("pattern","^(characters\\.[^.]+\\.(lookId|position|lookDirection|holding|pose|actionState)|props\\.[^.]+\\.(holder|position|state))$"));
-        changeProperties.set("from",stateValueSchema());changeProperties.set("to",stateValueSchema());changeProperties.set("reason",string());requireAll(change);
+        changeProperties.set("from",stateValueSchema());changeProperties.set("to",stateValueSchema());changeProperties.set("reason",string());
+        changeProperties.set("atSeconds",obj().put("type","number").put("minimum",0).put("maximum",120));requireAll(change);
         p.set("authorizedChanges",array(change,0).put("maxItems",20));
         ObjectNode views=object();ObjectNode viewProperties=views.withObject("properties");
         for(String id:keys(assets,"looks"))viewProperties.set(id,values(List.of("FRONT","LEFT","RIGHT","BACK")));
@@ -158,7 +159,8 @@ public final class DirectorContract {
     }
     private ObjectNode beatSchema(JsonNode assets){
         ObjectNode beat=object(),p=beat.withObject("properties");
-        for(String field:List.of("beatId","beatPurpose","action","conflict","emotionBefore","emotionAfter","informationReveal"))p.set(field,string());
+        for(String field:List.of("beatId","beatPurpose","action","conflict","emotionBefore","emotionAfter"))p.set(field,string());
+        p.set("informationReveal",boundedString(0,600));
         p.set("activeCharacters",ids(assets,"characters"));p.set("storyFactChanges",array(string(),0).put("maxItems",12));p.set("relationshipChanges",array(string(),0).put("maxItems",12));
         ObjectNode knowledge=object(),k=knowledge.withObject("properties");k.set("audienceLearns",array(boundedString(1,240),0).put("maxItems",12));
         ObjectNode characterChange=object(),c=characterChange.withObject("properties");c.set("characterId",values(keys(assets,"characters")));c.set("learns",array(boundedString(1,240),0).put("maxItems",12));c.set("beliefBefore",boundedString(0,240));c.set("beliefAfter",boundedString(0,240));requireAll(characterChange);
@@ -257,7 +259,7 @@ public final class DirectorContract {
         p.set("hand",values(Arrays.stream(ProductionModels.ActionHand.values()).map(Enum::name).toList()));p.set("object",boundedString(0,160));
         requireAll(actionState);return actionState;
     }
-    private ObjectNode stateValueSchema(){ObjectNode value=obj();value.putArray("oneOf").add(string()).add(actionStateSchema());return value;}
+    private ObjectNode stateValueSchema(){ObjectNode value=obj();value.putArray("oneOf").add(boundedString(0,240)).add(actionStateSchema());return value;}
 
     /** Keep project configuration authoritative while retaining the raw provider output on the job. */
     public ObjectNode canonicalizeTrustedFields(JsonNode output,JsonNode input) {
@@ -652,6 +654,7 @@ public final class DirectorContract {
     }
     private void compare(JsonNode previous,JsonNode start,String relative,String path,ShotRelation relation,JsonNode changes) {
         start.fields().forEachRemaining(e->{
+            if(relative.isEmpty()&&"spatialAnchors".equals(e.getKey()))return;
             if(!previous.has(e.getKey()))return;String field=relative.isEmpty()?e.getKey():relative+"."+e.getKey();JsonNode expected=previous.path(e.getKey());
             if(expected.isObject()&&e.getValue().isObject()) { compare(expected,e.getValue(),field,path+"."+e.getKey(),relation,changes);return; }
             boolean identity=e.getKey().equals("identityId");

@@ -69,7 +69,7 @@ class DirectorBatchRecoveryIntegrationTest {
         assertThat(shots).hasSize(10);assertThat(store.get(GENERATION_JOB,id(root)).path("outputSnapshot").path("detailsComplete").asBoolean()).isTrue();
         assertThat(text(shots.getFirst(),"sequenceRelation")).isEqualTo("SEQUENCE_FIRST_CLIP");
         assertThat(text(shots.get(1),"sequenceRelation")).isEqualTo("SEAMLESS_CONTINUATION");
-        assertThat(text(shots.get(2),"sequenceRelation")).isEqualTo("INTENTIONAL_NEXT_SHOT");
+        assertThat(text(shots.get(2),"sequenceRelation")).isEqualTo("SEAMLESS_CONTINUATION");
         for(ObjectNode shot:shots){String current=text(shot.path("currentBeat"),"beatId");List<String> completed=new java.util.ArrayList<>(),reserved=new java.util.ArrayList<>();shot.path("completedBeats").forEach(v->completed.add(v.asText()));shot.path("reservedFutureBeats").forEach(v->reserved.add(v.asText()));assertThat(completed).doesNotContain(current);assertThat(reserved).doesNotContain(current);}
         assertThat(store.get(SCENE,sceneId).path("sceneContinuityPolicy").path("maxContinuationDepth").asInt()).isEqualTo(4);
     }

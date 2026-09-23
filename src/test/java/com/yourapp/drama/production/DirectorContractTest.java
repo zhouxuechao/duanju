@@ -184,7 +184,7 @@ class DirectorContractTest {
         Set<String> screenDirections=new LinkedHashSet<>();skeleton.path("basicBlocking").path("properties").path("characters").path("items").path("properties").path("screenDirection").path("enum").forEach(value->screenDirections.add(value.asText()));
         assertThat(screenDirections).containsExactlyInAnyOrder("FRAME_LEFT","FRAME_RIGHT","INTO_DEPTH","OUT_OF_DEPTH","STATIC");
         assertThat(contract.schema(input).path("properties").path("shots").path("items").path("properties").path("authorizedChanges").path("items").path("properties").fieldNames()).toIterable()
-            .containsExactlyInAnyOrder("path","from","to","reason");
+            .containsExactlyInAnyOrder("path","from","to","reason","atSeconds");
 
         ObjectNode detailInput=input.deepCopy();detailInput.set("shotSkeletons",mapper.createArrayNode().add(mapper.createObjectNode()));
         JsonNode detail=contract.detailSchema(detailInput),detailRoot=detail.path("properties"),detailShot=detailRoot.path("shots").path("items").path("properties");
@@ -409,7 +409,7 @@ class DirectorContractTest {
     @Test void reactionShotCannotMoveActorWithoutAnExplainedChange() {
         ((ObjectNode)shot(1).path("startState").path("characters").path("actor")).put("position","水井旁");
         assertThatThrownBy(()->contract.validate(output,input,"p")).hasMessageContaining("$.shots[1].startState.characters.actor.position");
-        shot(1).withArray("authorizedChanges").add(mapper.createObjectNode().put("path","characters.actor.position").put("from","院门南侧一米").put("to","水井旁").put("reason","剧本明确省略老人从门口走向水井的步行过程"));
+        shot(1).withArray("authorizedChanges").add(mapper.createObjectNode().put("path","characters.actor.position").put("from","院门南侧一米").put("to","水井旁").put("reason","剧本明确省略老人从门口走向水井的步行过程").put("atSeconds",1));
         ((ObjectNode)shot(1).path("blocking").path("characters").path(0)).put("worldPosition","水井旁");
         assertThatCode(()->contract.validate(output,input,"p")).doesNotThrowAnyException();
     }
@@ -444,7 +444,7 @@ class DirectorContractTest {
             assertThatThrownBy(()->contract.validate(output,input,"p")).hasMessageContaining("$.shots[1].relationToPrevious");
         }
         shot(1).put("relationToPrevious","REACTION");
-        shot(1).withArray("authorizedChanges").add(mapper.createObjectNode().put("path","time").put("from","午夜").put("to","午夜稍后").put("reason","人物敲门结束"));
+        shot(1).withArray("authorizedChanges").add(mapper.createObjectNode().put("path","time").put("from","午夜").put("to","午夜稍后").put("reason","人物敲门结束").put("atSeconds",1));
         assertThatThrownBy(()->contract.validate(output,input,"p")).hasMessageContaining("$.shots[1].authorizedChanges[0].path");
     }
     @Test void materializationAddsSharedSceneStateWithoutChangingProviderOutput() {
@@ -507,7 +507,7 @@ class DirectorContractTest {
         ((ObjectNode)input.path("assets")).withArray("looks").add(mapper.createObjectNode().put("id","changed-look").put("characterId","actor"));
         ((ObjectNode)reentry.path("referenceViews")).remove("look");((ObjectNode)reentry.path("referenceViews")).put("changed-look","FRONT");
         assertThatThrownBy(()->contract.validate(output,input,"p")).hasMessageContaining("$.shots[2].startState.characters.actor.lookId");
-        reentry.withArray("authorizedChanges").add(mapper.createObjectNode().put("path","characters.actor.lookId").put("from","look").put("to","changed-look").put("reason","已确认剧本中老人离画脱下外衣，返回时穿内层衣服"));
+        reentry.withArray("authorizedChanges").add(mapper.createObjectNode().put("path","characters.actor.lookId").put("from","look").put("to","changed-look").put("reason","已确认剧本中老人离画脱下外衣，返回时穿内层衣服").put("atSeconds",1));
         assertThatCode(()->contract.validate(output,input,"p")).doesNotThrowAnyException();
     }
     private ObjectNode shot(int index){return (ObjectNode)output.path("shots").path(index);}
