@@ -114,7 +114,7 @@ public class StudioService {
     }
     private void validate(ResourceKind kind,ObjectNode body) {
         switch(kind) {
-            case PROJECT -> { required(body,"name"); required(body,"idea");
+            case PROJECT -> { required(body,"name");String sourceMode=body.path("sourceMode").asText("IDEA").toUpperCase(Locale.ROOT);if(!Set.of("IDEA","NOVEL","SCRIPT").contains(sourceMode))throw new IllegalArgumentException("sourceMode 只支持 IDEA、NOVEL、SCRIPT");body.put("sourceMode",sourceMode);if("IDEA".equals(sourceMode))required(body,"idea");else body.putIfAbsent("idea",TextNode.valueOf("NOVEL".equals(sourceMode)?"等待上传小说":"等待上传剧本"));
                 if(body.has("episodeCount")&&!body.path("episodeCount").isIntegralNumber())throw new IllegalArgumentException("episodeCount 必须为整数");
                 int count=body.path("episodeCount").asInt(1); if(count<1||count>100)throw new IllegalArgumentException("集数应为 1 到 100");
                 body.put("episodeCount",count); body.putIfAbsent("targetDuration",IntNode.valueOf(20)); body.putIfAbsent("ratio",TextNode.valueOf("9:16")); body.putIfAbsent("style",TextNode.valueOf("写实电影")); body.putIfAbsent("dialect",TextNode.valueOf("MANDARIN"));

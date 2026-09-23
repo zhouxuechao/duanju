@@ -1,0 +1,30 @@
+package com.yourapp.drama.workflow;
+
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.yourapp.drama.persistence.DocumentStore;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import static com.yourapp.drama.persistence.ResourceKind.*;
+import static com.yourapp.drama.workflow.Documents.*;
+
+@Service
+public class ScriptImportService {
+    private static final Pattern EPISODE_HEADING=Pattern.compile("^第\\s*(\\d+)\\s*集(?:\\s+|[：:])?(.*)$"),DIALOGUE=Pattern.compile("^([^：:]{1,30})[：:](.+)$");
+    private final DocumentStore store;private final ScriptWorkspaceService scripts;private final NovelDocumentParser parser;private final long maxFileSize;
+    public ScriptImportService(DocumentStore store,ScriptWorkspaceService scripts,NovelDocumentParser parser,@Value("${script.import.max-file-size:52428800}")long maxFileSize){this.store=store;this.scripts=scripts;this.parser=parser;this.maxFileSize=maxFileSize;}
+    public ObjectNode importBytes(String projectId,String fileName,String format,byte[] bytes){ObjectNode project=store.get(PROJECT,projectId);if(!"SCRIPT".equals(text(project,"sourceMode")))throw new WorkflowException("SCRIPT_SOURCE_MODE_REQUIRED","只有上传剧本项目可以直接导入剧本");String normalized=format.toUpperCase(Locale.ROOT);if(!Set.of("TXT","DOCX").contains(normalized))throw new IllegalArgumentException("剧本导入只支持 TXT、DOCX");if(fileName.contains("/")||fileName.contains("\\")||fileName.contains(".."))throw new IllegalArgumentException("文件名不能包含路径");if(bytes.length<1||bytes.length>maxFileSize)throw new IllegalArgumentException("剧本文件大小超出限制");Path temp=null;try{temp=Files.createTempFile("script-import-","."+normalized.toLowerCase(Locale.ROOT));Files.write(temp,bytes);List<String> lines=new ArrayList<>();parser.parse(temp,normalized,lines::add);return materialize(project,fileName,lines);}catch(IOException e){throw new UncheckedIOException("保存剧本导入临时文件失败",e);}finally{if(temp!=null)try{Files.deleteIfExists(temp);}catch(IOException ignored){}}}
+    private ObjectNode materialize(ObjectNode project,String fileName,List<String> lines){List<Draft> drafts=new ArrayList<>();Draft current=null;ObjectNode scene=null;for(String raw:lines){String line=raw==null?"":raw.strip();if(line.isBlank())continue;Matcher episode=EPISODE_HEADING.matcher(line);if(episode.matches()){current=new Draft(Integer.parseInt(episode.group(1)),episode.group(2).strip());drafts.add(current);scene=null;continue;}if(current==null){current=new Draft(1,"");drafts.add(current);}if(line.startsWith("场景：")||line.startsWith("场景:")){scene=current.scene(line.substring(3).strip());continue;}if(scene==null)scene=current.scene("未命名场景");if(line.startsWith("人物：")||line.startsWith("人物:")){String names=line.substring(3);for(String name:names.split("[、,，]"))if(!name.isBlank())scene.withArray("characterNames").add(name.strip());continue;}if(line.startsWith("动作：")||line.startsWith("动作:")){scene.withArray("actions").add(obj().put("text",line.substring(3).strip()).put("sourceType","IMPORTED"));continue;}Matcher dialogue=DIALOGUE.matcher(line);if(dialogue.matches()){ObjectNode imported=obj().put("lineKey","import-"+current.number+"-"+(current.dialogueNo++)).put("speakerName",dialogue.group(1).strip()).put("text",dialogue.group(2).strip()).put("semanticText",dialogue.group(2).strip()).put("sourceType","ORIGINAL_QUOTE");imported.putArray("sourceRefs");scene.withArray("dialogues").add(imported);continue;}current.review=true;current.unparsed.add(line);}
+        if(drafts.isEmpty())throw new WorkflowException("SCRIPT_IMPORT_EMPTY","剧本文件没有可解析内容");ObjectNode result=obj().put("projectId",id(project)).put("fileName",fileName);ArrayNode versions=result.putArray("versions"),issues=result.putArray("issues");for(Draft draft:drafts){if(draft.scenes.isEmpty())draft.scene("未命名场景");ObjectNode structured=obj().put("title",draft.title.isBlank()?"第"+draft.number+"集":draft.title).put("summary",draft.review?"导入内容需要人工复核":"已从剧本文件解析").put("openingHook","").put("endingHook","").put("importStatus",draft.review?"IMPORT_REVIEW_REQUIRED":"PARSED");structured.set("scenes",draft.scenes);structured.putArray("sourceRefs");ObjectNode episode=findOrCreateEpisode(project,draft),provenance=obj().put("sourceType","SCRIPT_IMPORT").put("fileName",fileName).put("importStatus",draft.review?"IMPORT_REVIEW_REQUIRED":"PARSED");ObjectNode version=scripts.createReviewVersion(id(episode),structured,"SCRIPT","SCRIPT_IMPORT",provenance);versions.add(version);draft.unparsed.forEach(value->issues.add(obj().put("episodeNo",draft.number).put("text",value).put("code","IMPORT_REVIEW_REQUIRED")));}result.put("status",issues.isEmpty()?"PARSED":"IMPORT_REVIEW_REQUIRED");return result;}
+    private ObjectNode findOrCreateEpisode(ObjectNode project,Draft draft){return store.list(EPISODE,id(project),null).stream().filter(e->e.path("episodeNo").asInt()==draft.number).findFirst().orElseGet(()->store.create(EPISODE,obj().put("projectId",id(project)).put("episodeNo",draft.number).put("name",draft.title.isBlank()?"第"+draft.number+"集":draft.title).put("summary","导入剧本").put("sourceMode","SCRIPT").put("scriptReviewStatus","REVIEW").put("productionReady",false)));}
+    private static final class Draft {final int number;final String title;final ArrayNode scenes=obj().putArray("scenes");final List<String> unparsed=new ArrayList<>();boolean review;int dialogueNo=1;Draft(int number,String title){this.number=number;this.title=title;}ObjectNode scene(String title){int sceneNo=scenes.size()+1;ObjectNode scene=scenes.addObject().put("sceneKey","import-"+number+"-scene-"+sceneNo).put("title",title).put("summary","").put("sourceType","SCRIPT_IMPORT");scene.putArray("sourceRefs");scene.putArray("characterNames");scene.putArray("actions");scene.putArray("dialogues");return scene;}}
+}
