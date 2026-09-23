@@ -33,6 +33,13 @@ class NovelAnalysisIntegrationTest {
         assertThat(store.list(NOVEL_CHAPTER_ANALYSIS,f.projectId(),null)).hasSize(2);
         assertThat(store.list(NOVEL_STORY_ARC,f.projectId(),f.novelId())).isNotEmpty();
         ObjectNode graph=store.list(NOVEL_STORY_GRAPH,f.projectId(),f.novelId()).getFirst();assertThat(graph.path("storyArcs")).isNotEmpty();
+        assertThat(store.list(NOVEL_AI_JOB,f.projectId(),null)).extracting(job->text(job,"taskType"))
+                .contains("CHUNK_ANALYSIS","CHAPTER_SYNTHESIS","ARC_SYNTHESIS","GLOBAL_GRAPH");
+        assertThat(store.list(NOVEL_CHUNK_ANALYSIS,f.projectId(),null)).allSatisfy(item->{
+            assertThat(item.path("inputHash").asText()).isNotBlank();
+            assertThat(item.path("model").asText()).isEqualTo("deterministic-novel");
+            assertThat(item.path("adaptationSignals").isArray()).isTrue();
+        });
         assertThat(store.list(STORY_FACT,f.projectId(),null)).isNotEmpty().allSatisfy(fact->{assertThat(text(fact,"source")).isEqualTo("NOVEL");assertThat(fact.path("sourceRefs")).isNotEmpty();});
         assertThat(store.list(CHARACTER_KNOWLEDGE,f.projectId(),null)).isNotEmpty().allSatisfy(item->assertThat(item.path("sourceRefs")).isNotEmpty());
         assertThat(store.list(RELATIONSHIP,f.projectId(),null)).isNotEmpty().allSatisfy(item->assertThat(item.path("sourceRefs")).isNotEmpty());

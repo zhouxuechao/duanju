@@ -12,6 +12,7 @@ import static com.yourapp.drama.workflow.Documents.*;
 public class NovelIntelligenceExecutor {
     private final DocumentStore store;private final NovelIntelligenceProvider provider;
     public NovelIntelligenceExecutor(DocumentStore store,NovelIntelligenceProvider provider){this.store=store;this.provider=provider;}
+    public String cacheIdentity(String modelRole){return provider.cacheIdentity(modelRole);}
     public NovelIntelligenceProvider.Result execute(String projectId,NovelPromptIR ir,NovelPromptCompiler.Compiled prompt){
         ObjectNode sourceIds=obj();sourceIds.set("chapterIds",array(ir.chapterIds()));sourceIds.set("chunkIds",array(ir.chunkIds()));sourceIds.set("entityIds",array(ir.entityIds()));sourceIds.set("factIds",array(ir.factIds()));
         ObjectNode job=store.create(NOVEL_AI_JOB,obj().put("projectId",projectId).put("novelId",ir.novelId()).put("taskType",prompt.taskType()).put("status","RUNNING").put("profile",ir.profile()).put("contextHash",ir.contextHash()).put("compilerVersion",prompt.compilerVersion()).put("sourceBoundary",ir.sourceBoundary()).put("startedAt",Instant.now().toString()).set("sourceIds",sourceIds));
