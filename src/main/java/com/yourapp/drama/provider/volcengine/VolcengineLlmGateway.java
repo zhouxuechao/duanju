@@ -19,9 +19,8 @@ public final class VolcengineLlmGateway implements LlmGateway {
     @Override public <T> StructuredResult<T> generate(StructuredRequest request, Class<T> responseType) {
         ProviderInputs.prompt(request.userPrompt());
         JsonNode schema = structuredJson.schema(request.jsonSchema());
-        boolean director="director".equals(request.options().get("modelRole"));
-        String model=director&&properties.getDirectorModel()!=null&&!properties.getDirectorModel().isBlank()?properties.getDirectorModel():properties.getTextModel();
-        String apiStyle=director&&properties.getDirectorModel()!=null&&!properties.getDirectorModel().isBlank()?properties.getDirectorApiStyle():properties.getTextApiStyle();
+        String role=String.valueOf(request.options().getOrDefault("modelRole","text"));
+        String model=model(role),apiStyle=apiStyle(role);
         boolean responses = apiStyle.equals("responses");
         boolean deepseek = model.toLowerCase(java.util.Locale.ROOT).startsWith("deepseek-");
         Map<String, Object> body = ProviderInputs.options(request.options(), responses
@@ -92,6 +91,26 @@ public final class VolcengineLlmGateway implements LlmGateway {
         try{value=structuredJson.parse(output, schema, responseType, result.requestId());}
         catch(ProviderException error){throw error.withProviderDiagnostics(finishReason,metrics.promptTokens(),metrics.completionTokens(),metrics.totalTokens());}
         return new StructuredResult<>(value, model, result.requestId(), output, false,metrics);
+    }
+    private String model(String role){
+        String selected=switch(role){
+            case "director"->properties.getDirectorModel();
+            case "novel_analysis"->properties.getNovelAnalysisModel();
+            case "novel_adaptation"->properties.getNovelAdaptationModel();
+            case "novel_screenwriter"->properties.getNovelScreenwriterModel();
+            default->properties.getTextModel();
+        };
+        return selected==null||selected.isBlank()?properties.getTextModel():selected;
+    }
+    private String apiStyle(String role){
+        String selected=switch(role){
+            case "director"->properties.getDirectorApiStyle();
+            case "novel_analysis"->properties.getNovelAnalysisApiStyle();
+            case "novel_adaptation"->properties.getNovelAdaptationApiStyle();
+            case "novel_screenwriter"->properties.getNovelScreenwriterApiStyle();
+            default->properties.getTextApiStyle();
+        };
+        return selected==null||selected.isBlank()?properties.getTextApiStyle():selected;
     }
     private ProviderException invalid(String requestId, String message) {
         return new ProviderException("INVALID_STRUCTURED_OUTPUT", message, requestId, 200, false, false);

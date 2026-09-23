@@ -10,6 +10,9 @@ public class VolcengineProperties {
     private String apiKey;
     private String textModel;
     private String directorModel;
+    private String novelAnalysisModel;
+    private String novelAdaptationModel;
+    private String novelScreenwriterModel;
     private String imageModel = "doubao-seedream-5-0-260128";
     private String videoModel = "doubao-seedance-2-0-fast-260128";
     private String videoResolution = "480p";
@@ -20,6 +23,9 @@ public class VolcengineProperties {
     private String vlmModel;
     private String textApiStyle = "responses";
     private String directorApiStyle = "responses";
+    private String novelAnalysisApiStyle;
+    private String novelAdaptationApiStyle;
+    private String novelScreenwriterApiStyle;
     private Duration connectTimeout = Duration.ofSeconds(10);
     private Duration requestTimeout = Duration.ofMinutes(10);
     private int maxOutputTokens = 16384;
@@ -56,6 +62,12 @@ public class VolcengineProperties {
     public void setTextModel(String value) { textModel = value; }
     public String getDirectorModel() { return directorModel; }
     public void setDirectorModel(String value) { directorModel = value; }
+    public String getNovelAnalysisModel(){return novelAnalysisModel;}
+    public void setNovelAnalysisModel(String value){novelAnalysisModel=value;}
+    public String getNovelAdaptationModel(){return novelAdaptationModel;}
+    public void setNovelAdaptationModel(String value){novelAdaptationModel=value;}
+    public String getNovelScreenwriterModel(){return novelScreenwriterModel;}
+    public void setNovelScreenwriterModel(String value){novelScreenwriterModel=value;}
     public String getImageModel() { return imageModel; }
     public void setImageModel(String value) { imageModel = value; }
     public String getVideoModel() { return videoModel; }
@@ -77,6 +89,12 @@ public class VolcengineProperties {
     public void setTextApiStyle(String value) { textApiStyle = value; }
     public String getDirectorApiStyle() { return directorApiStyle; }
     public void setDirectorApiStyle(String value) { directorApiStyle = value; }
+    public String getNovelAnalysisApiStyle(){return novelAnalysisApiStyle;}
+    public void setNovelAnalysisApiStyle(String value){novelAnalysisApiStyle=value;}
+    public String getNovelAdaptationApiStyle(){return novelAdaptationApiStyle;}
+    public void setNovelAdaptationApiStyle(String value){novelAdaptationApiStyle=value;}
+    public String getNovelScreenwriterApiStyle(){return novelScreenwriterApiStyle;}
+    public void setNovelScreenwriterApiStyle(String value){novelScreenwriterApiStyle=value;}
     public Duration getConnectTimeout() { return connectTimeout; }
     public void setConnectTimeout(Duration value) { connectTimeout = value; }
     public Duration getRequestTimeout() { return requestTimeout; }

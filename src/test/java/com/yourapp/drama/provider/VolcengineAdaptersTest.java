@@ -138,6 +138,24 @@ class VolcengineAdaptersTest {
             assertThat(format.path("schema")).isEqualTo(mapper.valueToTree(schema));
         }
     }
+    @Test void novelRolesUseDedicatedModelsAndFallBackToTextConfiguration(){
+        properties.setTextModel("text-fallback");properties.setTextApiStyle("responses");
+        properties.setNovelAnalysisModel("novel-analysis");properties.setNovelAnalysisApiStyle("responses");
+        properties.setNovelAdaptationModel("novel-adaptation");properties.setNovelAdaptationApiStyle("responses");
+        properties.setNovelScreenwriterModel("novel-screenwriter");properties.setNovelScreenwriterApiStyle("responses");
+        AtomicReference<JsonNode> captured=new AtomicReference<>();
+        server.createContext("/api/v3/responses",exchange->{captured.set(read(exchange));send(exchange,200,"{\"status\":\"completed\",\"output\":[{\"content\":[{\"type\":\"output_text\",\"text\":\"{\\\"title\\\":\\\"ok\\\"}\"}]}]}");});
+        try(var factory=jakarta.validation.Validation.buildDefaultValidatorFactory()){
+            var gateway=new VolcengineLlmGateway(new ArkHttpClient(mapper,properties),properties,new StructuredJson(mapper,factory.getValidator()));
+            var schema=Map.<String,Object>of("type","object","properties",Map.of("title",Map.of("type","string")),"required",List.of("title"),"additionalProperties",false);
+            assertThat(gateway.generate(new LlmGateway.StructuredRequest("JSON","分析",schema,Map.of("modelRole","novel_analysis")),JsonNode.class).model()).isEqualTo("novel-analysis");
+            assertThat(gateway.generate(new LlmGateway.StructuredRequest("JSON","规划",schema,Map.of("modelRole","novel_adaptation")),JsonNode.class).model()).isEqualTo("novel-adaptation");
+            assertThat(gateway.generate(new LlmGateway.StructuredRequest("JSON","编剧",schema,Map.of("modelRole","novel_screenwriter")),JsonNode.class).model()).isEqualTo("novel-screenwriter");
+            properties.setNovelAnalysisModel("");
+            assertThat(gateway.generate(new LlmGateway.StructuredRequest("JSON","分析",schema,Map.of("modelRole","novel_analysis")),JsonNode.class).model()).isEqualTo("text-fallback");
+            assertThat(captured.get().path("model").asText()).isEqualTo("text-fallback");
+        }
+    }
     @Test void deepseekJsonModeSendsCompleteStorySchemaInSystemMessage()throws Exception{
         properties.setTextModel("deepseek-v4-pro-ga-260813");properties.setTextApiStyle("chat");
         AtomicReference<JsonNode> captured=new AtomicReference<>();

@@ -42,6 +42,9 @@ drama:
       base-url: ${ARK_BASE_URL:https://ark.cn-beijing.volces.com/api/v3}
       text-model: ${ARK_TEXT_MODEL:}
       director-model: ${ARK_DIRECTOR_MODEL:${ARK_TEXT_MODEL:}}
+      novel-analysis-model: ${ARK_NOVEL_ANALYSIS_MODEL:${ARK_TEXT_MODEL:}}
+      novel-adaptation-model: ${ARK_NOVEL_ADAPTATION_MODEL:${ARK_TEXT_MODEL:}}
+      novel-screenwriter-model: ${ARK_NOVEL_SCREENWRITER_MODEL:${ARK_TEXT_MODEL:}}
       image-model: ${ARK_IMAGE_MODEL:doubao-seedream-5-0-260128}
       image-size: ${ARK_IMAGE_SIZE:2K}
       video-model: ${ARK_VIDEO_MODEL:doubao-seedance-2-0-fast-260128}
@@ -52,6 +55,9 @@ drama:
       vlm-model: ${ARK_VLM_MODEL:}
       text-api-style: ${ARK_TEXT_API_STYLE:responses}
       director-api-style: ${ARK_DIRECTOR_API_STYLE:${ARK_TEXT_API_STYLE:responses}}
+      novel-analysis-api-style: ${ARK_NOVEL_ANALYSIS_API_STYLE:${ARK_TEXT_API_STYLE:responses}}
+      novel-adaptation-api-style: ${ARK_NOVEL_ADAPTATION_API_STYLE:${ARK_TEXT_API_STYLE:responses}}
+      novel-screenwriter-api-style: ${ARK_NOVEL_SCREENWRITER_API_STYLE:${ARK_TEXT_API_STYLE:responses}}
       request-timeout: ${ARK_REQUEST_TIMEOUT:10m}
       max-output-tokens: ${ARK_MAX_OUTPUT_TOKENS:16384}
     seed-audio:
@@ -82,3 +88,6 @@ drama:
   render:
     ffmpeg: ${FFMPEG_PATH:ffmpeg}
     ffprobe: ${FFPROBE_PATH:ffprobe}
+  novel:
+    intelligence:
+      mode: ${NOVEL_INTELLIGENCE_MODE:deterministic}

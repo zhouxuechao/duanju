@@ -30,6 +30,7 @@ public enum ResourceKind {
     NOVEL_STORY_ARC("novel_story_arc", "novel-story-arcs", NOVEL_SOURCE, "novelId"),
     NOVEL_STORY_GRAPH("novel_story_graph", "novel-story-graphs", NOVEL_SOURCE, "novelId"),
     NOVEL_ANALYSIS_JOB("novel_analysis_job", "novel-analysis-jobs", NOVEL_CHUNK, "chunkId"),
+    NOVEL_AI_JOB("novel_ai_job", "novel-ai-jobs", null, null),
     ADAPTATION_PLAN("adaptation_plan", "adaptation-plans", null, null),
     EPISODE_ADAPTATION_PLAN("episode_adaptation_plan", "episode-adaptation-plans", ADAPTATION_PLAN, "planId"),
     SCENE("scene", "scenes", EPISODE, "episodeId"),
