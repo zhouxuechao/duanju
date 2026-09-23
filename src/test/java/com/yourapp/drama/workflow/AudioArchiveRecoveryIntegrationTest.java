@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.node.*;
 import com.yourapp.drama.job.GenerationWorker;
 import com.yourapp.drama.job.JobService;
 import com.yourapp.drama.model.voice.VoiceGenerator;
+import com.yourapp.drama.model.ProviderException;
 import com.yourapp.drama.persistence.*;
 import com.yourapp.drama.storage.*;
 import org.junit.jupiter.api.*;
@@ -54,6 +55,23 @@ class AudioArchiveRecoveryIntegrationTest {
         worker.tick();
         assertThat(text(store.get(GENERATION_JOB,id(retried)),"status")).isEqualTo("SUCCESS");
         assertThat(text(store.get(AUDIO_CLIP,id(clip)),"archiveUrl")).isEqualTo("/api/media/audio.mp3");
+        verify(voice,times(1)).generate(any());
+    }
+
+
+    @Test void pipelineCanaryRetryableTtsFailureCallsTheVoiceProviderOnlyOnce() {
+        ObjectNode project=store.create(PROJECT,obj().put("name","音频单次提交").put("idea","对白").put("testRun",true).put("testRunId","tts-retry-fault").put("testPhase","PIPELINE"));
+        ObjectNode episode=store.create(EPISODE,obj().put("projectId",id(project)).put("name","第一集"));
+        ObjectNode scene=store.create(SCENE,obj().put("projectId",id(project)).put("episodeId",id(episode)).put("name","屋内"));
+        ObjectNode location=store.create(LOCATION,obj().put("projectId",id(project)).put("name","屋内").put("description","旧屋"));
+        NewWorkflowTestFixtures.install(store,assetViews,project,episode,null,null,location);
+        ObjectNode shot=obj().put("projectId",id(project)).put("sceneId",id(scene)).put("locationId",id(location)).put("purpose","对白").put("duration",3).put("status","VIDEO_LOCKED");shot.putArray("characterIds");shot.putArray("propIds");shot.putArray("dialogueIds");shot.set("assetViewIds",NewWorkflowTestFixtures.approvedViewIds(store,id(project),id(location)));shot.set("startState",obj());shot.set("endState",obj().put("reviewed",true));shot=store.create(SHOT,shot);
+        ObjectNode profile=store.create(VOICE_PROFILE,obj().put("projectId",id(project)).put("providerVoiceId","voice-1").put("approved",true));
+        ObjectNode line=store.create(DIALOGUE_LINE,obj().put("projectId",id(project)).put("shotId",id(shot)).put("semanticText","别开门").put("subtitleText","别开门").put("spokenText","别开门").put("voiceProfileId",id(profile)));
+        when(voice.generate(any())).thenThrow(new ProviderException("HTTP_503","语音服务明确未接单","tts-retryable",503,true,false));
+        ObjectNode job=post.tts(id(line),obj().put("requestKey","pipeline-tts-once"));worker.tick();worker.tick();
+        assertThat(text(store.get(GENERATION_JOB,id(job)),"status")).isEqualTo("FAILED");
+        assertThat(text(store.get(GENERATION_JOB,id(job)),"status")).isNotEqualTo("RETRY_WAIT");
         verify(voice,times(1)).generate(any());
     }
 }

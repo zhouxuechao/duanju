@@ -43,6 +43,16 @@ class StoryDevelopmentIntegrationTest {
     }
 
     @Test
+    void pipelineCanaryRetryableStoryFailureCallsTheLlmOnlyOnce() {
+        ObjectNode project=store.get(PROJECT,projectId);store.update(PROJECT,projectId,revision(project),project.deepCopy().put("testRun",true).put("testRunId","llm-retry-fault").put("testPhase","PIPELINE"));
+        reset(llm);when(llm.generate(any(),eq(JsonNode.class))).thenThrow(new ProviderException("HTTP_503","文本服务明确未接单","llm-retryable",503,true,false));
+        ObjectNode document=development.start(projectId,obj());String jobId=required(document,"generationJobId");worker.tick();worker.tick();
+        assertThat(text(store.get(GENERATION_JOB,jobId),"status")).isEqualTo("FAILED");
+        assertThat(text(store.get(GENERATION_JOB,jobId),"status")).isNotEqualTo("RETRY_WAIT");
+        verify(llm,times(1)).generate(any(),eq(JsonNode.class));
+    }
+
+    @Test
     void coreGenerationDoesNotCallBatchOrScriptAndConfirmationCreatesOnlyFirstBatch() {
         ObjectNode core = generateCore();
         assertThat(text(core, "reviewStatus")).isEqualTo("REVIEW");

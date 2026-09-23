@@ -39,15 +39,16 @@ public class TestBudgetGuard {
         String category=category(taskType);if("LOCAL".equals(category))return false;
         String run=run(input);double cost=input.path("estimatedCost").asDouble(0);
         if(!Double.isFinite(cost)||cost<0)throw new WorkflowException("TEST_BUDGET_INVALID","真实 Canary 预计成本必须是非负有限数值");
-        return transaction(()->{Reservation next=load(run).reserve(category,cost);
+        return transaction(()->{Reservation next=load(run).reserve(category,taskType,cost);
             int lipsyncLimit="PIPELINE".equalsIgnoreCase(input.path("testPhase").asText())?0:property("TEST_MAX_REAL_LIPSYNC_REQUESTS",2);
-            if(next.reservedCost+next.actualCost>limit(input,"TEST_MAX_COST_CNY",5d)||next.llm>limit(input,"TEST_MAX_REAL_LLM_REQUESTS",20)||next.vlm>limit(input,"TEST_MAX_REAL_VLM_REQUESTS",0)||next.images>limit(input,"TEST_MAX_REAL_IMAGE_REQUESTS",2)||next.videos>limit(input,"TEST_MAX_REAL_VIDEO_REQUESTS",2)||next.tts>limit(input,"TEST_MAX_REAL_AUDIO_REQUESTS",5)||next.lipsync>lipsyncLimit)throw new WorkflowException("TEST_BUDGET_EXCEEDED","真实 Canary 预算或请求次数已达到上限，禁止继续提交付费请求");
+            boolean pipeline="PIPELINE".equalsIgnoreCase(input.path("testPhase").asText());
+            if(next.reservedCost+next.actualCost>limit(input,"TEST_MAX_COST_CNY",5d)||next.llm>limit(input,"TEST_MAX_REAL_LLM_REQUESTS",20)||next.vlm>limit(input,"TEST_MAX_REAL_VLM_REQUESTS",0)||next.images>limit(input,"TEST_MAX_REAL_IMAGE_REQUESTS",2)||next.videos>limit(input,"TEST_MAX_REAL_VIDEO_REQUESTS",2)||next.tts>limit(input,"TEST_MAX_REAL_AUDIO_REQUESTS",5)||next.lipsync>lipsyncLimit||(pipeline&&(next.keyframeQc>4||next.videoQc>4)))throw new WorkflowException("TEST_BUDGET_EXCEEDED","真实 Canary 预算或请求次数已达到上限，禁止继续提交付费请求");
             save(run,next);return true;});
     }
 
     public synchronized void release(String taskType,JsonNode input){
         if(!guarded(input))return;String category=category(taskType);if("LOCAL".equals(category))return;
-        String run=run(input);transaction(()->{Reservation old=load(run);save(run,old.release(category,input.path("estimatedCost").asDouble(0)));return null;});
+        String run=run(input);transaction(()->{Reservation old=load(run);save(run,old.release(category,taskType,input.path("estimatedCost").asDouble(0)));return null;});
     }
 
     public synchronized void settle(String taskType,JsonNode input,boolean wasted){
@@ -69,8 +70,8 @@ public class TestBudgetGuard {
         if(changed==0)try{jdbc.update("INSERT INTO \"test_budget_reservation\" (run_id,document,updated_at) VALUES (?,?,?)",run,document,OffsetDateTime.now(ZoneOffset.UTC));}
         catch(DuplicateKeyException race){jdbc.update("UPDATE \"test_budget_reservation\" SET document=?,updated_at=? WHERE run_id=?",document,OffsetDateTime.now(ZoneOffset.UTC),run);}
     }
-    private ObjectNode document(Reservation value){return obj().put("plannedCost",value.plannedCost).put("reservedCost",value.reservedCost).put("actualCost",value.actualCost).put("wasteCost",value.wasteCost).put("llm",value.llm).put("vlm",value.vlm).put("image",value.images).put("video",value.videos).put("tts",value.tts).put("lipsync",value.lipsync);}
-    private Reservation fromDocument(String json){try{JsonNode value=mapper.readTree(json);return new Reservation(value.path("plannedCost").asDouble(),value.path("reservedCost").asDouble(),value.path("actualCost").asDouble(),value.path("wasteCost").asDouble(),value.path("llm").asInt(),value.path("vlm").asInt(),value.path("image").asInt(),value.path("video").asInt(),value.path("tts").asInt(),value.path("lipsync").asInt());}catch(Exception error){throw new IllegalStateException("测试预算记录损坏",error);}}
+    private ObjectNode document(Reservation value){return obj().put("plannedCost",value.plannedCost).put("reservedCost",value.reservedCost).put("actualCost",value.actualCost).put("wasteCost",value.wasteCost).put("llm",value.llm).put("vlm",value.vlm).put("keyframeQc",value.keyframeQc).put("videoQc",value.videoQc).put("image",value.images).put("video",value.videos).put("tts",value.tts).put("lipsync",value.lipsync);}
+    private Reservation fromDocument(String json){try{JsonNode value=mapper.readTree(json);return new Reservation(value.path("plannedCost").asDouble(),value.path("reservedCost").asDouble(),value.path("actualCost").asDouble(),value.path("wasteCost").asDouble(),value.path("llm").asInt(),value.path("vlm").asInt(),value.path("keyframeQc").asInt(),value.path("videoQc").asInt(),value.path("image").asInt(),value.path("video").asInt(),value.path("tts").asInt(),value.path("lipsync").asInt());}catch(Exception error){throw new IllegalStateException("测试预算记录损坏",error);}}
 
     private boolean guarded(JsonNode input){return (input.path("testRun").asBoolean(false)||environment.getProperty("DRAMA_TEST_RUN",Boolean.class,false))&&!"mock".equalsIgnoreCase(environment.getProperty("drama.provider.mode","mock"));}
     private String run(JsonNode input){return input.path("testRunId").asText(environment.getProperty("DRAMA_TEST_RUN_ID","default-canary"));}
@@ -85,11 +86,11 @@ public class TestBudgetGuard {
         try{double value=Double.parseDouble(raw);if(!Double.isFinite(value)||value<0)throw new NumberFormatException();return value;}catch(NumberFormatException error){throw new WorkflowException("TEST_BUDGET_INVALID",name+" 必须是非负有限数值");}
     }
 
-    private record Reservation(double plannedCost,double reservedCost,double actualCost,double wasteCost,int llm,int vlm,int images,int videos,int tts,int lipsync){
-        static Reservation empty(){return new Reservation(0,0,0,0,0,0,0,0,0,0);}
-        Reservation reserve(String category,double cost){return change(category,1,plannedCost+cost,reservedCost+cost,actualCost,wasteCost);}
-        Reservation release(String category,double cost){return change(category,-1,plannedCost,Math.max(0,reservedCost-cost),actualCost,wasteCost);}
-        Reservation settle(double cost,boolean wasted){return new Reservation(plannedCost,Math.max(0,reservedCost-cost),actualCost+cost,wasteCost+(wasted?cost:0),llm,vlm,images,videos,tts,lipsync);}
-        private Reservation change(String category,int delta,double planned,double reserved,double actual,double waste){return new Reservation(planned,reserved,actual,waste,llm+("LLM".equals(category)?delta:0),vlm+("VLM".equals(category)?delta:0),images+("IMAGE".equals(category)?delta:0),videos+("VIDEO".equals(category)?delta:0),tts+("TTS".equals(category)?delta:0),lipsync+("LIPSYNC".equals(category)?delta:0));}
+    private record Reservation(double plannedCost,double reservedCost,double actualCost,double wasteCost,int llm,int vlm,int keyframeQc,int videoQc,int images,int videos,int tts,int lipsync){
+        static Reservation empty(){return new Reservation(0,0,0,0,0,0,0,0,0,0,0,0);}
+        Reservation reserve(String category,String taskType,double cost){return change(category,taskType,1,plannedCost+cost,reservedCost+cost,actualCost,wasteCost);}
+        Reservation release(String category,String taskType,double cost){return change(category,taskType,-1,plannedCost,Math.max(0,reservedCost-cost),actualCost,wasteCost);}
+        Reservation settle(double cost,boolean wasted){return new Reservation(plannedCost,Math.max(0,reservedCost-cost),actualCost+cost,wasteCost+(wasted?cost:0),llm,vlm,keyframeQc,videoQc,images,videos,tts,lipsync);}
+        private Reservation change(String category,String taskType,int delta,double planned,double reserved,double actual,double waste){return new Reservation(planned,reserved,actual,waste,llm+("LLM".equals(category)?delta:0),vlm+("VLM".equals(category)?delta:0),keyframeQc+("KEYFRAME_QC".equals(taskType)?delta:0),videoQc+("VIDEO_QC".equals(taskType)?delta:0),images+("IMAGE".equals(category)?delta:0),videos+("VIDEO".equals(category)?delta:0),tts+("TTS".equals(category)?delta:0),lipsync+("LIPSYNC".equals(category)?delta:0));}
     }
 }

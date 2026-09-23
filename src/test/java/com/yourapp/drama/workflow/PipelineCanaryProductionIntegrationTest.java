@@ -3,18 +3,26 @@ package com.yourapp.drama.workflow;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yourapp.drama.persistence.DocumentStore;
+import com.yourapp.drama.model.ImageGenerator;
+import com.yourapp.drama.model.VideoGenerator;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import java.util.List;
+import java.util.Set;
 
 import static com.yourapp.drama.persistence.ResourceKind.*;
 import static com.yourapp.drama.workflow.Documents.*;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.ArgumentMatchers.any;
 
 @SpringBootTest(properties={"drama.render.ffmpeg=frontend/node_modules/ffmpeg-static/ffmpeg.exe","drama.render.ffprobe=frontend/node_modules/ffprobe-static/bin/win32/x64/ffprobe.exe"})
 @ActiveProfiles("test")
@@ -24,6 +32,8 @@ class PipelineCanaryProductionIntegrationTest {
     @Autowired DocumentStore store;
     @Autowired StudioService studio;
     @Autowired ObjectMapper mapper;
+    @MockitoSpyBean ImageGenerator images;
+    @MockitoSpyBean VideoGenerator videos;
 
     @Test
     void fixedIdeaRunsThroughThePersistedProductionWorkflow() {
@@ -80,6 +90,8 @@ class PipelineCanaryProductionIntegrationTest {
         assertThat(jobs.stream().filter(job->"VIDEO".equals(text(job,"type")))).hasSize(4);
         assertThat(jobs.stream().filter(job->"TTS".equals(text(job,"type")))).hasSize(2);
         assertThat(jobs).allSatisfy(job->{assertThat(job.path("inputSnapshot").path("testRun").asBoolean()).isTrue();assertThat(text(job.path("inputSnapshot"),"testRunId")).isEqualTo("production-e2e");assertThat(text(job.path("inputSnapshot"),"testPhase")).isEqualTo("PIPELINE");});
+        assertThat(jobs.stream().filter(job->Set.of("STORY","SCRIPT","STORY_QA","DIRECTOR_PLAN","SHOT_DETAIL","ASSET_IMAGE","STORYBOARD","KEYFRAME","KEYFRAME_QC","VIDEO_QC","VIDEO","TTS","LIPSYNC").contains(text(job,"type"))))
+            .allSatisfy(job->assertThat(job.path("maxAttempts").asInt()).as(text(job,"type")).isEqualTo(1));
         assertThat(store.list(DIALOGUE_LINE,projectId,null)).allSatisfy(line->{assertThat(text(line,"semanticText")).isNotBlank();assertThat(text(line,"spokenText")).isNotBlank();assertThat(text(line,"subtitleText")).isNotBlank();assertThat(text(line,"voiceProfileId")).isNotBlank();});
         assertThat(store.list(AUDIO_CLIP,projectId,null)).allSatisfy(clip->{assertThat(clip.path("locked").asBoolean()).isTrue();assertThat(clip.path("selected").asBoolean()).isTrue();assertThat(clip.path("voiceSnapshot").isObject()).isTrue();});
         List<ObjectNode> reviews=store.list(QC_RESULT,projectId,null);
@@ -120,4 +132,41 @@ class PipelineCanaryProductionIntegrationTest {
         assertThat(text(result,"projectId")).isEqualTo(id(orphan));
         assertThat(store.list(PROJECT,null,null).stream().filter(value->runId.equals(text(value,"pipelineCanaryRunId")))).hasSize(1);
     }
+
+    @Test void failedKeyframeQcResumeBlocksWithoutASecondImageDispatch(){
+        ObjectNode result=adapter.start(PipelineCanaryFixture.standard(),"keyframe-qc-resume","MOCK");String projectId=text(result,"projectId");
+        ObjectNode frame=store.get(KEYFRAME,result.path("keyframeArtifactIds").path(0).asText());
+        store.update(KEYFRAME,id(frame),revision(frame),frame.deepCopy().put("qcStatus","FAILED").put("selected",false).put("locked",false));
+        reopen(result);clearInvocations(images);
+
+        ObjectNode resumed=adapter.resume(text(result,"pipelineRunId"));
+
+        assertThat(text(resumed,"lastErrorCode")).isIn("PIPELINE_CANARY_SECOND_TAKE_BLOCKED","KEYFRAME_QC_REVIEW_REQUIRED");
+        verify(images,never()).generate(any());
+        assertThat(store.list(KEYFRAME,projectId,text(frame,"shotId"))).hasSize(1);
+    }
+
+    @Test void failedVideoQcResumeBlocksWithoutASecondVideoSubmission(){
+        ObjectNode result=adapter.start(PipelineCanaryFixture.standard(),"video-qc-resume","MOCK");String projectId=text(result,"projectId");
+        ObjectNode take=store.get(VIDEO_TAKE,result.path("selectedTakeIds").path(0).asText());
+        store.update(VIDEO_TAKE,id(take),revision(take),take.deepCopy().put("qcStatus","FAILED").put("selected",false).put("locked",false));
+        reopen(result);clearInvocations(videos);
+
+        ObjectNode resumed=adapter.resume(text(result,"pipelineRunId"));
+
+        assertThat(text(resumed,"lastErrorCode")).isIn("PIPELINE_CANARY_SECOND_TAKE_BLOCKED","VIDEO_QC_REVIEW_REQUIRED");
+        verify(videos,never()).submit(any());
+        assertThat(store.list(VIDEO_TAKE,projectId,text(take,"shotId"))).hasSize(1);
+    }
+
+    @Test void passedButUnlockedVideoResumeLocksTheExistingTakeWithoutResubmission(){
+        ObjectNode result=adapter.start(PipelineCanaryFixture.standard(),"video-lock-resume","MOCK");ObjectNode take=store.get(VIDEO_TAKE,result.path("selectedTakeIds").path(0).asText());
+        store.update(VIDEO_TAKE,id(take),revision(take),take.deepCopy().put("selected",false).put("locked",false));reopen(result);clearInvocations(videos);
+
+        ObjectNode resumed=adapter.resume(text(result,"pipelineRunId"));
+
+        assertThat(text(resumed,"status")).isEqualTo("SUCCESS");verify(videos,never()).submit(any());ObjectNode locked=store.get(VIDEO_TAKE,id(take));assertThat(locked.path("selected").asBoolean()).isTrue();assertThat(locked.path("locked").asBoolean()).isTrue();
+    }
+
+    private void reopen(ObjectNode result){ObjectNode run=store.get(PIPELINE_RUN,text(result,"pipelineRunId"));store.update(PIPELINE_RUN,id(run),revision(run),run.deepCopy().put("status","WAITING"));}
 }

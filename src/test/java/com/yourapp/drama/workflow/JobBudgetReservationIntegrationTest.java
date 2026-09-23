@@ -20,6 +20,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 
+import java.util.Set;
+
 @SpringBootTest @ActiveProfiles("test") @Transactional
 class JobBudgetReservationIntegrationTest {
     @Autowired DocumentStore store;@Autowired JobService jobs;@MockitoBean TestBudgetGuard budget;
@@ -51,5 +53,32 @@ class JobBudgetReservationIntegrationTest {
         ObjectNode failed=jobs.fail(id(running),"TEST_FAILURE","用于验证任务字段",false,false);
         assertThat(text(failed,"phase")).isEqualTo("FAILED");
         assertThat(failed.path("elapsedMs").isIntegralNumber()).isTrue();
+    }
+
+    @Test void pipelineCanaryPaidJobsAreSingleAttemptWhileNormalJobsKeepTheirRetryPolicy(){
+        ObjectNode canary=store.create(PROJECT,obj().put("name","Pipeline Canary").put("idea","付费请求只提交一次")
+            .put("testRun",true).put("testRunId","single-attempt").put("testPhase","PIPELINE"));
+        Set<String> paid=Set.of("STORY","SCRIPT","STORY_QA","DIRECTOR_PLAN","SHOT_DETAIL","ASSET_IMAGE","STORYBOARD","KEYFRAME","KEYFRAME_QC","VIDEO_QC","VIDEO","TTS","LIPSYNC");
+        for(String type:paid)assertThat(jobs.enqueue(id(canary),null,type,obj(),"single-"+type).path("maxAttempts").asInt()).as(type).isEqualTo(1);
+
+        ObjectNode normal=store.create(PROJECT,obj().put("name","普通项目").put("idea","保留原重试策略"));
+        assertThat(jobs.enqueue(id(normal),null,"VIDEO",obj(),"normal-video").path("maxAttempts").asInt()).isEqualTo(3);
+    }
+
+    @Test void pipelineCanaryRetryableFailureNeverWaitsForCreationRetryAndUncertainFailureRequiresReconciliation(){
+        ObjectNode project=store.create(PROJECT,obj().put("name","Pipeline Canary").put("idea","失败关闭")
+            .put("testRun",true).put("testRunId","fail-closed").put("testPhase","PIPELINE"));
+        ObjectNode retryable=jobs.enqueue(id(project),null,"VIDEO",obj(),"retryable-video");
+        ObjectNode running=jobs.claim(id(project)).orElseThrow();
+        ObjectNode failed=jobs.fail(id(running),"HTTP_503","明确未提交",true,false);
+        assertThat(text(failed,"status")).isEqualTo("FAILED");
+        assertThat(text(failed,"status")).isNotEqualTo("RETRY_WAIT");
+
+        ObjectNode uncertain=jobs.enqueue(id(project),null,"KEYFRAME",obj(),"uncertain-image");
+        while(!id(uncertain).equals(id(running=jobs.claim(id(project)).orElseThrow()))) jobs.fail(id(running),"TEST_DRAIN","测试清理",false,false);
+        ObjectNode unknown=jobs.fail(id(running),"REQUEST_TIMEOUT","响应丢失",true,true);
+        assertThat(text(unknown,"status")).isEqualTo("UNKNOWN");
+        assertThat(unknown.path("reconciliationRequired").asBoolean()).isTrue();
+        assertThat(jobs.claim(id(project))).isEmpty();
     }
 }

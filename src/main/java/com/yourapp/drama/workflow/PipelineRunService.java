@@ -64,14 +64,15 @@ public class PipelineRunService {
      */
     private void drive(ObjectNode run){
         String projectId=project(run),mode=text(run,"mode");
+        boolean pipelineCanary=pipelineCanary(projectId);
         ObjectNode readiness=preflight.review(projectId,mode);
         if(!readiness.path("ready").asBoolean())throw new WorkflowException("PREFLIGHT_BLOCKED","Pipeline 自检未通过："+readiness.path("blocking"));
         driveStory(projectId);
         driveAssetViews(projectId);
         driveShotPlans(projectId);
-        driveKeyframes(projectId,"golden-basic".equals(text(run,"scenarioId")),"MOCK".equals(mode),"phase-b-production".equals(text(run,"scenarioId")));
-        driveVideos(projectId);
-        driveAudio(projectId);
+        driveKeyframes(projectId,"golden-basic".equals(text(run,"scenarioId")),"MOCK".equals(mode),"phase-b-production".equals(text(run,"scenarioId")),pipelineCanary);
+        driveVideos(projectId,pipelineCanary);
+        driveAudio(projectId,pipelineCanary);
         driveTimelines(projectId);
     }
 
@@ -116,7 +117,7 @@ public class PipelineRunService {
         for(ObjectNode scene:scenes)if(store.list(SHOT,projectId,id(scene)).stream().noneMatch(s->!s.path("stale").asBoolean()))throw new WorkflowException("SHOT_PLAN_MISSING","导演任务结束后仍没有镜头");
     }
 
-    private void driveKeyframes(String projectId,boolean exerciseRetake,boolean deterministicAcceptance,boolean canaryAcceptance){
+    private void driveKeyframes(String projectId,boolean exerciseRetake,boolean deterministicAcceptance,boolean canaryAcceptance,boolean pipelineCanary){
         List<ObjectNode> shots=orderedShots(projectId);boolean first=true,skipPrevis=skipPrevis(projectId);
         for(ObjectNode shot:shots){
             if(first&&!skipPrevis&&!approved(projectId,id(shot),STORYBOARD).isPresent()){
@@ -125,6 +126,14 @@ public class PipelineRunService {
             }
             if(approved(projectId,id(shot),KEYFRAME).isEmpty()){
                 List<ObjectNode> frames=store.list(KEYFRAME,projectId,id(shot));ObjectNode job;
+                if(pipelineCanary&&!frames.isEmpty()){
+                    ObjectNode frame=frames.getLast();
+                    if("FAILED".equals(text(frame,"qcStatus")))throw new WorkflowException("KEYFRAME_QC_REVIEW_REQUIRED","Pipeline Canary 关键帧质检失败，禁止自动生成第二张关键帧");
+                    if(!"PASSED".equals(text(frame,"qcStatus")))visualReview.review(id(frame),obj().put("apply",true).put("allowAutomaticRepair",false).put("deterministicAcceptance",deterministicAcceptance).put("canaryAcceptance",canaryAcceptance).put("requestKey","pipeline-keyframe-qc-"+id(frame)));
+                    frame=store.get(KEYFRAME,id(frame));
+                    if(!"PASSED".equals(text(frame,"qcStatus")))throw new WorkflowException("KEYFRAME_QC_REVIEW_REQUIRED","关键帧自动质检未通过，Pipeline Canary 禁止自动返修");
+                    workflow.lock(KEYFRAME,id(frame),obj().put("generateVideo",false));first=false;continue;
+                }
                 if(!frames.isEmpty()&&"FAILED".equals(text(frames.getLast(),"qcStatus")))job=workflow.regenerateLatestKeyframe(id(frames.getLast()),obj().put("requestKey","pipeline-keyframe-retry-"+id(shot)));
                 else job=workflow.image(id(shot),"KEYFRAME",obj().put("requestKey","pipeline-keyframe-"+id(shot)+"-"+frames.size()));
                 complete(job);ObjectNode frame=latest(projectId,id(shot),KEYFRAME);
@@ -138,19 +147,26 @@ public class PipelineRunService {
         }
     }
 
-    private void driveVideos(String projectId){
+    private void driveVideos(String projectId,boolean pipelineCanary){
         for(ObjectNode shot:orderedShots(projectId))if(approved(projectId,id(shot),VIDEO_TAKE).isEmpty()){
             ObjectNode frame=approved(projectId,id(shot),KEYFRAME).orElseThrow();
-            List<ObjectNode> takes=store.list(VIDEO_TAKE,projectId,id(shot));ObjectNode take=takes.stream().filter(t->"SUCCEEDED".equals(text(t,"providerStatus"))&&"PENDING".equals(text(t,"qcStatus"))).findFirst().orElse(null);
+            List<ObjectNode> takes=store.list(VIDEO_TAKE,projectId,id(shot));
+            if(pipelineCanary&&(!takes.isEmpty()||hasJob(projectId,id(shot),"VIDEO"))){drain(projectId,64);takes=store.list(VIDEO_TAKE,projectId,id(shot));}
+            ObjectNode take=takes.stream().filter(t->"SUCCEEDED".equals(text(t,"providerStatus"))&&Set.of("PENDING","PASSED").contains(text(t,"qcStatus"))).findFirst().orElse(null);
+            if(pipelineCanary&&take==null&&!takes.isEmpty()){
+                boolean qcFailed=takes.stream().anyMatch(t->"FAILED".equals(text(t,"qcStatus"))||"MANUAL_FIX".equals(text(t,"decision")));
+                throw new WorkflowException(qcFailed?"VIDEO_QC_REVIEW_REQUIRED":"PIPELINE_CANARY_SECOND_TAKE_BLOCKED",qcFailed?"Pipeline Canary 视频质检失败，禁止自动生成第二条视频":"Pipeline Canary 已存在视频任务或成片，禁止自动提交第二条视频");
+            }
+            if(pipelineCanary&&take==null&&hasJob(projectId,id(shot),"VIDEO"))throw new WorkflowException("PIPELINE_CANARY_SECOND_TAKE_BLOCKED","Pipeline Canary 已有视频生成任务，禁止自动重新提交");
             if(take==null){ObjectNode job=workflow.video(id(frame),obj().put("requestKey","pipeline-video-"+id(shot)+"-"+takes.size()).put("allowAutomaticRepair",false));complete(job);take=latest(projectId,id(shot),VIDEO_TAKE);}
             drain(projectId,64);take=store.get(VIDEO_TAKE,id(take));
-            if(!"PASSED".equals(text(take,"qcStatus")))throw new WorkflowException("VIDEO_QC_PENDING","视频自动质检尚未通过");
+            if(!"PASSED".equals(text(take,"qcStatus")))throw new WorkflowException(pipelineCanary?"VIDEO_QC_REVIEW_REQUIRED":"VIDEO_QC_PENDING","视频自动质检尚未通过");
             workflow.lock(VIDEO_TAKE,id(take),obj());
         }
         drain(projectId,512);
     }
 
-    private void driveAudio(String projectId){
+    private void driveAudio(String projectId,boolean pipelineCanary){
         Map<String,String> voices=new HashMap<>();
         for(ObjectNode profile:store.list(VOICE_PROFILE,projectId,null))if(profile.hasNonNull("characterId")&&profile.path("approved").asBoolean())voices.put(text(profile,"characterId"),id(profile));
         for(ObjectNode line:store.list(DIALOGUE_LINE,projectId,null)){
@@ -160,7 +176,7 @@ public class PipelineRunService {
             if(text(line,"spokenText").isBlank())line=post.dialect(id(line),obj().put("dialect",line.path("dialect").asText("MANDARIN")));
             String lineId=id(line),shotId=required(line,"shotId");
             boolean ready=store.list(AUDIO_CLIP,projectId,shotId).stream().anyMatch(a->lineId.equals(text(a,"dialogueLineId"))&&a.path("locked").asBoolean());
-            if(!ready){ObjectNode job=post.tts(lineId,obj().put("requestKey","pipeline-tts-"+lineId));complete(job);ObjectNode clip=store.list(AUDIO_CLIP,projectId,shotId).stream().filter(a->lineId.equals(text(a,"dialogueLineId"))).reduce((a,b)->b).orElseThrow();workflow.lock(AUDIO_CLIP,id(clip),obj());}
+            if(!ready){ObjectNode job=pipelineCanary?jobForInput(projectId,"TTS","dialogueLineId",lineId).orElseGet(()->post.tts(lineId,obj().put("requestKey","pipeline-tts-"+lineId))):post.tts(lineId,obj().put("requestKey","pipeline-tts-"+lineId));complete(job);ObjectNode clip=store.list(AUDIO_CLIP,projectId,shotId).stream().filter(a->lineId.equals(text(a,"dialogueLineId"))).reduce((a,b)->b).orElseThrow();workflow.lock(AUDIO_CLIP,id(clip),obj());}
         }
         if(store.list(DIALOGUE_LINE,projectId,null).isEmpty())throw new WorkflowException("DIALOGUE_REQUIRED","FREE Golden Flow 必须包含对白与字幕验收");
     }
@@ -184,6 +200,9 @@ public class PipelineRunService {
     private ObjectNode latest(String projectId,String parentId,ResourceKind kind){List<ObjectNode> values=store.list(kind,projectId,parentId);if(values.isEmpty())throw new WorkflowException("PIPELINE_ARTIFACT_MISSING",kind+" 未生成");return values.getLast();}
     private List<ObjectNode> ordered(ResourceKind kind,String projectId,String parentId,String field){List<ObjectNode> values=new ArrayList<>(store.list(kind,projectId,parentId));values.sort(Comparator.comparingInt(v->v.path(field).asInt(Integer.MAX_VALUE)));return values;}
     private List<ObjectNode> orderedShots(String projectId){List<ObjectNode> result=new ArrayList<>();for(ObjectNode episode:ordered(EPISODE,projectId,null,"episodeNo"))for(ObjectNode scene:ordered(SCENE,projectId,id(episode),"sceneNo"))result.addAll(ordered(SHOT,projectId,id(scene),"shotNo").stream().filter(s->!s.path("stale").asBoolean()).toList());return result;}
+    private boolean pipelineCanary(String projectId){ObjectNode project=store.get(PROJECT,projectId);return project.path("testRun").asBoolean(false)&&"PIPELINE".equalsIgnoreCase(text(project,"testPhase"));}
+    private boolean hasJob(String projectId,String shotId,String type){return store.list(GENERATION_JOB,projectId,null).stream().anyMatch(job->type.equals(text(job,"type"))&&shotId.equals(text(job,"shotId")));}
+    private Optional<ObjectNode> jobForInput(String projectId,String type,String field,String value){return store.list(GENERATION_JOB,projectId,null).stream().filter(job->type.equals(text(job,"type"))&&value.equals(text(job.path("inputSnapshot"),field))).findFirst();}
     private ObjectNode complete(ObjectNode submitted){for(int step=0;step<1024;step++){ObjectNode job=store.get(GENERATION_JOB,id(submitted));if("SUCCESS".equals(text(job,"status")))return job;if(Set.of("FAILED","CANCELLED").contains(text(job,"status")))throw new WorkflowException(text(job,"failureCode"),text(job,"failureReason"));if(Set.of("UNKNOWN","WAITING_HUMAN").contains(text(job,"status")))throw new WorkflowException("PROVIDER_STATUS_UNKNOWN","任务 "+id(job)+" 的服务商状态未知，必须先对账");if(!worker.tickProject(project(job)))throw stalled(project(job),text(job,"type"),"任务未结束且没有可执行工作");}throw new WorkflowException("PIPELINE_STEP_LIMIT","任务超过安全执行步数："+id(submitted));}
     private void drain(String projectId,int limit){for(int step=0;step<limit;step++){List<ObjectNode> active=store.list(GENERATION_JOB,projectId,null).stream().filter(j->Set.of("QUEUED","RUNNING","RETRY_WAIT").contains(text(j,"status"))).toList();if(active.isEmpty()){failIfTerminal(projectId);return;}if(!worker.tickProject(projectId))throw stalled(projectId,"JOB_DRAIN","存在任务但当前无法安全执行");}throw new WorkflowException("PIPELINE_STEP_LIMIT","项目任务超过安全执行步数");}
     private void failIfTerminal(String projectId){store.list(GENERATION_JOB,projectId,null).stream().filter(j->Set.of("FAILED","UNKNOWN","WAITING_HUMAN").contains(text(j,"status"))).findFirst().ifPresent(j->{String status=text(j,"status");throw new WorkflowException("FAILED".equals(status)?text(j,"failureCode"):"PROVIDER_STATUS_UNKNOWN",text(j,"failureReason"));});}

@@ -14,9 +14,9 @@ import static com.yourapp.drama.workflow.Documents.*;
 public class AutomaticVisualReviewService {
     private static final Object[] LOCKS=new Object[64];static{Arrays.setAll(LOCKS,ignored->new Object());}
     private final DocumentStore store;private final VisualExpectedContextService expectedContexts;private final VisualQualityReviewer reviewer;
-    private final RuleEngine rules;private final VisualQualityProtocol protocol;private final VisualQualityPolicy policy;private final VisualReviewMediaService media;private final WorkflowService workflow;
-    public AutomaticVisualReviewService(DocumentStore store,VisualExpectedContextService expectedContexts,VisualQualityReviewer reviewer,RuleEngine rules,VisualQualityProtocol protocol,VisualQualityPolicy policy,VisualReviewMediaService media,WorkflowService workflow){
-        this.store=store;this.expectedContexts=expectedContexts;this.reviewer=reviewer;this.rules=rules;this.protocol=protocol;this.policy=policy;this.media=media;this.workflow=workflow;
+    private final RuleEngine rules;private final VisualQualityProtocol protocol;private final VisualQualityPolicy policy;private final VisualReviewMediaService media;private final WorkflowService workflow;private final TestBudgetGuard testBudget;
+    public AutomaticVisualReviewService(DocumentStore store,VisualExpectedContextService expectedContexts,VisualQualityReviewer reviewer,RuleEngine rules,VisualQualityProtocol protocol,VisualQualityPolicy policy,VisualReviewMediaService media,WorkflowService workflow,TestBudgetGuard testBudget){
+        this.store=store;this.expectedContexts=expectedContexts;this.reviewer=reviewer;this.rules=rules;this.protocol=protocol;this.policy=policy;this.media=media;this.workflow=workflow;this.testBudget=testBudget;
     }
 
     /** Defaults to shadow assessment. Callers must explicitly set apply=true to affect the production gate. */
@@ -34,8 +34,11 @@ public class AutomaticVisualReviewService {
         if(request.path("canaryAcceptance").asBoolean()||frame.path("simulated").asBoolean()&&request.path("deterministicAcceptance").asBoolean())expected.set("reviewPolicy",obj().put("importantCharacterFirstAppearance",false).put("importantLocationFirstAppearance",false));
         ObjectNode reviewInput=request.isObject()?(ObjectNode)request.deepCopy():obj();
         if(frame.path("simulated").asBoolean()&&request.path("deterministicAcceptance").asBoolean()&&!reviewInput.path("observedConstraints").isObject())reviewInput.set("observedConstraints",expected.path("requiredConstraints").deepCopy());
-        ObjectNode generated=media.prepare(frame,generation,expected,reviewInput);JsonNode result;
-        try{result=protocol.validate(reviewer.review(expected,generated),expected);}catch(ProviderException failure){failedAssessment(frame,assessmentKey,shadow,failure);throw failure;}
+        ObjectNode generated=media.prepare(frame,generation,expected,reviewInput),budgetInput=reviewBudgetInput(generation);JsonNode result;
+        boolean reserved=testBudget!=null&&testBudget.reserve("KEYFRAME_QC",budgetInput);
+        try{result=protocol.validate(reviewer.review(expected,generated),expected);if(reserved)testBudget.settle("KEYFRAME_QC",budgetInput,false);}
+        catch(ProviderException failure){if(reserved)testBudget.settle("KEYFRAME_QC",budgetInput,true);failedAssessment(frame,assessmentKey,shadow,failure);throw failure;}
+        catch(RuntimeException failure){if(reserved)testBudget.settle("KEYFRAME_QC",budgetInput,true);throw failure;}
         VisualQualityPolicy.Decision route=policy.decide(result,expected,priorProviderDecisions(keyframeId));
         if(route==VisualQualityPolicy.Decision.AUTO_REGENERATE&&!request.path("allowAutomaticRepair").asBoolean(true))route=VisualQualityPolicy.Decision.MANUAL_REVIEW;
         ObjectNode body=reviewBody(expected,result,route).put("assessmentKey",assessmentKey);
@@ -98,6 +101,7 @@ public class AutomaticVisualReviewService {
             .put("retryable",failure.retryable()).put("submissionUncertain",failure.uncertain());if(failure.requestId()!=null&&!failure.requestId().isBlank())qc.put("providerRequestId",failure.requestId());if(failure.rawOutput()!=null)qc.put("providerOutputRaw",bounded(failure.rawOutput()));store.create(QC_RESULT,QcGenerationProvenance.attach(qc,frame));
     }
     private String bounded(String value){return value.length()<=16000?value:value.substring(0,16000);}
+    private ObjectNode reviewBudgetInput(JsonNode generation){ObjectNode input=obj();for(String field:List.of("testRun","testRunId","testPhase","estimatedCost"))if(generation.has(field))input.set(field,generation.path(field).deepCopy());return input;}
     private long nextReviewSequence(ObjectNode frame){return store.list(QC_RESULT,project(frame),null).stream().filter(review->id(frame).equals(text(review,"targetId"))).mapToLong(review->review.path("reviewSequence").asLong(0)).max().orElse(0)+1;}
     private double score(JsonNode result,String metric){return result.path(metric).path("score").asDouble();}
 }

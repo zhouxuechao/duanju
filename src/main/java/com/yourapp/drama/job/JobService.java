@@ -17,6 +17,9 @@ import static com.yourapp.drama.workflow.Documents.*;
 
 @Service
 public class JobService {
+    private static final Set<String> PIPELINE_PAID_JOB_TYPES=Set.of(
+        "STORY","SCRIPT","STORY_QA","DIRECTOR_PLAN","SHOT_DETAIL",
+        "ASSET_IMAGE","STORYBOARD","KEYFRAME","KEYFRAME_QC","VIDEO_QC","VIDEO","TTS","LIPSYNC");
     private final DocumentStore store;
     private final JobEvents events;
     private final ModelRoutingPolicy routing;
@@ -40,8 +43,9 @@ public class JobService {
             }
             enforceBudget(projectDocument,shotId,type,frozen);
             boolean reserved=testBudget.reserve(type,frozen);
+            int maxAttempts=pipelineCanary(frozen)&&PIPELINE_PAID_JOB_TYPES.contains(type)?1:3;
             String localTaskId=UUID.randomUUID().toString();ObjectNode next=obj().put("id",localTaskId).put("localTaskId",localTaskId).put("projectId",projectId).put("type",type).put("status","QUEUED").put("phase","QUEUED").put("progress",0)
-                .put("attempts",0).put("retryCount",0).put("maxAttempts",3).put("cost",0).put("costKnown",false).put("requestKey",requestKey==null?UUID.randomUUID().toString():requestKey).put("generationProfile",generationProfile);
+                .put("attempts",0).put("retryCount",0).put("maxAttempts",maxAttempts).put("cost",0).put("costKnown",false).put("requestKey",requestKey==null?UUID.randomUUID().toString():requestKey).put("generationProfile",generationProfile);
             for(String field:List.of("modelId","resolution","imageSize"))if(frozen.hasNonNull(field))next.set(field,frozen.path(field).deepCopy());
             if(reserved)next.put("testBudgetReserved",true).put("testBudgetReservationStatus","RESERVED");
             if(shotId!=null)next.put("shotId",shotId);
@@ -86,12 +90,17 @@ public class JobService {
     });settleReservation(saved,false);recordTerminalCost(saved);return store.get(GENERATION_JOB,id);}
     public ObjectNode fail(String id,String code,String reason,boolean retryable,boolean uncertain){ObjectNode saved=mutate(id,j->{
         if(Set.of("CANCELLED","SUCCESS").contains(text(j,"status")))return;
-        boolean unresolved=uncertain||j.path("submissionUncertain").asBoolean();
-        boolean retry=retryable&&!unresolved&&!j.path("cancelRequested").asBoolean()&&j.path("attempts").asInt()<j.path("maxAttempts").asInt(3);
+        boolean pipeline=pipelineCanary(j.path("inputSnapshot")),unresolved=uncertain||j.path("submissionUncertain").asBoolean();
+        if(pipeline&&unresolved){
+            j.put("status","UNKNOWN").put("phase","RECONCILIATION").put("failureCode",code).put("failureReason",reason).put("elapsedMs",elapsedMs(j))
+                .put("submissionUncertain",false).put("retryable",false).put("reconciliationRequired",true).put("billingStatus","POSSIBLY_BILLED");
+            return;
+        }
+        boolean retry=retryable&&!pipeline&&!unresolved&&!j.path("cancelRequested").asBoolean()&&j.path("attempts").asInt()<j.path("maxAttempts").asInt(3);
         j.put("status",retry?"RETRY_WAIT":"FAILED").put("phase",retry?"WAITING_RETRY":"FAILED").put("failureCode",code).put("failureReason",reason).put("elapsedMs",elapsedMs(j))
             .put("submissionUncertain",unresolved).put("retryable",retryable&&!unresolved);
         if(retry)j.put("retryAt",Instant.now().plusSeconds(5L*(1L<<Math.min(j.path("attempts").asInt(),5))).toString());
-    });if("FAILED".equals(text(saved,"status")))settleFailedReservation(saved);recordTerminalCost(saved);return store.get(GENERATION_JOB,id);}
+    });if("FAILED".equals(text(saved,"status")))settleFailedReservation(saved);if("UNKNOWN".equals(text(saved,"status")))recordUnknownCost(saved);else recordTerminalCost(saved);return store.get(GENERATION_JOB,id);}
     public ObjectNode unknown(String id,String code,String reason){ObjectNode saved=mutate(id,j->{
         if(Set.of("SUCCESS","CANCELLED").contains(text(j,"status")))return;
         j.put("status","UNKNOWN").put("phase","RECONCILIATION").put("failureCode",code).put("failureReason",reason).put("elapsedMs",elapsedMs(j))
@@ -100,6 +109,7 @@ public class JobService {
     public ObjectNode retry(String id){return store.transaction(()->{
         ObjectNode j=store.getForUpdate(GENERATION_JOB,id);
         if(!Set.of("FAILED","CANCELLED").contains(text(j,"status")))throw new WorkflowException("NOT_RETRYABLE","仅失败或取消的任务可以重试");
+        if(pipelineCanary(j.path("inputSnapshot"))&&PIPELINE_PAID_JOB_TYPES.contains(text(j,"type")))throw new WorkflowException("PIPELINE_CANARY_RETRY_BLOCKED","Pipeline Canary 付费任务失败后禁止重新提交");
         if(j.path("submissionUncertain").asBoolean())throw new WorkflowException("SUBMISSION_UNCERTAIN","服务商可能已接受请求，请先在控制台核对任务，避免重复扣费");
         for(ObjectNode existing:store.list(GENERATION_JOB,project(j),null))if(id.equals(text(existing.path("inputSnapshot"),"retryOfJobId"))&&text(j,"type").equals(text(existing,"type"))&&Set.of("QUEUED","RUNNING","RETRY_WAIT","SUCCESS").contains(text(existing,"status")))return existing;
         if(!text(j,"providerRequestId").isBlank()&&!"SHOT_DETAIL".equals(text(j,"type"))&&!"CONFIRMED_NOT_SUBMITTED".equals(text(j,"reconciliationStatus")))throw new WorkflowException("NEW_TAKE_REQUIRED","服务商已创建任务，请使用重拍生成新版本");
@@ -198,4 +208,5 @@ public class JobService {
     private void recordCost(ObjectNode job,String status,String billingStatus,boolean provisional){store.transaction(()->{List<ObjectNode> existing=store.list(COST_RECORD,project(job),null).stream().filter(record->id(job).equals(text(record,"generationJobId"))).toList();if(existing.stream().anyMatch(record->status.equals(text(record,"terminalStatus"))))return null;ObjectNode priceSnapshot=store.list(PRICE_SNAPSHOT,project(job),null).stream().max(Comparator.comparingInt(value->value.path("version").asInt())).orElseGet(()->store.create(PRICE_SNAPSHOT,obj().put("projectId",project(job)).put("version",1).put("currency","CNY").put("status","UNPRICED").put("source","LOCAL_CONFIG").set("prices",obj())));JsonNode usage=job.path("providerUsage");double amount=job.path("cost").asDouble(0);boolean known=job.path("costKnown").asBoolean(false),wasted=!provisional&&!"SUCCESS".equals(status);ObjectNode record=obj().put("projectId",project(job)).put("generationJobId",id(job)).put("taskId",id(job)).put("taskType",text(job,"type")).put("provider",job.path("provider").asText("UNKNOWN")).put("model",job.path("model").asText("UNKNOWN")).put("generationProfile",job.path("generationProfile").asText("TEST")).put("resolution",job.path("resolution").asText(job.path("inputSnapshot").path("resolution").asText(""))).put("inputTokens",usage.path("promptTokens").asLong(usage.path("inputTokens").asLong(0))).put("outputTokens",usage.path("completionTokens").asLong(usage.path("outputTokens").asLong(0))).put("totalTokens",usage.path("totalTokens").asLong(0)).put("estimatedCost",amount).put("currency",job.path("currency").asText("CNY")).put("billingStatus",billingStatus).put("provisional",provisional).put("selectedResult",false).put("wastedCost",wasted?amount:0).put("priceSnapshotId",id(priceSnapshot)).put("terminalStatus",status);if(known&&!provisional)record.put("actualCost",amount);if(!provisional)existing.stream().filter(old->old.path("provisional").asBoolean()).reduce((a,b)->b).ifPresent(old->record.put("supersedesCostRecordId",id(old)));if(job.hasNonNull("shotId"))record.put("shotId",text(job,"shotId"));JsonNode input=job.path("inputSnapshot");for(String field:List.of("episodeId","sceneId","episodeNo"))if(input.hasNonNull(field))record.set(field,input.path(field));for(String field:List.of("providerRequestId","providerTaskId"))if(job.hasNonNull(field))record.set(field,job.path(field));store.create(COST_RECORD,record);return null;});}
     private List<ObjectNode> latestCosts(String projectId){Map<String,ObjectNode> latest=new LinkedHashMap<>();for(ObjectNode cost:store.list(COST_RECORD,projectId,null)){String key=text(cost,"generationJobId");ObjectNode prior=latest.get(key);if(prior==null||(!cost.path("provisional").asBoolean()&&prior.path("provisional").asBoolean()))latest.put(key,cost);}return List.copyOf(latest.values());}
     private long elapsedMs(JsonNode job){String stamp=text(job,"startedAt");if(stamp.isBlank())stamp=text(job,"createdAt");if(stamp.isBlank())return 0;try{return Math.max(0,java.time.Duration.between(Instant.parse(stamp),Instant.now()).toMillis());}catch(RuntimeException ignored){return 0;}}
+    private boolean pipelineCanary(JsonNode input){return input.path("testRun").asBoolean(false)&&"PIPELINE".equalsIgnoreCase(input.path("testPhase").asText());}
 }

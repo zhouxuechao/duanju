@@ -10,7 +10,7 @@ class AutomaticVisualReviewOrderingTest {
     @Test void equalStoryTimeFallsBackToShotOrderWithinTheScene() throws Exception {
         var earlier=JsonNodeFactory.instance.objectNode().put("sceneId","scene").put("shotNo",1).put("storyTime",0);
         var current=JsonNodeFactory.instance.objectNode().put("sceneId","scene").put("shotNo",2).put("storyTime",0);
-        var service=new AutomaticVisualReviewService(null,null,null,null,null,null,null,null);
+        var service=new AutomaticVisualReviewService(null,null,null,null,null,null,null,null,null);
         Method method=AutomaticVisualReviewService.class.getDeclaredMethod("precedes",JsonNode.class,JsonNode.class,double.class);
         method.setAccessible(true);
         assertThat((boolean)method.invoke(service,earlier,current,0d)).isTrue();

@@ -38,7 +38,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ActiveProfiles("test")
 @Transactional
 class HandoffIntegrationTest {
-    @Autowired DocumentStore store;@Autowired WorkflowService workflow;@Autowired GenerationWorker worker;@MockitoSpyBean JobService jobs;@Autowired StudioService studio;@Autowired AssetViewService assetViews;@Autowired WebApplicationContext web;@Autowired AutomaticVisualReviewService automaticVisualReview;@Autowired AutomaticVideoReviewService automaticVideoReview;@Autowired VisualExpectedContextService visualExpected;@Autowired QualityMetricsService qualityMetrics;@Autowired VisualCalibrationService calibration;@Autowired com.fasterxml.jackson.databind.ObjectMapper mapper;
+    @Autowired DocumentStore store;@Autowired WorkflowService workflow;@Autowired GenerationWorker worker;@MockitoSpyBean JobService jobs;@MockitoSpyBean TestBudgetGuard testBudget;@Autowired StudioService studio;@Autowired AssetViewService assetViews;@Autowired WebApplicationContext web;@Autowired AutomaticVisualReviewService automaticVisualReview;@Autowired AutomaticVideoReviewService automaticVideoReview;@Autowired VisualExpectedContextService visualExpected;@Autowired QualityMetricsService qualityMetrics;@Autowired VisualCalibrationService calibration;@Autowired com.fasterxml.jackson.databind.ObjectMapper mapper;
     @MockitoBean ImageGenerator images;@MockitoBean VideoGenerator videos;@MockitoBean MediaStorage storage;@MockitoBean ProviderMediaFetcher fetcher;@MockitoBean MediaProbeService mediaProbe;@MockitoBean VideoFrameExtractor videoFrames;@MockitoBean VisualQualityReviewer visualReviewer;@MockitoBean VideoQualityReviewer videoReviewer;
     private String projectId,shotId;
     private static final String ORIGINAL="https://image.volces.com/seedream/frame.png?token=a%2Fb+Z&sig=ABC%2B123%3D&x=1";
@@ -67,6 +67,27 @@ class HandoffIntegrationTest {
         lenient().when(videoReviewer.review(any(),anyList())).thenAnswer(call->new FakeVideoQualityReviewer(mapper).review(call.getArgument(0),call.getArgument(1)));
     }
     private ObjectNode generateFrame(){ObjectNode job=workflow.image(shotId,"KEYFRAME",obj());worker.tick();assertThat(text(store.get(GENERATION_JOB,id(job)),"status")).isEqualTo("SUCCESS");return store.list(KEYFRAME,projectId,shotId).getFirst();}
+    private void markPipelineCanary(){ObjectNode project=store.get(PROJECT,projectId);store.update(PROJECT,projectId,revision(project),project.deepCopy().put("testRun",true).put("testRunId","provider-retry-fault").put("testPhase","PIPELINE"));}
+    @Test void pipelineCanaryRetryableImageFailureDispatchesOnlyOnce(){
+        markPipelineCanary();reset(images);when(images.generate(any())).thenThrow(new ProviderException("HTTP_503","图片服务明确未接单","image-retryable",503,true,false));
+        ObjectNode job=workflow.image(shotId,"KEYFRAME",obj().put("requestKey","pipeline-image-once"));worker.tick();worker.tick();
+        assertThat(text(store.get(GENERATION_JOB,id(job)),"status")).isEqualTo("FAILED");
+        assertThat(text(store.get(GENERATION_JOB,id(job)),"status")).isNotEqualTo("RETRY_WAIT");
+        verify(images,times(1)).generate(any());
+    }
+    @Test void pipelineCanaryRetryableVideoFailureSubmitsOnlyOnce(){
+        ObjectNode frame=generateFrame();workflow.review(KEYFRAME,id(frame),obj().put("passed",true));workflow.lock(KEYFRAME,id(frame),obj().put("generateVideo",false));markPipelineCanary();reset(videos);when(videos.submit(any())).thenThrow(new ProviderException("HTTP_503","视频服务明确未接单","video-retryable",503,true,false));
+        ObjectNode job=workflow.video(id(frame),obj().put("requestKey","pipeline-video-once"));worker.tick();worker.tick();
+        assertThat(text(store.get(GENERATION_JOB,id(job)),"status")).isEqualTo("FAILED");
+        assertThat(text(store.get(GENERATION_JOB,id(job)),"status")).isNotEqualTo("RETRY_WAIT");
+        verify(videos,times(1)).submit(any());
+    }
+    @Test void pipelineKeyframeReviewReservesTheVlmBudgetImmediatelyBeforeReviewerDispatch(){
+        markPipelineCanary();ObjectNode frame=generateFrame();clearInvocations(testBudget,visualReviewer);
+        automaticVisualReview.review(id(frame),obj().put("apply",true).put("deterministicAcceptance",true));
+        verify(testBudget).reserve(eq("KEYFRAME_QC"),argThat(input->input.path("testRun").asBoolean()&&"provider-retry-fault".equals(text(input,"testRunId"))&&"PIPELINE".equals(text(input,"testPhase"))));
+        verify(visualReviewer,times(1)).review(any(),any());
+    }
     @Test void promptVersionPersistsProviderNeutralIrForAuditAndDeterministicRepair(){
         generateFrame();
         ObjectNode prompt=store.list(PROMPT_VERSION,projectId,null).stream().filter(item->shotId.equals(text(item,"shotId"))).findFirst().orElseThrow();
@@ -603,6 +624,18 @@ class HandoffIntegrationTest {
         ObjectNode reviewed=automaticVisualReview.review(id(frame),request);
         assertThat(text(reviewed.path("automaticRepairJob"),"type")).isEqualTo("KEYFRAME");
         assertThat(store.list(GENERATION_JOB,projectId,null)).hasSize(before+1);
+    }
+    @Test void keyframeReviewCannotCreateARepairJobWhenPipelineDisablesAutomaticRepair(){
+        ObjectNode frame=generateFrame(),expected=visualExpected.build(frame.path("generationInputSnapshot").path("context")),observed=expected.path("requiredConstraints").deepCopy();observed.set("clothing",obj().put("wrong",true));
+        ObjectNode request=obj().put("apply",true).put("allowAutomaticRepair",false).put("requestKey","pipeline-keyframe-no-repair");request.set("observedConstraints",observed);int before=store.list(GENERATION_JOB,projectId,null).size();
+        ObjectNode reviewed=automaticVisualReview.review(id(frame),request);
+        assertThat(reviewed.has("automaticRepairJob")).isFalse();assertThat(reviewed.path("automaticReview").path("manualReviewRequired").asBoolean()).isTrue();assertThat(store.list(GENERATION_JOB,projectId,null)).hasSize(before);
+    }
+    @Test void videoReviewCannotCreateASecondTakeWhenPipelineDisablesAutomaticRepair(){
+        ObjectNode frame=generateFrame();workflow.review(KEYFRAME,id(frame),obj().put("passed",true));workflow.lock(KEYFRAME,id(frame),obj().put("generateVideo",false));workflow.video(id(frame),obj().put("requestKey","pipeline-video-no-repair-source"));worker.tick();worker.tick();worker.tick();ObjectNode take=store.list(VIDEO_TAKE,projectId,shotId).getFirst();
+        doAnswer(call->{ObjectNode result=(ObjectNode)new FakeVideoQualityReviewer(mapper).review(call.getArgument(0),call.getArgument(1));result.set("actionAccuracy",obj().put("pass",false).put("score",25).put("confidence",.97).put("reason","动作方向错误").put("evidence","动作与计划相反"));result.withArray("failureCodes").add("ACTION_MISMATCH");return result.put("overallScore",70).put("overallConfidence",.97).put("decision","REGENERATE").put("reason","动作方向错误");}).when(videoReviewer).review(any(),anyList());
+        int before=store.list(GENERATION_JOB,projectId,null).size();ObjectNode reviewed=automaticVideoReview.review(id(take),obj().put("apply",true).put("allowAutomaticRepair",false).put("requestKey","pipeline-video-no-repair"));
+        assertThat(reviewed.has("automaticRepairJob")).isFalse();assertThat(reviewed.path("automaticReview").path("manualReviewRequired").asBoolean()).isTrue();assertThat(store.list(GENERATION_JOB,projectId,null)).hasSize(before);
     }
     @Test void appliedAutomaticReviewKeepsTheVlmProviderRequestId(){
         ObjectNode frame=generateFrame(),body=obj().put("passed",false).put("reviewer","AUTOMATIC").put("notes","构图错误");body.putObject("qualityReviewResult").putObject("_provider").put("requestId","vlm-request-123");
