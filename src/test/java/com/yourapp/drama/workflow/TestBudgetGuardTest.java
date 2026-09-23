@@ -23,4 +23,15 @@ class TestBudgetGuardTest {
         guard.reserve("KEYFRAME",input);guard.release("KEYFRAME",input);
         assertThatCode(()->guard.reserve("KEYFRAME",input)).doesNotThrowAnyException();
     }
+
+    @Test void providerCanaryAllowsExactlyOneImageAndOneVideoAndRejectsInvalidCost(){
+        var env=new MockEnvironment().withProperty("drama.provider.mode","volcengine").withProperty("DRAMA_TEST_RUN","true")
+                .withProperty("TEST_MAX_REAL_IMAGE_REQUESTS","1").withProperty("TEST_MAX_REAL_VIDEO_REQUESTS","1").withProperty("TEST_MAX_COST_CNY","2");
+        var guard=new TestBudgetGuard(env);var base=obj().put("testRun",true).put("testRunId","phase-a").put("estimatedCost",.5);
+        guard.reserve("KEYFRAME",base);guard.reserve("VIDEO",base);
+        assertThatThrownBy(()->guard.reserve("KEYFRAME",base)).isInstanceOfSatisfying(WorkflowException.class,e->org.assertj.core.api.Assertions.assertThat(e.code()).isEqualTo("TEST_BUDGET_EXCEEDED"));
+        assertThatThrownBy(()->guard.reserve("VIDEO",base)).isInstanceOfSatisfying(WorkflowException.class,e->org.assertj.core.api.Assertions.assertThat(e.code()).isEqualTo("TEST_BUDGET_EXCEEDED"));
+        assertThatThrownBy(()->guard.reserve("KEYFRAME",obj().put("testRun",true).put("testRunId","negative").put("estimatedCost",-.1)))
+                .isInstanceOfSatisfying(WorkflowException.class,e->org.assertj.core.api.Assertions.assertThat(e.code()).isEqualTo("TEST_BUDGET_INVALID"));
+    }
 }

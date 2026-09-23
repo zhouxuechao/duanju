@@ -38,6 +38,7 @@ public class TestBudgetGuard {
         if(!guarded(input))return false;
         String category=category(taskType);if("LOCAL".equals(category))return false;
         String run=run(input);double cost=input.path("estimatedCost").asDouble(0);
+        if(!Double.isFinite(cost)||cost<0)throw new WorkflowException("TEST_BUDGET_INVALID","真实 Canary 预计成本必须是非负有限数值");
         return transaction(()->{Reservation next=load(run).reserve(category,cost);
             if(next.reservedCost+next.actualCost>property("TEST_MAX_COST_CNY",5d)||next.llm>property("TEST_MAX_REAL_LLM_REQUESTS",20)||next.images>property("TEST_MAX_REAL_IMAGE_REQUESTS",2)||next.videos>property("TEST_MAX_REAL_VIDEO_REQUESTS",2)||next.tts>property("TEST_MAX_REAL_AUDIO_REQUESTS",5)||next.lipsync>property("TEST_MAX_REAL_LIPSYNC_REQUESTS",2))throw new WorkflowException("TEST_BUDGET_EXCEEDED","真实 Canary 预算或请求次数已达到上限，禁止继续提交付费请求");
             save(run,next);return true;});
