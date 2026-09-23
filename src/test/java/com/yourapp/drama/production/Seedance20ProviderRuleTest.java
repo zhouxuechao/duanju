@@ -7,7 +7,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class Seedance20ProviderRuleTest {
     @Test
     void seedance20LoadsOnlyItsOwnProviderRules() {
-        var profile = new ProviderCapabilityRegistry().profile("doubao-seedance-2-0-pro");
+        var profile = new ProviderCapabilityRegistry().profile("doubao-seedance-2-0");
         var pack = new ProviderRulePackResolver(new RuntimeRulePackLoader())
                 .resolve(profile, VideoTaskType.FIRST_FRAME_GENERATE);
 

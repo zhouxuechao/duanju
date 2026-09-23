@@ -55,7 +55,7 @@ public class JdbcDocumentStore implements DocumentStore {
         m.get(AUDIO_CLIP).addAll(List.of(col("shotId","uuid"),col("dialogueLineId","uuid")));
         m.get(QC_RESULT).addAll(List.of(col("shotId","uuid"),col("keyframeId","uuid"),col("videoTakeId","uuid"),col("generationJobId","uuid")));
         m.get(COST_RECORD).addAll(List.of(col("generationJobId","uuid"),col("cost","decimal")));
-        m.get(TIMELINE_ITEM).addAll(List.of(col("shotId","uuid"),col("videoTakeId","uuid"),col("audioClipId","uuid")));
+        m.get(TIMELINE_ITEM).addAll(List.of(col("shotId","uuid"),col("videoTakeId","uuid"),col("audioClipId","uuid"),col("linkedVideoTimelineItemId","uuid")));
         return m;
     }
     public JdbcDocumentStore(JdbcTemplate jdbc, ObjectMapper mapper, PlatformTransactionManager manager) {

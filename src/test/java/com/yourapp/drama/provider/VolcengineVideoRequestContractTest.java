@@ -42,7 +42,7 @@ class VolcengineVideoRequestContractTest {
         VolcengineProperties properties = new VolcengineProperties();
         properties.setBaseUrl(URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/api/v3"));
         properties.setApiKey("test-only"); properties.setTextModel("text-test"); properties.setImageModel("image-test");
-        properties.setVideoModel("doubao-seedance-2-5-test");
+        properties.setVideoModel("doubao-seedance-2-5-260628");
         properties.setRequestTimeout(Duration.ofSeconds(3));
         generator = new VolcengineVideoGenerator(new ArkHttpClient(mapper, properties), properties);
     }

@@ -34,9 +34,9 @@ class ProductionRulesTest {
     @Test void jCutMustActuallyCrossTheOwnedShotPictureBoundary(@TempDir Path temp)throws Exception{
         Path first=Files.write(temp.resolve("first.mp4"),new byte[]{1}),second=Files.write(temp.resolve("second.mp4"),new byte[]{2}),dialogue=Files.write(temp.resolve("dialogue.wav"),new byte[]{3});
         ObjectNode request=mapper.createObjectNode().put("outputPath",temp.resolve("out.mp4").toString()).put("subtitleMode","SIDECAR");ArrayNode items=request.putArray("items");
-        items.add(mapper.createObjectNode().put("track","VIDEO").put("shotId","shot-1").put("path",first.toString()).put("startMs",0).put("durationMs",3000));
-        items.add(mapper.createObjectNode().put("track","VIDEO").put("shotId","shot-2").put("path",second.toString()).put("startMs",3000).put("durationMs",3000));
-        ObjectNode falseJCut=mapper.createObjectNode().put("track","DIALOGUE").put("shotId","shot-2").put("path",dialogue.toString()).put("startMs",3000).put("durationMs",1200);falseJCut.putArray("editOperations").add("J_CUT");items.add(falseJCut);
+        items.add(mapper.createObjectNode().put("id","clip-1").put("track","VIDEO").put("shotId","shot-1").put("path",first.toString()).put("startMs",0).put("durationMs",3000));
+        items.add(mapper.createObjectNode().put("id","clip-2").put("track","VIDEO").put("shotId","shot-2").put("path",second.toString()).put("startMs",3000).put("durationMs",3000));
+        ObjectNode falseJCut=mapper.createObjectNode().put("track","DIALOGUE").put("shotId","shot-2").put("linkedVideoTimelineItemId","clip-2").put("path",dialogue.toString()).put("startMs",3000).put("durationMs",1200);falseJCut.putArray("editOperations").add("J_CUT");items.add(falseJCut);
 
         JsonNode plan=service.planTimeline(request);
 
@@ -46,10 +46,10 @@ class ProductionRulesTest {
     @Test void validJCutAndLCutKeepIndependentAudioTimingInTheFfmpegPlan(@TempDir Path temp)throws Exception{
         Path first=Files.write(temp.resolve("first.mp4"),new byte[]{1}),second=Files.write(temp.resolve("second.mp4"),new byte[]{2}),lead=Files.write(temp.resolve("lead.wav"),new byte[]{3}),tail=Files.write(temp.resolve("tail.wav"),new byte[]{4});
         ObjectNode request=mapper.createObjectNode().put("outputPath",temp.resolve("out.mp4").toString()).put("subtitleMode","SIDECAR");ArrayNode items=request.putArray("items");
-        items.add(mapper.createObjectNode().put("track","VIDEO").put("shotId","shot-1").put("path",first.toString()).put("startMs",0).put("durationMs",3000));
-        items.add(mapper.createObjectNode().put("track","VIDEO").put("shotId","shot-2").put("path",second.toString()).put("startMs",3000).put("durationMs",3000));
-        ObjectNode lCut=mapper.createObjectNode().put("track","DIALOGUE").put("shotId","shot-1").put("path",tail.toString()).put("startMs",2200).put("durationMs",1200);lCut.putArray("editOperations").add("L_CUT");items.add(lCut);
-        ObjectNode jCut=mapper.createObjectNode().put("track","SFX").put("shotId","shot-2").put("path",lead.toString()).put("startMs",2600).put("durationMs",800);jCut.putArray("editOperations").add("J_CUT");items.add(jCut);
+        items.add(mapper.createObjectNode().put("id","clip-1").put("track","VIDEO").put("shotId","shot-1").put("path",first.toString()).put("startMs",0).put("durationMs",3000));
+        items.add(mapper.createObjectNode().put("id","clip-2").put("track","VIDEO").put("shotId","shot-2").put("path",second.toString()).put("startMs",3000).put("durationMs",3000));
+        ObjectNode lCut=mapper.createObjectNode().put("track","DIALOGUE").put("shotId","shot-1").put("linkedVideoTimelineItemId","clip-1").put("path",tail.toString()).put("startMs",2200).put("durationMs",1200);lCut.putArray("editOperations").add("L_CUT");items.add(lCut);
+        ObjectNode jCut=mapper.createObjectNode().put("track","SFX").put("shotId","shot-2").put("linkedVideoTimelineItemId","clip-2").put("path",lead.toString()).put("startMs",2600).put("durationMs",800);jCut.putArray("editOperations").add("J_CUT");items.add(jCut);
 
         JsonNode plan=service.planTimeline(request);
 

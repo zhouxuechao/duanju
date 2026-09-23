@@ -9,6 +9,7 @@ import com.yourapp.drama.model.ProviderException;
 import com.yourapp.drama.persistence.*;
 import com.yourapp.drama.storage.*;
 import com.yourapp.drama.workflow.*;
+import com.yourapp.drama.production.PaidProviderPreflight;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -32,9 +33,10 @@ public class GenerationWorker {
     private final PostProductionJobs post;
     private final AssetViewService assetViews;
     private final MediaProbeService mediaProbe;
+    private final PaidProviderPreflight paidPreflight;
     public GenerationWorker(DocumentStore store,JobService jobs,WorkflowService workflow,ImageGenerator images,VideoGenerator videos,LlmGateway llm,
-                            MediaStorage storage,ProviderMediaFetcher fetcher,ObjectMapper mapper,CreativeJobs creative,PostProductionJobs post,AssetViewService assetViews,MediaProbeService mediaProbe,@Value("${drama.jobs.enabled:true}")boolean enabled){
-        this.store=store;this.jobs=jobs;this.workflow=workflow;this.images=images;this.videos=videos;this.llm=llm;this.storage=storage;this.fetcher=fetcher;this.mapper=mapper;this.creative=creative;this.post=post;this.assetViews=assetViews;this.mediaProbe=mediaProbe;this.enabled=enabled;
+                            MediaStorage storage,ProviderMediaFetcher fetcher,ObjectMapper mapper,CreativeJobs creative,PostProductionJobs post,AssetViewService assetViews,MediaProbeService mediaProbe,PaidProviderPreflight paidPreflight,@Value("${drama.jobs.enabled:true}")boolean enabled){
+        this.store=store;this.jobs=jobs;this.workflow=workflow;this.images=images;this.videos=videos;this.llm=llm;this.storage=storage;this.fetcher=fetcher;this.mapper=mapper;this.creative=creative;this.post=post;this.assetViews=assetViews;this.mediaProbe=mediaProbe;this.paidPreflight=paidPreflight;this.enabled=enabled;
     }
     @EventListener(ApplicationReadyEvent.class) public void recover(){
         if(!enabled)return;
@@ -60,6 +62,7 @@ public class GenerationWorker {
             if(store.get(GENERATION_JOB,id(job)).path("cancelRequested").asBoolean()){jobs.cancelled(id(job));return;}
             creative.checkProductionInput(job);
             if(Set.of("DIRECTOR_PLAN","SHOT_DETAIL","KEYFRAME","STORYBOARD","VIDEO").contains(text(job,"type")))workflow.checkReferenceSnapshot(job.path("inputSnapshot"));
+            paidPreflight.requirePass(job);
             switch(text(job,"type")){
                 case "ASSET_IMAGE" -> assetViews.process(job);
                 case "KEYFRAME","STORYBOARD" -> image(job);

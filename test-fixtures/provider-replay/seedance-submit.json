@@ -2,8 +2,8 @@
   "provider": "VOLCENGINE_SEEDANCE",
   "capturedContract": "2026-09",
   "expectedRequest": {
-    "model": "seedance-replay",
-    "duration": 4,
+    "model": "doubao-seedance-2-5-260628",
+    "duration": 5,
     "ratio": "9:16"
   },
   "expectedContentRoles": ["text", "reference_image"],

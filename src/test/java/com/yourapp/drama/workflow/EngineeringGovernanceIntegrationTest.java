@@ -59,7 +59,7 @@ class EngineeringGovernanceIntegrationTest {
         ObjectNode project=store.create(PROJECT,fixture);
         JsonNode started=mapper.readTree(mvc.perform(post("/api/projects/{id}/pipeline-runs",id(project)).contentType(MediaType.APPLICATION_JSON)
             .content(obj().put("mode","MOCK").put("scenarioId","golden-basic").toString())).andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
-        assertThat(started.path("status").asText()).isEqualTo("SUCCESS");
+        assertThat(started.path("status").asText()).as(started.toPrettyString()).isEqualTo("SUCCESS");
         assertThat(started.path("resumeFromStage").asText()).isBlank();
         assertThat(started.path("stages")).anyMatch(stage->stage.path("stage").asText().equals("PREFLIGHT")&&stage.path("status").asText().equals("SUCCESS"));
         assertThat(started.path("stages")).extracting(stage->stage.path("stage").asText()).containsExactly(
@@ -109,7 +109,7 @@ class EngineeringGovernanceIntegrationTest {
         ObjectNode project=store.create(PROJECT,fixture);
         JsonNode started=mapper.readTree(mvc.perform(post("/api/projects/{id}/pipeline-runs",id(project)).contentType(MediaType.APPLICATION_JSON)
             .content(obj().put("mode","MOCK").put("scenarioId","skip-previs").toString())).andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
-        assertThat(started.path("status").asText()).isEqualTo("SUCCESS");
+        assertThat(started.path("status").asText()).as(started.toPrettyString()).isEqualTo("SUCCESS");
         assertThat(store.list(STORYBOARD,id(project),null)).isEmpty();
         assertThat(store.list(KEYFRAME,id(project),null)).isNotEmpty().allMatch(frame->"KEYFRAME".equals(text(frame,"mediaPurpose")));
         assertThat(store.list(TIMELINE,id(project),null)).anyMatch(timeline->!text(timeline,"finalUrl").isBlank());

@@ -18,13 +18,13 @@ public final class EditingEngine {
 
     public static void validate(JsonNode items,List<Risk> risks){
         if(!items.isArray())return;
-        Map<String,Clip> videoByShot=new HashMap<>();
+        Map<String,Clip> videoByTimelineItem=new HashMap<>();
         List<Long> pictureCuts=new ArrayList<>();
         List<Clip> dialogueClips=new ArrayList<>();
         int index=0;
         for(JsonNode item:items){
             if("VIDEO".equals(text(item,"track").toUpperCase(Locale.ROOT))){
-                Clip picture=clip(item,index);if(!text(item,"shotId").isBlank())videoByShot.put(text(item,"shotId"),picture);if(picture.start>0)pictureCuts.add(picture.start);
+                Clip picture=clip(item,index);if(!text(item,"id").isBlank())videoByTimelineItem.put(text(item,"id"),picture);if(picture.start>0)pictureCuts.add(picture.start);
             }
             if("DIALOGUE".equals(text(item,"track").toUpperCase(Locale.ROOT)))dialogueClips.add(clip(item,index));
             index++;
@@ -36,8 +36,10 @@ public final class EditingEngine {
                 Set<EditOperation> allowed="VIDEO".equals(track)?VIDEO_OPERATIONS:AUDIO_OPERATIONS;
                 if(!allowed.contains(operation)){error(risks,"EDIT_OPERATION_TRACK_INVALID",path+".editOperations",operation+" 不适用于 "+track+" 轨道");continue;}
                 if(operation==EditOperation.J_CUT||operation==EditOperation.L_CUT){
-                    Clip audio=clip(item,index),picture=videoByShot.get(text(item,"shotId"));
-                    if(picture==null){error(risks,"EDIT_OPERATION_SHOT_REQUIRED",path+".shotId",operation+" 必须绑定有画面片段的来源镜头");continue;}
+                    String linked=text(item,"linkedVideoTimelineItemId");
+                    if(linked.isBlank()){error(risks,"EDIT_OPERATION_CLIP_REQUIRED",path+".linkedVideoTimelineItemId",operation+" 必须绑定具体的时间线画面片段");continue;}
+                    Clip audio=clip(item,index),picture=videoByTimelineItem.get(linked);
+                    if(picture==null){error(risks,"EDIT_OPERATION_CLIP_NOT_FOUND",path+".linkedVideoTimelineItemId",operation+" 引用的时间线画面片段不存在");continue;}
                     if(operation==EditOperation.J_CUT&&!(audio.start<picture.start&&audio.end()>picture.start))
                         error(risks,"J_CUT_POSITION_INVALID",path+".startMs","J-Cut 的声音必须先于所属镜头画面开始，并跨过该切点");
                     if(operation==EditOperation.L_CUT&&!(audio.start<picture.end()&&audio.end()>picture.end()))

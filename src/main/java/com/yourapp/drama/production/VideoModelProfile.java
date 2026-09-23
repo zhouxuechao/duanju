@@ -24,7 +24,7 @@ public record VideoModelProfile(
     }
     public ObjectNode toJson(){
         ObjectNode n=obj().put("version",profileVersion).put("modelId",modelId).put("modelFamily",family)
-                .put("capabilityFingerprint",capabilityFingerprint).put("source","MODEL_PROFILE")
+                .put("capabilityFingerprint",capabilityFingerprint).put("source","MODEL_PROFILE").put("verificationStatus","STATIC_UNVERIFIED")
                 .put("supportsMultipleImages",hardLimits.images()>1).put("supportsReferenceImage",hardLimits.images()>0).put("supportsReferenceVideo",supportsReferenceVideo)
                 .put("supportsReferenceAudio",supportsReferenceAudio).put("supportsNativeAudio",supportsNativeAudio)
                 .put("supportsStartFrame",supportsStartFrame).put("supportsEndFrame",supportsEndFrame)

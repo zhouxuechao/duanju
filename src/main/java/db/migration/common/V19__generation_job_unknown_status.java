@@ -6,7 +6,10 @@ import org.flywaydb.core.api.migration.Context;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.regex.Pattern;
 
 /** Keeps provider outcome uncertainty distinct from a confirmed failed generation. */
 public class V19__generation_job_unknown_status extends BaseJavaMigration {
@@ -19,7 +22,7 @@ public class V19__generation_job_unknown_status extends BaseJavaMigration {
         try(Statement statement=context.getConnection().createStatement();ResultSet rows=statement.executeQuery(query)){
             while(rows.next()){
                 String clause=rows.getString(2);
-                if(clause.contains("'QUEUED'")&&clause.contains("'RETRY_WAIT'"))constraints.add(rows.getString(1));
+                if(isOriginalStatusConstraint(clause))constraints.add(rows.getString(1));
             }
         }
         if(constraints.size()!=1)throw new IllegalStateException("Expected exactly one generation_job status constraint, found "+constraints.size());
@@ -27,5 +30,12 @@ public class V19__generation_job_unknown_status extends BaseJavaMigration {
             statement.execute("ALTER TABLE \"generation_job\" DROP CONSTRAINT \""+constraints.getFirst().replace("\"","\"\"")+"\"");
             statement.execute("ALTER TABLE \"generation_job\" ADD CONSTRAINT ck_generation_job_status CHECK (status IN ('QUEUED','RUNNING','SUCCESS','FAILED','CANCELLED','RETRY_WAIT','UNKNOWN','WAITING_HUMAN'))");
         }
+    }
+
+    static boolean isOriginalStatusConstraint(String clause){
+        if(clause==null||!Pattern.compile("(?i)\\bstatus\\b").matcher(clause.replace("\"","")).find())return false;
+        Set<String> values=new LinkedHashSet<>();var matcher=Pattern.compile("'([A-Z_]+)'",Pattern.CASE_INSENSITIVE).matcher(clause);
+        while(matcher.find())values.add(matcher.group(1).toUpperCase());
+        return values.equals(Set.of("QUEUED","RUNNING","SUCCESS","FAILED","CANCELLED","RETRY_WAIT"));
     }
 }

@@ -58,7 +58,7 @@ class ProviderReplayContractTest {
         assertThat(fixtureText).doesNotContain("Bearer ").doesNotContain("ark-").doesNotContain("api_key");
 
         VolcengineProperties properties=new VolcengineProperties();
-        properties.setBaseUrl(URI.create(base()+"/api/v3"));properties.setApiKey("replay-only-key");properties.setTextModel("text-replay");properties.setImageModel("seedream-replay");properties.setVideoModel("seedance-replay");properties.setRequestTimeout(Duration.ofSeconds(3));
+        properties.setBaseUrl(URI.create(base()+"/api/v3"));properties.setApiKey("replay-only-key");properties.setTextModel("text-replay");properties.setImageModel("seedream-replay");properties.setVideoModel("doubao-seedance-2-5-260628");properties.setRequestTimeout(Duration.ofSeconds(3));
         ArkHttpClient http=new ArkHttpClient(mapper,properties);
         try(var validatorFactory=jakarta.validation.Validation.buildDefaultValidatorFactory()){
             var schema=Map.<String,Object>of("type","object","properties",Map.of("title",Map.of("type","string")),"required",List.of("title"),"additionalProperties",false);

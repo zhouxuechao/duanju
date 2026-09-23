@@ -42,4 +42,17 @@ class LegacyDefinitionMigrationTest {
         assertThat(scene.has("activeShotPlanJobId")||scene.has("activeDirectorPlanJobId")).isFalse();
         assertThat(scene.path("directorPlanStatus").asText()).isEqualTo("REPLAN_REQUIRED");
     }
+
+    @Test void shotDurationMigrationMatchesOnlyTheOriginalTwoToFiveSecondConstraint(){
+        assertThat(V17__shot_duration_domain.isOriginalDurationConstraint("CHECK ((duration >= 2) AND (duration <= 5))")).isTrue();
+        assertThat(V17__shot_duration_domain.isOriginalDurationConstraint("duration BETWEEN 2 AND 5")).isTrue();
+        assertThat(V17__shot_duration_domain.isOriginalDurationConstraint("duration >= 2 AND retry_count <= 5")).isFalse();
+        assertThat(V17__shot_duration_domain.isOriginalDurationConstraint("duration BETWEEN 2 AND 50")).isFalse();
+    }
+
+    @Test void jobStatusMigrationMatchesOnlyTheCompleteOriginalStatusSet(){
+        assertThat(V19__generation_job_unknown_status.isOriginalStatusConstraint("status IN ('QUEUED','RUNNING','SUCCESS','FAILED','CANCELLED','RETRY_WAIT')")).isTrue();
+        assertThat(V19__generation_job_unknown_status.isOriginalStatusConstraint("status IN ('QUEUED','RUNNING','SUCCESS','FAILED','CANCELLED','RETRY_WAIT','UNKNOWN')")).isFalse();
+        assertThat(V19__generation_job_unknown_status.isOriginalStatusConstraint("phase IN ('QUEUED','RUNNING','SUCCESS','FAILED','CANCELLED','RETRY_WAIT')")).isFalse();
+    }
 }

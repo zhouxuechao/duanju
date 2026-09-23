@@ -32,6 +32,26 @@ class ProviderReconciliationIntegrationTest {
         assertThat(text(reconciled,"providerTaskId")).isEqualTo("cgt-provider-task");
         assertThat(reconciled.path("submissionUncertain").asBoolean()).isFalse();
         assertThat(store.list(GENERATION_JOB,id(project),null)).hasSize(1);
+        ObjectNode recovered=store.list(VIDEO_TAKE,id(project),null).getFirst();
+        assertThat(text(recovered,"recoveredFromJobId")).isEqualTo(id(failed));
+    }
+
+    @Test void unknownTaskCannotRetryOrClaimNoSubmissionAndKeepsPossibleBillingState() {
+        ObjectNode project=store.create(PROJECT,obj().put("name","未知状态测试").put("episodeCount",1).put("targetDuration",24));
+        ObjectNode failed=uncertain(project,"VIDEO");
+        ObjectNode resumed=jobs.reconcile(id(failed),obj().put("decision","CONFIRMED_SUBMITTED").put("providerTaskId","cgt-provider-task")
+                .put("evidence","服务商已接单").put("reviewer","operator"));
+        ObjectNode unknown=jobs.unknown(id(resumed),"POLL_EXHAUSTED","轮询无法确认最终状态");
+
+        assertThat(text(unknown,"billingStatus")).isEqualTo("POSSIBLY_BILLED");
+        assertThat(store.list(COST_RECORD,id(project),null).stream().filter(cost->"UNKNOWN".equals(text(cost,"terminalStatus"))).toList()).singleElement().satisfies(cost->{
+            assertThat(text(cost,"billingStatus")).isEqualTo("POSSIBLY_BILLED");
+            assertThat(text(cost,"terminalStatus")).isEqualTo("UNKNOWN");
+        });
+        assertThatThrownBy(()->jobs.retry(id(unknown))).isInstanceOf(WorkflowException.class);
+        assertThatThrownBy(()->jobs.reconcile(id(unknown),obj().put("decision","CONFIRMED_NOT_SUBMITTED")
+                .put("evidence","错误结论").put("reviewer","operator"))).isInstanceOf(WorkflowException.class);
+        assertThat(store.list(GENERATION_JOB,id(project),null)).hasSize(1);
     }
 
     @Test void confirmedNotSubmittedUnlocksAControlledRetryEvenWhenRequestIdWasRecorded() {

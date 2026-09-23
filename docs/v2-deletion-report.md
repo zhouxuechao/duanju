@@ -94,3 +94,37 @@ Tests:
 
 Dependency check:
 Skill 路径、RulePack 指纹、JSON Schema、Gateway、任务状态和 Provider ID 均保留；只移动文本编译职责，没有删除 API、数据库字段、migration 或 Spring Bean。
+
+## 6. 重复的跨镜连续性判断器
+
+Deleted:
+`CrossShotQc`，以及 `TimelineQualityService` 内部的状态兼容 helper。
+
+Reason:
+两处都在独立比较人物、服装、持物、场景、动作和画面方向，会让视频边界、跨镜质检与时间线得到不同结论，并存在缺状态默认通过的风险。
+
+Replacement:
+`ContinuityCompatibilityEvaluator`。计划状态使用 `previous Shot.endState → current Shot.startState`；观察状态使用上一条 selected + locked + QC PASSED Take 的 `observedState → current Shot.startState`。缺少必要状态时明确失败。
+
+Tests:
+`ContinuitySingleSourceContractTest`、`CrossShotQcTest`、`ProductionBoundaryDeterministicRuleTest`、`TimelineEditingIntegrationTest`。
+
+Dependency check:
+全仓调用已迁移到统一 evaluator；没有删除 HTTP API、数据库字段、migration 或 Spring Bean 对外契约。
+
+## 7. Timeline 的 Shot 级音画定位
+
+Deleted:
+`EditingEngine.videoByShot` 与 reflow 中按 `audio.shotId == video.shotId` 的联动逻辑。
+
+Reason:
+同一 Shot/Take 可合法多次进入 Timeline，Shot ID 无法唯一指向 Clip，会造成 J/L-Cut 错绑和重复移动音频。
+
+Replacement:
+V23 `linkedVideoTimelineItemId` 与按 TimelineItem ID 的索引、校验和 reflow。
+
+Tests:
+`TimelineRepeatedShotTest`、`TimelineEditingIntegrationTest`、`ProductionRulesTest`、`PostProductionIntegrationTest`。
+
+Dependency check:
+保留 Shot/Take 生产来源；最终成片继续只读取 Timeline/TimelineItem。

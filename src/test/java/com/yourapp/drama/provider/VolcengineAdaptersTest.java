@@ -23,7 +23,7 @@ class VolcengineAdaptersTest {
         server=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);
         server.createContext("/api/v3/images/generations",exchange->{imageBody.set(read(exchange));send(exchange,200,"{\"created\":1770000000,\"data\":[{\"url\":\""+SIGNED.replace("&","\\u0026")+"\"}]}");});
         server.createContext("/api/v3/contents/generations/tasks",exchange->{String path=exchange.getRequestURI().getPath();if(path.endsWith("/tasks")&&exchange.getRequestMethod().equals("POST")){videoBody.set(read(exchange));send(exchange,200,"{\"id\":\"task-123\"}");}else if(exchange.getRequestMethod().equals("GET")){String status=videoStatus.get();String content=status.equals("succeeded")?",\"content\":{\"video_url\":\"https://media.example.com/result.mp4?sig=x%2By\"}":"";send(exchange,200,"{\"id\":\"task-123\",\"status\":\""+status+"\""+content+"}");}else{send(exchange,200,"{}");}});
-        server.start();properties=new VolcengineProperties();properties.setBaseUrl(URI.create("http://127.0.0.1:"+server.getAddress().getPort()+"/api/v3"));properties.setApiKey("test-only");properties.setTextModel("text-configured");properties.setImageModel("image-configured");properties.setVideoModel("video-configured");properties.setRequestTimeout(Duration.ofSeconds(3));
+        server.start();properties=new VolcengineProperties();properties.setBaseUrl(URI.create("http://127.0.0.1:"+server.getAddress().getPort()+"/api/v3"));properties.setApiKey("test-only");properties.setTextModel("text-configured");properties.setImageModel("image-configured");properties.setVideoModel("doubao-seedance-2-5-260628");properties.setRequestTimeout(Duration.ofSeconds(3));
     }
 
     @Test void textGenerationKeepsTheSafeSixteenKDefault(){

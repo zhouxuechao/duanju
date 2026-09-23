@@ -15,7 +15,7 @@ class VideoRequestSnapshotTest {
                 new MaterialPreflight(),new ReferenceConflictValidator(),new ReferenceIndexValidator(mapper),new VideoRequestContractValidator(),
                 new VideoRequestRouteResolver(),new KeyframeTimelineValidator(),new ProviderRulePackResolver(new RuntimeRulePackLoader()));
         ObjectNode context=mapper.createObjectNode();
-        context.set("providerCapabilities",registry.profile("doubao-seedance-2-5-test").toJson());
+        context.set("providerCapabilities",registry.profile("doubao-seedance-2-5-260628").toJson());
         ObjectNode shot=context.putObject("shot").put("shotId","SHOT_1").put("duration",5).put("locationId","LOC_1").put("sequenceRelation","CUT");
         shot.putArray("characterIds").add("CHAR_1");shot.putArray("propIds");
         ObjectNode keyframe=mapper.createObjectNode().put("id","KF_1").put("providerUrl","https://media.example.com/start.png").put("semanticRole","START_FRAME").put("stateVersion",1);

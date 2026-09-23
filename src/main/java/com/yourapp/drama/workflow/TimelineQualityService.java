@@ -7,6 +7,7 @@ import com.yourapp.drama.production.EditorialTiming;
 import com.yourapp.drama.production.EditingEngine;
 import com.yourapp.drama.production.EditOperation;
 import com.yourapp.drama.production.ProductionModels;
+import com.yourapp.drama.production.ContinuityCompatibilityEvaluator;
 import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.util.*;
@@ -16,7 +17,8 @@ import static com.yourapp.drama.workflow.Documents.*;
 @Service
 public class TimelineQualityService {
     private final DocumentStore store;
-    public TimelineQualityService(DocumentStore store){this.store=store;}
+    private final ContinuityCompatibilityEvaluator continuity;
+    public TimelineQualityService(DocumentStore store,ContinuityCompatibilityEvaluator continuity){this.store=store;this.continuity=continuity;}
 
     public ObjectNode review(String timelineId){return store.transaction(()->{
         ObjectNode timeline=store.getForUpdate(TIMELINE,timelineId);long contentRevision=timeline.path("contentRevision").asLong(1);
@@ -24,7 +26,7 @@ public class TimelineQualityService {
         List<ObjectNode> items=store.list(TIMELINE_ITEM,project(timeline),timelineId),videos=items.stream().filter(i->"VIDEO".equals(text(i,"track"))).sorted(Comparator.comparingLong(i->i.path("startMs").asLong())).toList();
         ArrayNode editingItems=JsonNodeFactory.instance.arrayNode();items.forEach(editingItems::add);List<ProductionModels.Risk> editingRisks=new ArrayList<>();EditingEngine.validate(editingItems,editingRisks);for(ProductionModels.Risk risk:editingRisks)if("ERROR".equals(risk.severity()))failure(failures,details,risk.code(),risk.message());
         if(videos.isEmpty())failure(failures,details,"VIDEO_REQUIRED","时间线没有视频轨");
-        long cursor=0;ObjectNode previousShot=null;int videoIndex=0;
+        long cursor=0;ObjectNode previousShot=null,previousTake=null;int videoIndex=0;
         for(ObjectNode item:videos){long start=item.path("startMs").asLong(-1),duration=item.path("durationMs").asLong(-1),sourceIn=item.path("sourceInMs").asLong(-1),sourceOut=item.path("sourceOutMs").asLong(-1);String transition=item.path("transition").asText("CUT").toUpperCase(Locale.ROOT);long transitionDuration=item.path("transitionDurationMs").asLong(0);
             if(!Set.of("CUT","MATCH_CUT","CROSS_DISSOLVE","FADE_TO_BLACK").contains(transition))failure(failures,details,"TRANSITION_INVALID","时间线包含不支持的镜头衔接类型");
             if(videoIndex==0&&(!"CUT".equals(transition)||transitionDuration!=0))failure(failures,details,"FIRST_TRANSITION_INVALID","第一个镜头必须从直接切换开始");
@@ -37,8 +39,8 @@ public class TimelineQualityService {
                 if(!take.path("selected").asBoolean()||!take.path("locked").asBoolean()||!"PASSED".equals(text(take,"qcStatus")))failure(failures,details,"VIDEO_TAKE_NOT_APPROVED","时间线使用了未采用或未通过质检的视频");
                 if(take.path("observedDifferences").isArray()&&!take.path("observedDifferences").isEmpty()&&!"ACCEPT_CANONICAL".equals(text(take,"deviationDecision")))failure(failures,details,"OBSERVED_STATE_UNRESOLVED","视频实拍状态与计划状态的差异尚未处理");
             }
-            ObjectNode shot=safe(SHOT,text(item,"shotId"));if(shot==null)failure(failures,details,"SHOT_MISSING","时间线项目缺少来源镜头");else{if(previousShot!=null&&"CONTINUOUS".equals(text(shot,"relationToPrevious"))&&!compatible(previousShot.path("endState"),shot.path("startState")))failure(failures,details,"SHOT_CONTINUITY_MISMATCH","连续镜头的结束状态与下一镜开始状态不一致");if("FADE_TO_BLACK".equals(transition)&&!allowsFadeToBlack(shot))failure(failures,details,"TRANSITION_SEMANTIC_INVALID","淡黑只能用于明确的时间跳跃、章节边界、梦境或情绪停顿");}
-            previousShot=shot;cursor=start+Math.max(0,duration);videoIndex++;
+            ObjectNode shot=safe(SHOT,text(item,"shotId"));if(shot==null)failure(failures,details,"SHOT_MISSING","时间线项目缺少来源镜头");else{if(previousShot!=null&&"CONTINUOUS".equals(text(shot,"relationToPrevious"))){for(ProductionModels.Risk risk:continuity.comparePlanned(previousShot.path("endState"),shot.path("startState")))failure(failures,details,risk.code(),risk.message());for(ProductionModels.Risk risk:continuity.compareObserved(previousTake==null?MissingNode.getInstance():previousTake,shot.path("startState")))failure(failures,details,risk.code(),risk.message());for(ProductionModels.Risk risk:continuity.compareBlocking(previousShot.path("blocking"),shot.path("blocking")))failure(failures,details,risk.code(),risk.message());}if("FADE_TO_BLACK".equals(transition)&&!allowsFadeToBlack(shot))failure(failures,details,"TRANSITION_SEMANTIC_INVALID","淡黑只能用于明确的时间跳跃、章节边界、梦境或情绪停顿");}
+            previousShot=shot;previousTake=take;cursor=start+Math.max(0,duration);videoIndex++;
         }
         for(ObjectNode item:items)if(!"VIDEO".equals(text(item,"track"))){long start=item.path("startMs").asLong(-1),duration=item.path("durationMs").asLong(-1);if(start<0||duration<=0||start+duration>cursor)failure(failures,details,"AUDIO_TIMING_INVALID","音频超出成片范围");if("DIALOGUE".equals(text(item,"track"))){ObjectNode clip=safe(AUDIO_CLIP,text(item,"audioClipId"));if(clip==null||!clip.path("selected").asBoolean()||!clip.path("locked").asBoolean())failure(failures,details,"DIALOGUE_AUDIO_NOT_APPROVED","对白引用了未采用的配音");}}
         if(timeline.path("durationMs").asLong(-1)!=cursor)failure(failures,details,"TIMELINE_DURATION_MISMATCH","时间线总时长与视频轨不一致");
@@ -49,7 +51,6 @@ public class TimelineQualityService {
         ObjectNode next=timeline.deepCopy().put("timelineQaStatus",qa.path("passed").asBoolean()?"PASSED":"FAILED");next.set("timelineQa",qa);store.update(TIMELINE,timelineId,revision(timeline),next);return qa;
     });}
     private ObjectNode safe(com.yourapp.drama.persistence.ResourceKind kind,String documentId){if(documentId.isBlank())return null;return store.find(kind,documentId).orElse(null);}
-    private boolean compatible(JsonNode left,JsonNode right){if(!left.isObject()||left.isEmpty()||!right.isObject()||right.isEmpty())return true;for(String key:List.of("characters","props","location","locationState","characterStates","propStates"))if(left.has(key)&&right.has(key)&&!left.path(key).equals(right.path(key)))return false;return true;}
     private boolean allowsFadeToBlack(ObjectNode shot){String relation=text(shot,"relationToPrevious").toUpperCase(Locale.ROOT),timeRelation=text(shot,"timeRelationToPrevious").toUpperCase(Locale.ROOT),purpose=text(shot,"purpose").toUpperCase(Locale.ROOT);return Set.of("TIME_JUMP","CHAPTER_BREAK","DREAM","FLASHBACK","EMOTIONAL_PAUSE").contains(relation)||Set.of("TIME_JUMP","NEXT_DAY","DREAM","FLASHBACK","CHAPTER_BREAK").contains(timeRelation)||purpose.contains("停顿")||purpose.contains("章节");}
     private void failure(ArrayNode codes,ArrayNode details,String code,String message){if(!contains(codes,code))codes.add(code);details.add(obj().put("code",code).put("message",message));}
     private boolean contains(ArrayNode codes,String code){for(JsonNode value:codes)if(code.equals(value.asText()))return true;return false;}

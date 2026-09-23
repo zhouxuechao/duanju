@@ -7,7 +7,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class VideoModelProfileTest {
     @Test void seedance20And25HaveSeparateCapabilitiesAndFingerprints() {
         ProviderCapabilityRegistry registry=new ProviderCapabilityRegistry();
-        VideoModelProfile old=registry.profile("doubao-seedance-2-0-pro"),current=registry.profile("doubao-seedance-2-5-pro");
+        VideoModelProfile old=registry.profile("doubao-seedance-2-0"),current=registry.profile("doubao-seedance-2-5-260628");
         assertThat(old.family()).isEqualTo("SEEDANCE_2_0");
         assertThat(current.family()).isEqualTo("SEEDANCE_2_5");
         assertThat(old.capabilityFingerprint()).isNotEqualTo(current.capabilityFingerprint());

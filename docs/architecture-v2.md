@@ -170,3 +170,25 @@ Render 只读取已锁定 Timeline 快照和已归档素材。停帧使用源裁
 3. 已锁定版本不可原地修改；编辑产生新版本并保存 provenance。
 4. Provider 原始错误、requestId/taskId 和不完整输出都进入审计记录。
 5. 新题材通常只新增 StoryProfile/StoryFormat/DramaRulePack 数据和 Skill 规则，不修改 Java 主流程。
+
+## Dialogue migration
+
+V22 是历史 DialogueLine 三轨文本的数据迁移边界。它同时迁移 typed columns 与 `dialogue_line.document` JSON，运行时只读取 `semanticText`、`spokenText`、`subtitleText`。迁移优先保留已有新字段；缺失时按 `displayText`、`speechText`、`dialectText` 的确定顺序补齐。旧列暂不删除，前端和业务代码不保留旧字段 fallback。
+
+## Continuity single source
+
+`ContinuityCompatibilityEvaluator` 是计划状态与观察状态兼容性的唯一底层比较器。Director、视频生成、跨镜 QC、Timeline QC 与 Final QC 通过该入口或 `ContinuityEngine` 使用同一规则。`CONTINUOUS` 若缺上一镜结束状态、当前起始状态、ActionState、Blocking，或缺少 selected + locked + QC PASSED 的观察 Take 时，统一 fail closed；Timeline 不再维护另一套 `compatible` 判断。
+
+所有付费媒体任务在真正调用 Provider 前经过 `PaidProviderPreflight`。镜头画面与视频运行 `RuleEngine`；视频还要通过模型能力、引用预算与素材冲突预检；素材多视图、TTS 和 LipSync 在执行时重新核对当前版本、批准与锁定状态。
+
+## Timeline Clip Identity
+
+Shot 是生产来源，TimelineItem 才是剪辑实例。同一 Shot 或同一 Take 可以在 Timeline 中出现多次，每个实例有独立 ID。对白、J-Cut、L-Cut 与音频桥使用 `linkedVideoTimelineItemId` 绑定具体视频 Clip；reflow、替换和校验均按 Clip ID 执行，不再用 Shot ID 猜测目标。V23 为该关系增加自引用外键与索引。
+
+## Provider Capability Verification
+
+`ProviderCapabilityRegistry` 只接受显式登记的准确模型 ID，不通过模型名称片段推测能力。静态 profile 标记为 `STATIC_UNVERIFIED`，保存 profile version 与 SHA-256 capability fingerprint；指纹进入 GenerationJob、PromptVersion、VideoTake 与 Provider request snapshot。
+
+`VolcengineCapabilityContractTest` 默认禁用。只有显式设置 `RUN_LIVE_PROVIDER_CAPABILITY_CANARY=true` 并提供真实 Canary 证据文件时才运行。证据必须覆盖 model ID、时长、分辨率、比例、首帧/首尾帧、图片/视频/音频参考、引用上限、任务类型、原生音频、Provider options 与真实 provider request ID。全部匹配后才在 `target/provider-capability-snapshot.json` 生成 `LIVE_VERIFIED` 快照；未执行 Live Canary 时不改静态能力值。
+
+UNKNOWN 任务不进入自动重提队列。确认已提交后继续轮询原 providerTaskId；缺少本地 Take 时从原 inputSnapshot 恢复，并记录 `recoveredFromJobId`。UNKNOWN 的不可变 CostRecord 使用 `POSSIBLY_BILLED`，终态追加可追溯的纠正事件，预算与质量统计按每个任务的最新费用事件计算。

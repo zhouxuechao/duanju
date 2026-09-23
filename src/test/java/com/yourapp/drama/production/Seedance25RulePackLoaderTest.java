@@ -39,7 +39,7 @@ class Seedance25RulePackLoaderTest {
         assertThat(pack.content()).doesNotContain("完整上游技能");
     }
     @Test void seedance20LoadsItsOwnRulesAndDoesNotLoadSeedance25SpecificRules() {
-        VideoModelProfile profile = new ProviderCapabilityRegistry().profile("doubao-seedance-2-0-pro");
+        VideoModelProfile profile = new ProviderCapabilityRegistry().profile("doubao-seedance-2-0");
         RuntimeRulePackLoader.RulePack pack = new ProviderRulePackResolver(new RuntimeRulePackLoader())
                 .resolve(profile, VideoTaskType.FIRST_FRAME_GENERATE);
 
