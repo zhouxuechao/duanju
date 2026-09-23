@@ -52,6 +52,7 @@ class LiveProviderCanaryIT {
     @Test
     @EnabledIfEnvironmentVariable(named="RUN_LIVE_PROVIDER_CANARY",matches="(?i)true")
     void seedreamToSeedanceProducesGranularEvidenceWithoutAutomaticRetry() throws Exception {
+        LiveCanaryPlan.provider().requireLiveFlags(System.getenv());
         ObjectMapper mapper=new ObjectMapper();String runId=optional("DRAMA_TEST_RUN_ID","provider-canary-"+UUID.randomUUID());
         ObjectNode evidence=mapper.createObjectNode().put("provider","VOLCENGINE").put("evidenceSource","LIVE_CANARY")
                 .put("phase","PROVIDER").put("generationProfile","TEST").put("runId",runId).put("status","RUNNING");
@@ -82,7 +83,7 @@ class LiveProviderCanaryIT {
             ledger.add(requestRecord(mapper,imageLocalJobId,"KEYFRAME",properties.getImageModel(),image.requestId(),"","2K",0,0,"SUCCESS"));
 
             VolcengineVideoGenerator videoGenerator=new VolcengineVideoGenerator(client,properties,capabilities);
-            VideoGenerator.VideoRequest videoRequest=new VideoGenerator.VideoRequest(properties.getVideoModel(),VIDEO_PROMPT,image.providerUrl(),List.of(),Map.of("duration",5,"resolution","480p","watermark",false,"generate_audio",false,"return_last_frame",true));
+            VideoGenerator.VideoRequest videoRequest=new VideoGenerator.VideoRequest(properties.getVideoModel(),VIDEO_PROMPT,image.providerUrl(),List.of(),Map.of("duration",5,"resolution","480p","watermark",false,"generate_audio",false));
             JsonNode videoRequestBody=mapper.valueToTree(videoGenerator.requestBodySnapshot(videoRequest));String handedOff=firstFrame(videoRequestBody);
             assertThat(handedOff).as("Seedream 原始 URL 必须逐字符进入 Seedance first_frame").isEqualTo(image.providerUrl());
             ObjectNode videoBudget=budgetInput(mapper,runId,decimal("TEST_VIDEO_ESTIMATED_COST_CNY",defaultReservation));budget.reserve("VIDEO",videoBudget);

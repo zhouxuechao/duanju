@@ -27,10 +27,10 @@ class LiveCanaryPlanTest {
 
     @Test void livePreflightRejectsWrongProfileModelsResolutionAndUnresolvedSubmissions(){
         LiveCanaryPlan plan=LiveCanaryPlan.provider();
-        Map<String,String> correct=Map.of("RUN_LIVE_PROVIDER_CANARY","true","CANARY_GENERATION_PROFILE","TEST",
-                "ARK_IMAGE_MODEL","doubao-seedream-5-0-260128","ARK_IMAGE_SIZE","2K",
-                "ARK_VIDEO_MODEL","doubao-seedance-2-0-fast-260128","ARK_VIDEO_RESOLUTION","480p",
-                "ARK_API_KEY","local-secret","TEST_MAX_REAL_IMAGE_REQUESTS","1","TEST_MAX_REAL_VIDEO_REQUESTS","1","TEST_MAX_COST_CNY","2");
+        Map<String,String> correct=Map.ofEntries(Map.entry("RUN_LIVE_PROVIDER_CANARY","true"),Map.entry("CANARY_RUNNER_PREFLIGHT_OK","true"),Map.entry("CANARY_GENERATION_PROFILE","TEST"),
+                Map.entry("ARK_IMAGE_MODEL","doubao-seedream-5-0-260128"),Map.entry("ARK_IMAGE_SIZE","2K"),
+                Map.entry("ARK_VIDEO_MODEL","doubao-seedance-2-0-fast-260128"),Map.entry("ARK_VIDEO_RESOLUTION","480p"),
+                Map.entry("ARK_API_KEY","local-secret"),Map.entry("TEST_MAX_REAL_IMAGE_REQUESTS","1"),Map.entry("TEST_MAX_REAL_VIDEO_REQUESTS","1"),Map.entry("TEST_MAX_COST_CNY","2"));
         assertThat(plan.validateLive(correct,List.of()).path("ready").asBoolean()).isTrue();
         assertThat(plan.validateLive(with(correct,"CANARY_GENERATION_PROFILE","FINAL"),List.of()).path("ready").asBoolean()).isFalse();
         assertThat(plan.validateLive(with(correct,"ARK_VIDEO_RESOLUTION","720p"),List.of()).path("ready").asBoolean()).isFalse();
@@ -41,7 +41,7 @@ class LiveCanaryPlanTest {
     }
 
     @Test void pipelineLiveRequiresItsOwnFlagInAdditionToProviderFlag(){
-        Map<String,String> onlyProvider=Map.of("RUN_LIVE_PROVIDER_CANARY","true");
+        Map<String,String> onlyProvider=Map.of("RUN_LIVE_PROVIDER_CANARY","true","CANARY_RUNNER_PREFLIGHT_OK","true");
         assertThatThrownBy(()->LiveCanaryPlan.pipeline().requireLiveFlags(onlyProvider)).hasMessageContaining("RUN_LIVE_PIPELINE_CANARY");
     }
 

@@ -31,6 +31,7 @@ public record LiveCanaryPlan(String phase,int imageRequests,int videoRequests,in
     public ObjectNode validateLive(Map<String,String> environment,List<? extends JsonNode> jobs){
         ArrayNode checks=com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.arrayNode(),blocking=com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.arrayNode();
         check(checks,blocking,"LIVE_FLAG","true".equalsIgnoreCase(environment.get("RUN_LIVE_PROVIDER_CANARY")),"RUN_LIVE_PROVIDER_CANARY 必须显式为 true");
+        check(checks,blocking,"RUNNER_PREFLIGHT","true".equalsIgnoreCase(environment.get("CANARY_RUNNER_PREFLIGHT_OK")),"真实 Canary 必须由 run-provider-canary.ps1 完成安全预检后启动");
         if("PIPELINE".equals(phase))check(checks,blocking,"PIPELINE_LIVE_FLAG","true".equalsIgnoreCase(environment.get("RUN_LIVE_PIPELINE_CANARY")),"RUN_LIVE_PIPELINE_CANARY 必须显式为 true");
         check(checks,blocking,"GENERATION_PROFILE","TEST".equalsIgnoreCase(value(environment,"CANARY_GENERATION_PROFILE","TEST")),"Canary 只能使用 TEST 档位");
         check(checks,blocking,"IMAGE_MODEL",ProviderCapabilityRegistry.SEEDREAM_50.equals(value(environment,"ARK_IMAGE_MODEL",ProviderCapabilityRegistry.SEEDREAM_50)),"图片模型必须为 Seedream 5.0 测试模型");
@@ -55,6 +56,7 @@ public record LiveCanaryPlan(String phase,int imageRequests,int videoRequests,in
 
     public void requireLiveFlags(Map<String,String> environment){
         if(!"true".equalsIgnoreCase(environment.get("RUN_LIVE_PROVIDER_CANARY")))throw new IllegalStateException("RUN_LIVE_PROVIDER_CANARY=true 才能启动真实 Provider Canary");
+        if(!"true".equalsIgnoreCase(environment.get("CANARY_RUNNER_PREFLIGHT_OK")))throw new IllegalStateException("CANARY_RUNNER_PREFLIGHT_REQUIRED: 真实 Canary 必须由 run-provider-canary.ps1 完成安全预检后启动");
         if("PIPELINE".equals(phase)&&!"true".equalsIgnoreCase(environment.get("RUN_LIVE_PIPELINE_CANARY")))throw new IllegalStateException("RUN_LIVE_PIPELINE_CANARY=true 才能启动完整 Pipeline Canary");
     }
 

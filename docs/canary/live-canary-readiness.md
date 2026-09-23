@@ -24,6 +24,13 @@
 - `target/live-canary/provider-canary-state.json` 防止崩溃、响应丢失或人工误重跑导致重复提交。
 - 存在 UNKNOWN、`submissionUncertain` 或待对账任务时拒绝启动。
 - 报告不保存 API Key 或完整签名 URL。
+- Runner Preflight enforcement: PASS
+- Direct Maven bypass: BLOCKED
+- return_last_frame removed: PASS
+- Partial failure state lock: PASS
+- Poll timeout reconciliation: PASS
+- Dry Run: PASS
+- Live requests executed: 0
 
 ## Evidence
 
@@ -32,8 +39,8 @@
 ## 回归
 
 - 前端：11/11 通过，生产构建成功。
-- 后端全量：561 个测试，0 failure，0 error，3 skipped。
-- 持久化 Canary 状态锁在全量测试后另行完成针对性回归。
+- 后端全量：569 个测试，0 failure，0 error，3 skipped。
+- Runner Preflight、最小请求快照和持久化 Canary 状态锁均已完成针对性回归。
 - PostgreSQL Testcontainers 仍因本机没有 Docker 跳过。
 - Live Provider：未执行。
 

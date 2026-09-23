@@ -4,6 +4,7 @@ param(
   [string]$BaseUrl='http://127.0.0.1:8080'
 )
 $ErrorActionPreference='Stop'
+Remove-Item Env:CANARY_RUNNER_PREFLIGHT_OK -ErrorAction SilentlyContinue
 $root=Split-Path -Parent $PSScriptRoot
 $target=Join-Path $root 'target\canary'
 New-Item -ItemType Directory -Force -Path $target | Out-Null
@@ -38,7 +39,8 @@ if($EnvFile){
   if(-not (Test-Path -LiteralPath $EnvFile)){throw "Env file not found: $EnvFile"}
   Get-Content -LiteralPath $EnvFile | ForEach-Object {if($_ -match '^\s*([^#][^=]+)=(.*)$'){[Environment]::SetEnvironmentVariable($matches[1].Trim(),$matches[2].Trim().Trim('"'),[EnvironmentVariableTarget]::Process)}}
 }
-$env:RUN_LIVE_PROVIDER_CANARY='true'
+Remove-Item Env:CANARY_RUNNER_PREFLIGHT_OK -ErrorAction SilentlyContinue
+$env:RUN_LIVE_PROVIDER_CANARY='false'
 $env:CANARY_GENERATION_PROFILE='TEST'
 if(-not $env:ARK_IMAGE_MODEL){$env:ARK_IMAGE_MODEL='doubao-seedream-5-0-260128'}
 if(-not $env:ARK_IMAGE_SIZE){$env:ARK_IMAGE_SIZE='2K'}
@@ -68,6 +70,11 @@ $env:FFPROBE_PATH=$ffprobe
 Push-Location $root
 try{
   & (Join-Path $PSScriptRoot 'test.ps1');if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+  $env:RUN_LIVE_PROVIDER_CANARY='true'
+  $env:CANARY_RUNNER_PREFLIGHT_OK='true'
   & $maven -q '-Dtest=LiveProviderCanaryIT' test;if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
-}finally{Pop-Location}
+}finally{
+  Remove-Item Env:CANARY_RUNNER_PREFLIGHT_OK -ErrorAction SilentlyContinue
+  Pop-Location
+}
 Write-Host 'PROVIDER CANARY FINISHED. Phase B was not started.' -ForegroundColor Green
