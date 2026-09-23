@@ -16,6 +16,8 @@ server:
   error:
     include-message: never
 novel:
+  adaptation:
+    episode-batch-size: ${NOVEL_ADAPTATION_EPISODE_BATCH_SIZE:10}
   upload:
     max-file-size: ${NOVEL_UPLOAD_MAX_FILE_SIZE:1073741824}
     part-size: ${NOVEL_UPLOAD_PART_SIZE:4194304}

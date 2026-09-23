@@ -99,6 +99,22 @@ class NovelAdaptationPlanningIntegrationTest {
             .extracting(e->((WorkflowException)e).code()).isEqualTo("FUTURE_FACT_LEAK");
     }
 
+    @Test void automaticPlannerBuildsSeasonSkeletonAndEightyEpisodesInResumableNonUniformBatches(){
+        Fixture f=fixture();
+        ObjectNode request=baseRequest(f).put("targetEpisodeCount",80).put("targetEpisodeDuration",60);
+        ObjectNode plan=adaptations.create(f.novelId(),request);List<ObjectNode> episodes=adaptations.episodes(id(plan));
+        assertThat(episodes).hasSize(80);assertThat(text(plan,"status")).isEqualTo("REVIEW");
+        assertThat(plan.path("seasonSkeleton").path("factReleaseSchedule").isArray()).isTrue();
+        assertThat(plan.path("batchRequestIds")).hasSize(8);
+        assertThat(plan.path("seasonSkeletonRequestId").asText()).isNotBlank();
+        assertThat(store.list(NOVEL_AI_JOB,f.projectId(),null).stream().filter(job->"ADAPTATION_PLAN".equals(text(job,"taskType")))).hasSize(9);
+        long distinctAllocations=episodes.stream().collect(java.util.stream.Collectors.groupingBy(e->e.path("sourceChapterIds").get(0).asText(),java.util.stream.Collectors.counting())).values().stream().distinct().count();
+        assertThat(distinctAllocations).isGreaterThan(1);
+        assertThat(episodes).allSatisfy(episode->{assertThat(text(episode,"adaptationReason")).isNotBlank();assertThat(episode.path("sourceRefs")).isNotEmpty();});
+        assertThat(id(adaptations.create(f.novelId(),request))).isEqualTo(id(plan));
+        assertThat(store.list(NOVEL_AI_JOB,f.projectId(),null).stream().filter(job->"ADAPTATION_PLAN".equals(text(job,"taskType")))).hasSize(9);
+    }
+
     private ObjectNode baseRequest(Fixture f){
         return obj().put("projectId",f.projectId()).put("targetEpisodeCount",3).put("targetEpisodeDuration",90)
             .put("adaptationStyle","SHORT_DRAMA").put("genre","悬疑").put("platform","竖屏短剧").put("region","中国")

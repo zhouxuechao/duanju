@@ -15,14 +15,16 @@ import static com.yourapp.drama.workflow.Documents.*;
 @Service
 public class NovelAdaptationService {
     private static final Set<String> STYLES=Set.of("FAITHFUL","BALANCED","SHORT_DRAMA");
-    private final DocumentStore store;
-    public NovelAdaptationService(DocumentStore store){this.store=store;}
+    private final DocumentStore store;private final NovelAdaptationPlanner planner;private final NovelIntelligenceQualityValidator quality;
+    public NovelAdaptationService(DocumentStore store,NovelAdaptationPlanner planner,NovelIntelligenceQualityValidator quality){this.store=store;this.planner=planner;this.quality=quality;}
 
     public ObjectNode create(String novelId,ObjectNode request){
         ObjectNode source=store.get(NOVEL_SOURCE,novelId);String projectId=project(source);
         if(source.path("analysisRevision").asInt()<1||store.list(NOVEL_STORY_GRAPH,projectId,novelId).isEmpty())throw new WorkflowException("NOVEL_ANALYSIS_REQUIRED","必须先完成小说分析");
         String style=request.path("adaptationStyle").asText("BALANCED").toUpperCase(Locale.ROOT);if(!STYLES.contains(style))throw new IllegalArgumentException("adaptationStyle 只支持 FAITHFUL、BALANCED、SHORT_DRAMA");
-        List<ObjectNode> requested=draftEpisodes(source,request);int target=request.path("targetEpisodeCount").asInt(requested.size());if(target<1||target!=requested.size())throw new IllegalArgumentException("targetEpisodeCount 必须与分集方案数量一致");List<ObjectNode> prepared=requested.stream().map(episode->normalizeEpisode(source,episode)).toList();
+        boolean manual=request.path("episodes").isArray()&&!request.path("episodes").isEmpty();ObjectNode generated=null;
+        if(!manual){String planningKey=planner.contextHash(source,request);ObjectNode existing=store.list(ADAPTATION_PLAN,projectId,null).stream().filter(p->novelId.equals(text(p,"novelId"))&&planningKey.equals(text(p,"planningContextHash"))&&!"SUPERSEDED".equals(text(p,"status"))).findFirst().orElse(null);if(existing!=null)return existing;generated=planner.plan(source,request);}
+        List<ObjectNode> requested=manual?draftEpisodes(source,request):objects(generated.path("episodes"));int target=request.path("targetEpisodeCount").asInt(requested.size());if(target<1||target!=requested.size())throw new IllegalArgumentException("targetEpisodeCount 必须与分集方案数量一致");List<ObjectNode> prepared=requested.stream().map(episode->normalizeEpisode(source,episode)).toList();quality.adaptationPlan(prepared,source);
         int version=store.list(ADAPTATION_PLAN,projectId,null).stream().filter(p->novelId.equals(text(p,"novelId"))).mapToInt(p->p.path("version").asInt()).max().orElse(0)+1;
         ObjectNode value=obj().put("projectId",projectId).put("novelId",novelId).put("analysisRevision",source.path("analysisRevision").asInt()).put("version",version).put("status","REVIEW")
             .put("targetEpisodeCount",target).put("targetEpisodeDuration",request.path("targetEpisodeDuration").asInt(90)).put("adaptationStyle",style)
@@ -30,6 +32,7 @@ public class NovelAdaptationService {
             .put("mainPlotPriority",request.path("mainPlotPriority").asText("HIGH")).put("subplotPolicy",request.path("subplotPolicy").asText("COMPRESS"))
             .put("characterMergePolicy",request.path("characterMergePolicy").asText("REVIEW_REQUIRED")).put("createdBy",request.path("createdBy").asText("USER"));
         if(request.has("contentRating"))value.set("contentRating",request.path("contentRating").deepCopy());if(request.has("sourceGapExplanation"))value.set("sourceGapExplanation",request.path("sourceGapExplanation").deepCopy());
+        if(generated!=null)for(String field:List.of("planningContextHash","model","compilerVersion","seasonSkeletonRequestId","seasonSkeleton","batchRequestIds"))if(generated.has(field))value.set(field,generated.path(field).deepCopy());
         value.set("coverage",coverage(source,prepared,text(value,"sourceGapExplanation")));value.set("continuityIssues",continuityIssues(prepared));ObjectNode plan=store.create(ADAPTATION_PLAN,value);
         for(ObjectNode episode:prepared)saveEpisode(plan,source,episode);return store.get(ADAPTATION_PLAN,id(plan));
     }
@@ -76,4 +79,5 @@ public class NovelAdaptationService {
     private static ObjectNode copyPlan(ObjectNode source){ObjectNode value=source.deepCopy();for(String field:List.of("id","parentId","revision","createdAt","updatedAt","confirmedAt","supersededById","diff","revalidatedEpisodes"))value.remove(field);return value;}
     private static ObjectNode copyEpisode(ObjectNode source){ObjectNode value=source.deepCopy();for(String field:List.of("id","parentId","planId","projectId","revision","createdAt","updatedAt","novelId","analysisRevision","planVersion"))value.remove(field);return value;}
     private static void requireRevision(ObjectNode current,JsonNode request){long expected=request.path("revision").asLong(-1);if(expected<1)throw new IllegalArgumentException("修改必须包含 revision");if(expected!=revision(current))throw new com.yourapp.drama.persistence.RevisionConflictException(ADAPTATION_PLAN,id(current));}
+    private static List<ObjectNode> objects(JsonNode values){List<ObjectNode> result=new ArrayList<>();values.forEach(value->{if(value.isObject())result.add((ObjectNode)value.deepCopy());});return result;}
 }

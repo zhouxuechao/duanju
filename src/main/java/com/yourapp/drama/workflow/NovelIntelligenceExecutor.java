@@ -17,12 +17,18 @@ public class NovelIntelligenceExecutor {
         ObjectNode sourceIds=obj();sourceIds.set("chapterIds",array(ir.chapterIds()));sourceIds.set("chunkIds",array(ir.chunkIds()));sourceIds.set("entityIds",array(ir.entityIds()));sourceIds.set("factIds",array(ir.factIds()));
         ObjectNode job=store.create(NOVEL_AI_JOB,obj().put("projectId",projectId).put("novelId",ir.novelId()).put("taskType",prompt.taskType()).put("status","RUNNING").put("profile",ir.profile()).put("contextHash",ir.contextHash()).put("compilerVersion",prompt.compilerVersion()).put("sourceBoundary",ir.sourceBoundary()).put("startedAt",Instant.now().toString()).set("sourceIds",sourceIds));
         try{
-            NovelIntelligenceProvider.Result result=provider.execute(prompt);ObjectNode done=job.deepCopy().put("status","SUCCEEDED").put("provider",result.provider()).put("model",result.model()).put("providerRequestId",result.requestId()).put("finishReason",result.finishReason()).put("inputTokens",result.inputTokens()).put("outputTokens",result.outputTokens()).put("simulated",result.simulated()).put("completedAt",Instant.now().toString());
+            NovelIntelligenceProvider.Result result=provider.execute(prompt);ObjectNode done=job.deepCopy().put("status","SUCCEEDED").put("provider",result.provider()).put("model",result.model()).put("providerRequestId",result.requestId()).put("finishReason",result.finishReason()).put("inputTokens",result.inputTokens()).put("outputTokens",result.outputTokens()).put("simulated",result.simulated()).put("completedAt",Instant.now().toString());done.set("output",result.value().deepCopy());
             store.update(NOVEL_AI_JOB,id(job),revision(job),done);return result;
         }catch(RuntimeException error){
             ObjectNode failed=job.deepCopy().put("status","FAILED").put("failureCode",error instanceof com.yourapp.drama.model.ProviderException providerError?providerError.code():"NOVEL_AI_FAILED").put("failureReason",String.valueOf(error.getMessage())).put("completedAt",Instant.now().toString());
             store.update(NOVEL_AI_JOB,id(job),revision(job),failed);throw error;
         }
+    }
+    public NovelIntelligenceProvider.Result executeOrReuse(String projectId,NovelPromptIR ir,NovelPromptCompiler.Compiled prompt){
+        String identity=cacheIdentity(prompt.modelRole());
+        ObjectNode cached=store.list(NOVEL_AI_JOB,projectId,null).stream().filter(job->prompt.taskType().equals(text(job,"taskType"))&&prompt.compilerVersion().equals(text(job,"compilerVersion"))&&ir.contextHash().equals(text(job,"contextHash"))&&"SUCCEEDED".equals(text(job,"status"))&&identity.equals(text(job,"model"))&&job.path("output").isObject()).findFirst().orElse(null);
+        if(cached!=null)return new NovelIntelligenceProvider.Result((ObjectNode)cached.path("output").deepCopy(),text(cached,"provider"),text(cached,"model"),text(cached,"providerRequestId"),text(cached,"finishReason"),cached.path("inputTokens").asLong(-1),cached.path("outputTokens").asLong(-1),cached.path("simulated").asBoolean());
+        return execute(projectId,ir,prompt);
     }
     private static com.fasterxml.jackson.databind.node.ArrayNode array(java.util.List<String> values){var result=com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.arrayNode();values.forEach(result::add);return result;}
 }
