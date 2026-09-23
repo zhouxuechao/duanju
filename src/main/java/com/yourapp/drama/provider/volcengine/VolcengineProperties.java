@@ -33,9 +33,13 @@ public class VolcengineProperties {
     private Duration videoUrlTtl = Duration.ofHours(24);
 
     public void validate() {
-        if (apiKey == null || apiKey.isBlank() || textModel == null || textModel.isBlank()
-                || imageModel == null || imageModel.isBlank() || videoModel == null || videoModel.isBlank())
+        validateTransport();
+        if (textModel == null || textModel.isBlank() || imageModel == null || imageModel.isBlank() || videoModel == null || videoModel.isBlank())
             throw new IllegalStateException("真实火山模式需要 API Key、text-model、image-model、video-model；请配置可用模型 ID，不能使用演示默认值。");
+        if(imageSize==null||imageSize.isBlank()||videoResolution==null||videoResolution.isBlank())throw new IllegalStateException("图片尺寸和视频分辨率必须显式配置");
+    }
+    public void validateTransport(){
+        if(apiKey==null||apiKey.isBlank())throw new IllegalStateException("真实火山模式需要 API Key");
         if (!"responses".equals(textApiStyle) && !"chat".equals(textApiStyle))
             throw new IllegalStateException("text-api-style 必须为 responses 或 chat");
         if (!"responses".equals(directorApiStyle) && !"chat".equals(directorApiStyle))
@@ -52,7 +56,6 @@ public class VolcengineProperties {
         if (imageUrlTtl == null || imageUrlTtl.isNegative() || videoUrlTtl == null || videoUrlTtl.isNegative())
             throw new IllegalStateException("URL 有效期配置不得为负数");
         if(videoMinDuration<1||videoMaxDuration<videoMinDuration||videoDurationStep<1)throw new IllegalStateException("视频时长范围配置无效");
-        if(imageSize==null||imageSize.isBlank()||videoResolution==null||videoResolution.isBlank())throw new IllegalStateException("图片尺寸和视频分辨率必须显式配置");
     }
     public URI getBaseUrl() { return baseUrl; }
     public void setBaseUrl(URI value) { baseUrl = value; }

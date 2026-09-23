@@ -68,6 +68,7 @@ public class JdbcDocumentStore implements DocumentStore {
         m.get(NOVEL_STORY_GRAPH).addAll(List.of(col("analysisRevision","int"),col("profile","text")));
         m.get(NOVEL_ANALYSIS_JOB).addAll(List.of(col("novelId","uuid"),col("chapterId","uuid"),col("status","text"),col("idempotencyKey","text"),col("contentHash","text"),col("profile","text"),col("analysisVersion","int")));
         m.get(NOVEL_AI_JOB).addAll(List.of(col("novelId","uuid"),col("taskType","text"),col("status","text"),col("providerRequestId","text"),col("model","text"),col("contextHash","text"),col("compilerVersion","text")));
+        m.get(NOVEL_INTELLIGENCE_RUN).addAll(List.of(col("novelId","uuid"),col("type","text"),col("profile","text"),col("status","text"),col("model","text")));
         m.get(ADAPTATION_PLAN).addAll(List.of(col("novelId","uuid"),col("analysisRevision","int"),col("version","int"),col("status","text"),col("adaptationStyle","text")));
         m.get(EPISODE_ADAPTATION_PLAN).addAll(List.of(col("episodeNo","int"),col("status","text")));
         m.get(PROMPT_VERSION).addAll(List.of(col("shotId","uuid"),col("version","int"),col("promptTemplateId","uuid")));

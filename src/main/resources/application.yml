@@ -93,3 +93,4 @@ drama:
   novel:
     intelligence:
       mode: ${NOVEL_INTELLIGENCE_MODE:deterministic}
+      live-enabled: ${RUN_LIVE_NOVEL_INTELLIGENCE:false}

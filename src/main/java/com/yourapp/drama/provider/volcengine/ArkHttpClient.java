@@ -17,7 +17,7 @@ public final class ArkHttpClient {
     private final HttpClient client;
 
     public ArkHttpClient(ObjectMapper mapper, VolcengineProperties properties) {
-        properties.validate();
+        properties.validateTransport();
         this.mapper = mapper;
         this.properties = properties;
         this.client = HttpClient.newBuilder().connectTimeout(properties.getConnectTimeout())

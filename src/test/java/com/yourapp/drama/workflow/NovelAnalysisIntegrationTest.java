@@ -29,6 +29,7 @@ class NovelAnalysisIntegrationTest {
         ObjectNode estimate=analysis.estimate(f.novelId());assertThat(estimate.path("chunks").asInt()).isEqualTo(2);assertThat(estimate.path("requests").asInt()).isEqualTo(2);
         ObjectNode result=analysis.start(f.novelId(),obj().put("confirmed",true).put("profile","STANDARD"));
         assertThat(text(result,"status")).isEqualTo("SUCCEEDED");
+        assertThat(store.list(NOVEL_INTELLIGENCE_RUN,f.projectId(),null)).singleElement().satisfies(run->{assertThat(text(run,"type")).isEqualTo("ANALYSIS");assertThat(text(run,"status")).isEqualTo("SUCCEEDED");assertThat(run.path("usedRequests").asInt()).isEqualTo(6);assertThat(run.path("usedInputTokens").asLong()).isBetween(0L,run.path("maxInputTokens").asLong());assertThat(run.path("reservedInputTokens").asLong()).isZero();});
         assertThat(store.list(NOVEL_CHUNK_ANALYSIS,f.projectId(),null)).hasSize(2).allSatisfy(item->{assertThat(item.has("wholeNovelText")).isFalse();assertThat(text(item,"sourceBoundary")).isEqualTo("UNTRUSTED_NOVEL_TEXT");assertThat(item.path("requestInputChars").asInt()).isLessThan(1000);});
         assertThat(store.list(NOVEL_CHAPTER_ANALYSIS,f.projectId(),null)).hasSize(2);
         assertThat(store.list(NOVEL_STORY_ARC,f.projectId(),f.novelId())).isNotEmpty();
@@ -53,6 +54,7 @@ class NovelAnalysisIntegrationTest {
         ObjectNode failedProgress=analysis.progress(f.novelId());assertThat(failedProgress.path("failedChunks").asInt()).isEqualTo(1);assertThat(failedProgress.path("succeededChunks").asInt()).isEqualTo(2);
         analysis.resume(f.novelId(),obj().put("profile","FAST"));
         assertThat(analysis.progress(f.novelId()).path("failedChunks").asInt()).isZero();
+        assertThat(store.list(NOVEL_INTELLIGENCE_RUN,f.projectId(),null)).singleElement().satisfies(run->{assertThat(text(run,"status")).isEqualTo("SUCCEEDED");assertThat(run.path("resumedAt").asText()).isNotBlank();});
         long attemptsBefore=store.list(NOVEL_ANALYSIS_JOB,f.projectId(),null).size();
         ObjectNode changed=store.get(NOVEL_CHUNK,failed);String replacement=text(changed,"normalizedText")+" 新证据。";store.update(NOVEL_CHUNK,failed,revision(changed),changed.deepCopy().put("normalizedText",replacement).put("contentHash",NovelIngestionService.hashText(replacement)));
         analysis.start(f.novelId(),obj().put("confirmed",true).put("profile","FAST"));

@@ -108,6 +108,7 @@ class NovelAdaptationPlanningIntegrationTest {
         assertThat(plan.path("batchRequestIds")).hasSize(8);
         assertThat(plan.path("seasonSkeletonRequestId").asText()).isNotBlank();
         assertThat(store.list(NOVEL_AI_JOB,f.projectId(),null).stream().filter(job->"ADAPTATION_PLAN".equals(text(job,"taskType")))).hasSize(9);
+        assertThat(store.list(NOVEL_INTELLIGENCE_RUN,f.projectId(),null)).singleElement().satisfies(run->{assertThat(text(run,"type")).isEqualTo("ADAPTATION");assertThat(text(run,"status")).isEqualTo("SUCCEEDED");assertThat(run.path("usedRequests").asInt()).isEqualTo(9);});
         long distinctAllocations=episodes.stream().collect(java.util.stream.Collectors.groupingBy(e->e.path("sourceChapterIds").get(0).asText(),java.util.stream.Collectors.counting())).values().stream().distinct().count();
         assertThat(distinctAllocations).isGreaterThan(1);
         assertThat(episodes).allSatisfy(episode->{assertThat(text(episode,"adaptationReason")).isNotBlank();assertThat(episode.path("sourceRefs")).isNotEmpty();});

@@ -23,18 +23,22 @@ public class NovelAnalysisService {
     private final NovelEntityResolutionService entities;
     private final NovelAnalysisEstimateService estimates;
     private final NovelIntelligenceQualityValidator quality;
+    private final NovelIntelligenceRunService runs;
 
     public NovelAnalysisService(DocumentStore store,NovelIntelligenceExecutor ai,NovelPromptCompiler prompts,
                                 NovelEntityResolutionService entities,NovelAnalysisEstimateService estimates,
-                                NovelIntelligenceQualityValidator quality){
-        this.store=store;this.ai=ai;this.prompts=prompts;this.entities=entities;this.estimates=estimates;this.quality=quality;
+                                NovelIntelligenceQualityValidator quality,NovelIntelligenceRunService runs){
+        this.store=store;this.ai=ai;this.prompts=prompts;this.entities=entities;this.estimates=estimates;this.quality=quality;this.runs=runs;
     }
     public ObjectNode estimate(String novelId){return estimates.estimate(novelId);}
+    public ObjectNode estimate(String novelId,String profile){String normalized=profile==null?"STANDARD":profile.toUpperCase(Locale.ROOT);if(!PROFILES.contains(normalized))throw new IllegalArgumentException("分析档位只支持 FAST、STANDARD、DEEP");return estimates.estimate(novelId,normalized);}
     public ObjectNode start(String novelId,ObjectNode request){
         if(!request.path("confirmed").asBoolean(false))throw new WorkflowException("ANALYSIS_CONFIRMATION_REQUIRED","小说分析必须由用户明确开始");
-        return run(novelId,request,false);
+        return executeRun(novelId,request,false);
     }
-    public ObjectNode resume(String novelId,ObjectNode request){return run(novelId,request,true);}
+    public ObjectNode resume(String novelId,ObjectNode request){return executeRun(novelId,request,true);}
+
+    private ObjectNode executeRun(String novelId,ObjectNode request,boolean resume){ObjectNode source=store.get(NOVEL_SOURCE,novelId);String profile=request.path("profile").asText("STANDARD").toUpperCase(Locale.ROOT);ObjectNode estimate=estimates.estimate(novelId,profile);NovelIntelligenceRunService.Estimate budget=new NovelIntelligenceRunService.Estimate(estimate.path("estimatedTotalRequests").asLong(),estimate.path("estimatedInputTokens").asLong()*2,estimate.path("estimatedOutputTokens").asLong(),0,(ObjectNode)estimate.path("layerLimits").deepCopy());return runs.execute(source,"ANALYSIS",profile,request,resume,budget,()->run(novelId,request,resume));}
 
     private ObjectNode run(String novelId,ObjectNode request,boolean resume){
         ObjectNode source=store.get(NOVEL_SOURCE,novelId);
@@ -50,9 +54,10 @@ public class NovelAnalysisService {
             if(same&&"FAILED".equals(text(latest,"status"))&&!resume)continue;
             if(resume&&same&&!"FAILED".equals(text(latest,"status")))continue;
             analyzeChunk(source,chunk,profile,inputHash,failures.contains(id(chunk)));
+            runs.progress("CHUNK_ANALYSIS",progress(novelId).path("succeededChunks").asLong(),chunks.size());
         }
         ObjectNode state=progress(novelId);
-        if(state.path("failedChunks").asInt()==0&&state.path("pendingChunks").asInt()==0)aggregate(source,profile);
+        if(state.path("failedChunks").asInt()==0&&state.path("pendingChunks").asInt()==0){runs.progress("HIERARCHICAL_SYNTHESIS",0,1);aggregate(source,profile);runs.progress("GLOBAL_GRAPH",1,1);}
         state=progress(novelId);
         state.put("status",state.path("failedChunks").asInt()>0?"PARTIAL_FAILED":state.path("pendingChunks").asInt()>0?"RUNNING":"SUCCEEDED");
         return state;

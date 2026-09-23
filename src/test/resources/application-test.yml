@@ -9,6 +9,7 @@ drama:
   novel:
     intelligence:
       mode: deterministic
+      live-enabled: false
   provider:
     mode: mock
   quality:

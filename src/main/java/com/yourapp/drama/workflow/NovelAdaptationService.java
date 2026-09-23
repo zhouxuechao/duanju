@@ -15,11 +15,14 @@ import static com.yourapp.drama.workflow.Documents.*;
 @Service
 public class NovelAdaptationService {
     private static final Set<String> STYLES=Set.of("FAITHFUL","BALANCED","SHORT_DRAMA");
-    private final DocumentStore store;private final NovelAdaptationPlanner planner;private final NovelIntelligenceQualityValidator quality;
-    public NovelAdaptationService(DocumentStore store,NovelAdaptationPlanner planner,NovelIntelligenceQualityValidator quality){this.store=store;this.planner=planner;this.quality=quality;}
+    private final DocumentStore store;private final NovelAdaptationPlanner planner;private final NovelIntelligenceQualityValidator quality;private final NovelIntelligenceRunService runs;
+    public NovelAdaptationService(DocumentStore store,NovelAdaptationPlanner planner,NovelIntelligenceQualityValidator quality,NovelIntelligenceRunService runs){this.store=store;this.planner=planner;this.quality=quality;this.runs=runs;}
 
     public ObjectNode create(String novelId,ObjectNode request){
-        ObjectNode source=store.get(NOVEL_SOURCE,novelId);String projectId=project(source);
+        ObjectNode source=store.get(NOVEL_SOURCE,novelId);boolean manual=request.path("episodes").isArray()&&!request.path("episodes").isEmpty();if(manual)return createInternal(source,request);ObjectNode estimate=estimate(novelId,request);NovelIntelligenceRunService.Estimate budget=new NovelIntelligenceRunService.Estimate(estimate.path("estimatedRequests").asLong(),estimate.path("estimatedInputTokens").asLong(),estimate.path("estimatedOutputTokens").asLong(),0,(ObjectNode)estimate.path("layerLimits").deepCopy());return runs.execute(source,"ADAPTATION",request.path("adaptationStyle").asText("BALANCED"),request,false,budget,()->createInternal(source,request));
+    }
+    private ObjectNode createInternal(ObjectNode source,ObjectNode request){
+        String novelId=id(source),projectId=project(source);
         if(source.path("analysisRevision").asInt()<1||store.list(NOVEL_STORY_GRAPH,projectId,novelId).isEmpty())throw new WorkflowException("NOVEL_ANALYSIS_REQUIRED","必须先完成小说分析");
         String style=request.path("adaptationStyle").asText("BALANCED").toUpperCase(Locale.ROOT);if(!STYLES.contains(style))throw new IllegalArgumentException("adaptationStyle 只支持 FAITHFUL、BALANCED、SHORT_DRAMA");
         boolean manual=request.path("episodes").isArray()&&!request.path("episodes").isEmpty();ObjectNode generated=null;
@@ -36,6 +39,7 @@ public class NovelAdaptationService {
         value.set("coverage",coverage(source,prepared,text(value,"sourceGapExplanation")));value.set("continuityIssues",continuityIssues(prepared));ObjectNode plan=store.create(ADAPTATION_PLAN,value);
         for(ObjectNode episode:prepared)saveEpisode(plan,source,episode);return store.get(ADAPTATION_PLAN,id(plan));
     }
+    public ObjectNode estimate(String novelId,ObjectNode request){ObjectNode source=store.get(NOVEL_SOURCE,novelId);int episodes=Math.max(1,request.path("targetEpisodeCount").asInt(1)),batchSize=10,requests=1+(episodes+batchSize-1)/batchSize;long graphChars=store.list(NOVEL_STORY_GRAPH,project(source),novelId).stream().mapToLong(value->value.toString().length()).max().orElse(1000),input=Math.max(requests*8192L,(graphChars/3+episodes*1500L)*2),output=requests*4096L;ObjectNode result=obj().put("novelId",novelId).put("targetEpisodeCount",episodes).put("estimatedRequests",requests).put("estimatedInputTokens",input).put("estimatedOutputTokens",output).put("estimatedCost",0).put("pricingStatus","UNPRICED");result.putObject("layerLimits").putObject("ADAPTATION_PLAN").put("maxRequests",requests);return result;}
 
     public List<ObjectNode> plans(String novelId){ObjectNode source=store.get(NOVEL_SOURCE,novelId);return store.list(ADAPTATION_PLAN,project(source),null).stream().filter(p->novelId.equals(text(p,"novelId"))).sorted(Comparator.comparingInt(p->p.path("version").asInt())).toList();}
     public List<ObjectNode> episodes(String planId){ObjectNode plan=store.get(ADAPTATION_PLAN,planId);return store.list(EPISODE_ADAPTATION_PLAN,project(plan),planId).stream().sorted(Comparator.comparingInt(e->e.path("episodeNo").asInt())).toList();}
