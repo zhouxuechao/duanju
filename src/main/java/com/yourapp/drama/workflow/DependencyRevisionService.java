@@ -101,6 +101,19 @@ public class DependencyRevisionService {
         copyPoint(edge,point);edge.set("changePoint",point.toJson());return store.create(DEPENDENCY_EDGE,edge);
     }
 
+    public ArrayNode markForwardDependencies(String projectId,ResourceKind sourceKind,String sourceId,ChangeScope scope,ChangePoint point,String sourceVersionId,Set<String> dependencyTypes){
+        ArrayNode result=obj().putArray("affected");
+        for(ObjectNode edge:store.list(DEPENDENCY_EDGE,projectId,null)){
+            if(!text(edge,"sourceKind").equals(sourceKind.path())||!text(edge,"sourceId").equals(sourceId)||!forward(edge,scope,point))continue;
+            String type=text(edge,"dependencyType");if(dependencyTypes!=null&&!dependencyTypes.isEmpty()&&!dependencyTypes.contains(type))continue;
+            ObjectNode node=obj().put("resourceKind",text(edge,"targetKind")).put("resourceId",text(edge,"targetId")).put("dependencyType",type).put("recommendedAction","REVALIDATION_REQUIRED");
+            for(String field:List.of("episodeId","episodeNo","sceneId","sceneNo","shotId","storyTime"))if(edge.has(field))node.set(field,edge.path(field).deepCopy());result.add(node);
+            boolean exists=store.list(REVALIDATION_MARKER,projectId,null).stream().anyMatch(marker->text(marker,"resourceKind").equals(text(edge,"targetKind"))&&text(marker,"resourceId").equals(text(edge,"targetId"))&&text(marker,"sourceVersionId").equals(sourceVersionId));
+            if(!exists){ObjectNode marker=node.deepCopy().put("projectId",projectId).put("sourceKind",sourceKind.path()).put("sourceId",sourceId).put("sourceVersionId",sourceVersionId).put("status","REVALIDATION_REQUIRED");store.create(REVALIDATION_MARKER,marker);}
+        }
+        return result;
+    }
+
     private ArrayNode analyzeAndRecord(String projectId,ResourceKind sourceKind,String sourceId,ChangeScope scope,ChangePoint point,String sourceVersionId){
         ArrayNode affected=Documents.obj().putArray("values");
         for(ObjectNode edge:store.list(DEPENDENCY_EDGE,projectId,null)){

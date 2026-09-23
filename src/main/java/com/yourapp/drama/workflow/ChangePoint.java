@@ -1,5 +1,6 @@
 package com.yourapp.drama.workflow;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import static com.yourapp.drama.workflow.Documents.obj;
@@ -16,4 +17,5 @@ public record ChangePoint(String episodeId,Integer episodeNo,String sceneId,Inte
         return value;
     }
     public static ChangePoint origin(){return new ChangePoint(null,0,null,0,null,null);}
+    public static ChangePoint from(JsonNode value){if(value==null||!value.isObject())return origin();return new ChangePoint(value.path("episodeId").asText(null),value.path("episodeNo").isInt()?value.path("episodeNo").asInt():null,value.path("sceneId").asText(null),value.path("sceneNo").isInt()?value.path("sceneNo").asInt():null,value.path("storyTime").isNumber()?value.path("storyTime").asDouble():null,value.path("scriptVersionId").asText(null));}
 }

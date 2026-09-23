@@ -53,6 +53,9 @@ public class JdbcDocumentStore implements DocumentStore {
         m.get(PRODUCTION_INPUT_SNAPSHOT).addAll(List.of(col("sourceKind","text"),col("sourceId","uuid"),col("promptVersionId","uuid"),col("scriptVersionId","uuid"),col("assetSnapshotHash","text"),col("snapshotKey","text")));
         m.get(EPISODE_SCRIPT_VERSION).addAll(List.of(col("version","int"),col("supersedesId","uuid"),col("sourceVersionId","uuid"),col("status","text"),col("contentHash","text"),col("sourceMode","text")));
         m.get(PRODUCTION_SCRIPT_SNAPSHOT).addAll(List.of(col("scriptVersionId","uuid"),col("scriptHash","text"),col("continuitySnapshotHash","text")));
+        m.get(IMPACT_PLAN).addAll(List.of(col("sourceVersionId","uuid"),col("targetVersionId","uuid"),col("impactType","text"),col("changeScope","text")));
+        m.get(REBUILD_PLAN).addAll(List.of(col("impactPlanId","uuid"),col("status","text"),col("requiresUserConfirmation","bool")));
+        m.get(PLATFORM_REVIEW_ISSUE).addAll(List.of(col("scriptVersionId","uuid"),col("platform","text"),col("reasonCode","text"),col("status","text"),col("resolutionVersionId","uuid")));
         m.get(PROMPT_VERSION).addAll(List.of(col("shotId","uuid"),col("version","int"),col("promptTemplateId","uuid")));
         m.get(STORYBOARD).add(col("version","int"));
         m.get(DIALOGUE_LINE).addAll(List.of(col("characterId","uuid"),col("semanticText","text"),col("spokenText","text"),col("subtitleText","text")));

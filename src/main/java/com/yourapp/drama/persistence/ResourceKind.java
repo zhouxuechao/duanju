@@ -16,6 +16,9 @@ public enum ResourceKind {
     EPISODE("episode", "episodes", null, null),
     EPISODE_SCRIPT_VERSION("episode_script_version", "episode-script-versions", EPISODE, "episodeId"),
     PRODUCTION_SCRIPT_SNAPSHOT("production_script_snapshot", "production-script-snapshots", EPISODE, "episodeId"),
+    IMPACT_PLAN("impact_plan", "impact-plans", null, null),
+    REBUILD_PLAN("rebuild_plan", "rebuild-plans", null, null),
+    PLATFORM_REVIEW_ISSUE("platform_review_issue", "platform-review-issues", EPISODE, "episodeId"),
     SCENE("scene", "scenes", EPISODE, "episodeId"),
     BEAT("beat", "beats", SCENE, "sceneId"),
     SHOT("shot", "shots", SCENE, "sceneId"),
@@ -71,7 +74,8 @@ public enum ResourceKind {
     public String parentField() { return parentField; }
     public boolean immutable() { return this == STORY_FACT_MUTATION || this == CHARACTER_KNOWLEDGE || this == PROMPT_VERSION || this == COST_RECORD || this == PRICE_SNAPSHOT || this == HUMAN_EDIT_FEEDBACK || this == QC_RESULT
             || this == CHARACTER_DEFINITION_VERSION || this == LOCATION_DEFINITION_VERSION || this == PROP_DEFINITION_VERSION
-            || this == DEPENDENCY_EDGE || this == REVALIDATION_MARKER || this == PRODUCTION_INPUT_SNAPSHOT || this == PRODUCTION_SCRIPT_SNAPSHOT; }
+            || this == DEPENDENCY_EDGE || this == REVALIDATION_MARKER || this == PRODUCTION_INPUT_SNAPSHOT || this == PRODUCTION_SCRIPT_SNAPSHOT
+            || this == IMPACT_PLAN || this == REBUILD_PLAN; }
     public static ResourceKind fromPath(String value) {
         String normalized = value.toLowerCase(Locale.ROOT).replace('_', '-');
         return Arrays.stream(values()).filter(k -> k.path.equals(normalized)
