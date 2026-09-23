@@ -18,13 +18,19 @@ public enum ResourceKind {
     BEAT("beat", "beats", SCENE, "sceneId"),
     SHOT("shot", "shots", SCENE, "sceneId"),
     CHARACTER("character", "characters", null, null),
+    CHARACTER_DEFINITION_VERSION("character_definition_version", "character-definition-versions", CHARACTER, "characterId"),
     CHARACTER_STATE("character_state", "character-states", CHARACTER, "characterId"),
     CHARACTER_PROVIDER_ASSET("character_provider_asset", "character-provider-assets", CHARACTER, "characterId"),
     CHARACTER_LOOK("character_look", "character-looks", CHARACTER, "characterId"),
     LOCATION("location", "locations", null, null),
+    LOCATION_DEFINITION_VERSION("location_definition_version", "location-definition-versions", LOCATION, "locationId"),
     LOCATION_STATE("location_state", "location-states", LOCATION, "locationId"),
     PROP("prop", "props", null, null),
+    PROP_DEFINITION_VERSION("prop_definition_version", "prop-definition-versions", PROP, "propId"),
     PROP_STATE("prop_state", "prop-states", PROP, "propId"),
+    DEPENDENCY_EDGE("dependency_edge", "dependency-edges", null, null),
+    REVALIDATION_MARKER("revalidation_marker", "revalidation-markers", null, null),
+    PRODUCTION_INPUT_SNAPSHOT("production_input_snapshot", "production-input-snapshots", null, null),
     ASSET_VIEW("asset_view", "asset-views", null, null),
     STORYBOARD("storyboard", "storyboards", SHOT, "shotId"),
     KEYFRAME("keyframe", "keyframes", SHOT, "shotId"),
@@ -61,7 +67,9 @@ public enum ResourceKind {
     public String path() { return path; }
     public ResourceKind parentKind() { return parent; }
     public String parentField() { return parentField; }
-    public boolean immutable() { return this == STORY_FACT_MUTATION || this == CHARACTER_KNOWLEDGE || this == PROMPT_VERSION || this == COST_RECORD || this == PRICE_SNAPSHOT || this == HUMAN_EDIT_FEEDBACK || this == QC_RESULT; }
+    public boolean immutable() { return this == STORY_FACT_MUTATION || this == CHARACTER_KNOWLEDGE || this == PROMPT_VERSION || this == COST_RECORD || this == PRICE_SNAPSHOT || this == HUMAN_EDIT_FEEDBACK || this == QC_RESULT
+            || this == CHARACTER_DEFINITION_VERSION || this == LOCATION_DEFINITION_VERSION || this == PROP_DEFINITION_VERSION
+            || this == DEPENDENCY_EDGE || this == REVALIDATION_MARKER || this == PRODUCTION_INPUT_SNAPSHOT; }
     public static ResourceKind fromPath(String value) {
         String normalized = value.toLowerCase(Locale.ROOT).replace('_', '-');
         return Arrays.stream(values()).filter(k -> k.path.equals(normalized)

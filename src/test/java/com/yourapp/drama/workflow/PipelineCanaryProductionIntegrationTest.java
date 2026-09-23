@@ -32,6 +32,7 @@ class PipelineCanaryProductionIntegrationTest {
     @Autowired DocumentStore store;
     @Autowired StudioService studio;
     @Autowired ObjectMapper mapper;
+    @Autowired ProductionInputSnapshotService productionSnapshots;
     @MockitoSpyBean ImageGenerator images;
     @MockitoSpyBean VideoGenerator videos;
 
@@ -62,7 +63,7 @@ class PipelineCanaryProductionIntegrationTest {
             assertThat(shot.path("propIds")).hasSize(1);
         });
         assertThat(shots.subList(1,4)).allSatisfy(shot->assertThat(text(shot,"relationToPrevious")).isEqualTo("CONTINUOUS"));
-        assertThat(store.list(PROMPT_VERSION,projectId,null)).isNotEmpty().allSatisfy(prompt->assertThat(prompt.path("promptIR")).isNotEmpty());
+        assertThat(store.list(PROMPT_VERSION,projectId,null)).isNotEmpty().allSatisfy(prompt->{assertThat(prompt.path("promptIR")).isNotEmpty();assertThat(text(prompt,"assetSnapshotHash")).hasSize(64);});
         ObjectNode firstCharacter=store.list(CHARACTER,projectId,null).stream().filter(value->"林川".equals(text(value,"name"))).findFirst().orElseThrow();
         ObjectNode secondCharacter=store.list(CHARACTER,projectId,null).stream().filter(value->"苏宁".equals(text(value,"name"))).findFirst().orElseThrow();
         ObjectNode phone=store.list(PROP,projectId,null).getFirst();String factId=id(store.list(STORY_FACT,projectId,null).getFirst());
@@ -84,6 +85,10 @@ class PipelineCanaryProductionIntegrationTest {
         assertThat(timeline.path("durationMs").asLong()).isEqualTo(20_000);
         assertThat(text(timeline,"finalUrl")).isNotBlank();
         assertThat(text(timeline,"finalQaStatus")).isEqualTo("PASSED");
+        assertThat(text(timeline,"productionInputSnapshotId")).isNotBlank();
+        assertThat(text(timeline,"assetSnapshotHash")).hasSize(64);
+        assertThat(text(timeline,"lastRenderProductionInputSnapshotId")).isNotBlank();
+        assertThat(items).allSatisfy(item->assertThat(text(item,"assetSnapshotHash")).hasSize(64));
 
         List<ObjectNode> jobs=store.list(GENERATION_JOB,projectId,null);
         assertThat(jobs.stream().filter(job->"ASSET_IMAGE".equals(text(job,"type")))).hasSize(4);
@@ -100,6 +105,7 @@ class PipelineCanaryProductionIntegrationTest {
         assertThat(result.path("assetDependency").asText()).isEqualTo("A1");
         assertThat(result.path("jobCounts").path("ASSET_IMAGE").asInt()).isEqualTo(4);
         assertThat(result.path("jobCounts").path("KEYFRAME").asInt()).isEqualTo(4);
+        assertThat(jobs.stream().filter(job->"ASSET_IMAGE".equals(text(job,"type"))).map(job->text(job.path("inputSnapshot"),"productionInputSnapshotId")).distinct()).hasSize(4);
         assertThat(result.path("llmStageCounts").path("STORY_BRIEF").asInt()).isEqualTo(1);
         assertThat(result.path("llmStageCounts").path("PREMISE").asInt()).isEqualTo(1);
         assertThat(result.path("llmStageCounts").path("CORE").asInt()).isEqualTo(1);
@@ -108,11 +114,12 @@ class PipelineCanaryProductionIntegrationTest {
         assertThat(result.path("llmStageCounts").path("STORY_QA").asInt()).isEqualTo(1);
         assertThat(result.path("llmStageCounts").path("DIRECTOR_PLAN").asInt()).isEqualTo(1);
         assertThat(result.path("llmStageCounts").path("SHOT_DETAIL").asInt()).isEqualTo(4);
-        assertThat(store.list(AUDIO_CLIP,projectId,null)).allSatisfy(clip->{assertThat(clip.path("locked").asBoolean()).isTrue();assertThat(clip.path("selected").asBoolean()).isTrue();assertThat(clip.path("voiceSnapshot").isObject()).isTrue();});
+        assertThat(store.list(AUDIO_CLIP,projectId,null)).allSatisfy(clip->{assertThat(clip.path("locked").asBoolean()).isTrue();assertThat(clip.path("selected").asBoolean()).isTrue();assertThat(clip.path("voiceSnapshot").isObject()).isTrue();assertThat(text(clip,"productionInputSnapshotId")).isNotBlank();assertThat(text(clip,"assetSnapshotHash")).hasSize(64);});
         List<ObjectNode> reviews=store.list(QC_RESULT,projectId,null);
         assertThat(reviews.stream().filter(review->KEYFRAME.path().equals(text(review,"targetKind"))&&"AUTOMATIC".equals(text(review,"reviewer"))&&!review.path("shadow").asBoolean()&&review.path("passed").asBoolean())).hasSize(4);
         assertThat(reviews.stream().filter(review->VIDEO_TAKE.path().equals(text(review,"targetKind"))&&"AUTOMATIC".equals(text(review,"reviewer"))&&!review.path("shadow").asBoolean()&&review.path("passed").asBoolean())).hasSize(4);
-        assertThat(store.list(VIDEO_TAKE,projectId,null)).allSatisfy(take->{assertThat(text(take,"sourceKeyframeId")).isNotBlank();assertThat(text(take,"promptVersionId")).isNotBlank();assertThat(text(take,"providerRequestId")).isNotBlank();assertThat(text(take,"generationProfile")).isEqualTo("TEST");ObjectNode frame=store.get(KEYFRAME,text(take,"sourceKeyframeId"));assertThat(text(take,"sourceProviderUrlSnapshot")).isEqualTo(text(frame,"providerUrl"));});
+        assertThat(store.list(KEYFRAME,projectId,null)).allSatisfy(frame->{assertThat(text(frame,"productionInputSnapshotId")).isNotBlank();assertThat(text(frame,"assetSnapshotHash")).hasSize(64);});
+        assertThat(store.list(VIDEO_TAKE,projectId,null)).allSatisfy(take->{assertThat(text(take,"sourceKeyframeId")).isNotBlank();assertThat(text(take,"promptVersionId")).isNotBlank();assertThat(text(take,"providerRequestId")).isNotBlank();assertThat(text(take,"generationProfile")).isEqualTo("TEST");assertThat(text(take,"productionInputSnapshotId")).isNotBlank();assertThat(text(take,"assetSnapshotHash")).hasSize(64);assertThat(productionSnapshots.trace(VIDEO_TAKE,id(take)).path("characterDefinitionVersionIds").isArray()).isTrue();ObjectNode frame=store.get(KEYFRAME,text(take,"sourceKeyframeId"));assertThat(text(take,"sourceProviderUrlSnapshot")).isEqualTo(text(frame,"providerUrl"));});
 
         int generationJobs=jobs.size();
         ObjectNode resumed=adapter.resume(text(result,"pipelineRunId"));

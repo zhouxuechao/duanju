@@ -36,6 +36,7 @@ public class JdbcDocumentStore implements DocumentStore {
         for (var kind : ResourceKind.values()) if(kind.parentField()!=null) m.get(kind).add(col(kind.parentField(),"uuid"));
         m.get(SHOT).addAll(List.of(col("duration","decimal"),col("status","text")));
         m.get(CHARACTER).addAll(List.of(col("provider","text"),col("sourceType","text"),col("providerAssetId","text"),col("providerStatus","text"),col("identityLocked","bool")));
+        for(ResourceKind kind:List.of(CHARACTER_DEFINITION_VERSION,LOCATION_DEFINITION_VERSION,PROP_DEFINITION_VERSION))m.get(kind).addAll(List.of(col("version","int"),col("supersedesId","uuid"),col("effectiveFromEpisode","int"),col("effectiveFromScene","int"),col("effectiveFromStoryTime","decimal"),col("contentHash","text")));
         m.get(CHARACTER_STATE).addAll(List.of(col("characterId","uuid"),col("state","text"),col("validFromStoryTime","decimal"),col("validToStoryTime","decimal"),col("sourceSceneId","uuid"),col("sourceShotId","uuid")));
         m.get(CHARACTER_PROVIDER_ASSET).addAll(List.of(col("provider","text"),col("providerAssetId","text"),col("providerStatus","text")));
         m.get(KEYFRAME).addAll(List.of(col("version","int"),col("provider","text"),col("sourceModel","text"),col("providerUrl","text"),col("providerUrlExpiresAt","time"),col("archiveUrl","text"),col("generationJobId","uuid"),col("providerRequestId","text"),col("handoffStatus","text"),col("qcStatus","text"),col("selected","bool"),col("locked","bool")));
@@ -47,6 +48,9 @@ public class JdbcDocumentStore implements DocumentStore {
         m.get(ENTITY_ALIAS).addAll(List.of(col("entityId","uuid"),col("alias","text"),col("aliasType","text"),col("validFromStoryTime","decimal"),col("validToStoryTime","decimal"),col("source","text"),col("confidence","decimal")));
         m.get(RELATIONSHIP).addAll(List.of(col("subjectCharacterId","uuid"),col("objectCharacterId","uuid"),col("relationshipType","text"),col("state","text"),col("validFromStoryTime","decimal"),col("validToStoryTime","decimal"),col("sourceSceneId","uuid"),col("sourceShotId","uuid")));
         m.get(LOCATION_STATE).addAll(List.of(col("locationId","uuid"),col("state","text"),col("validFromStoryTime","decimal"),col("validToStoryTime","decimal"),col("sourceSceneId","uuid"),col("sourceShotId","uuid")));
+        m.get(DEPENDENCY_EDGE).addAll(List.of(col("sourceKind","text"),col("sourceId","uuid"),col("targetKind","text"),col("targetId","uuid"),col("dependencyType","text"),col("episodeNo","int"),col("sceneNo","int"),col("storyTime","decimal")));
+        m.get(REVALIDATION_MARKER).addAll(List.of(col("resourceKind","text"),col("resourceId","uuid"),col("sourceVersionId","uuid"),col("status","text")));
+        m.get(PRODUCTION_INPUT_SNAPSHOT).addAll(List.of(col("sourceKind","text"),col("sourceId","uuid"),col("promptVersionId","uuid"),col("scriptVersionId","uuid"),col("assetSnapshotHash","text"),col("snapshotKey","text")));
         m.get(PROMPT_VERSION).addAll(List.of(col("shotId","uuid"),col("version","int"),col("promptTemplateId","uuid")));
         m.get(STORYBOARD).add(col("version","int"));
         m.get(DIALOGUE_LINE).addAll(List.of(col("characterId","uuid"),col("semanticText","text"),col("spokenText","text"),col("subtitleText","text")));

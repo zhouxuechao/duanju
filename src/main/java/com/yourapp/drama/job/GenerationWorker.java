@@ -98,6 +98,7 @@ public class GenerationWorker {
             for(String field:List.of("semanticRole","providerFrameMode","timeSec","stateVersion","mediaPurpose"))if(input.has(field))asset.set(field,input.path(field).deepCopy());
             if(input.has("assetDependencyLevel"))asset.set("assetDependencyLevel",input.path("assetDependencyLevel").deepCopy());
             for(String field:List.of("sequenceCompilerVersion","normalizedPromptHash","referenceBindingsHash","referenceAuthorityFingerprint","continuitySnapshotHash","sequenceStateFingerprint","providerCapabilitiesVersion"))if(input.has(field))asset.set(field,input.path(field).deepCopy());
+            copyProvenance(asset,input);
             asset.set("assetViewIds",input.path("assetViewIds").deepCopy());asset.set("assetReferences",input.path("assetReferences").deepCopy());
             if(kind==KEYFRAME&&input.path("storyboardReference").isObject())asset.set("storyboardReference",input.path("storyboardReference").deepCopy());
             asset.set("generationInputSnapshot",input.deepCopy());
@@ -140,7 +141,7 @@ public class GenerationWorker {
                 for(String field:List.of("parentTakeId","continuationDepth","reanchorReason","sequenceStrategy","sequenceRelation","sequenceCompilerVersion","normalizedPromptHash","referenceBindingsHash","referenceAuthorityFingerprint","continuitySnapshotHash","sequenceStateFingerprint","providerCapabilitiesVersion","modelId","modelProfileVersion","capabilityFingerprint","taskType","lockMode","route","videoRequestRoute","activatedMaterials","excludedMaterials","referenceMapping","referenceAuthority","referenceBudget","providerParameters","prompt","rulePackFingerprint","rulePackUpstreamCommit","runtimeRuleIds","audioGenerationPolicy","modelProfile","preflight","generationProfile","resolution","ratio","desiredDuration","providerDuration","durationAdaptationReason","nativeAudio","watermark"))if(input.has(field))take.set(field,input.path(field).deepCopy());
                 if(input.path("retake").isObject())take.set("retakeAudit",input.path("retake").deepCopy());
                 if(lipsync)take.put("variantType","LIPSYNC").put("sourceVideoTakeId",required(input,"sourceTakeId"));
-                take.set("inputSnapshot",input.deepCopy());take.set("assetViewIds",frame.path("assetViewIds").deepCopy());take.set("assetReferences",frame.path("assetReferences").deepCopy()); ObjectNode saved=store.create(VIDEO_TAKE,take);
+                take.set("inputSnapshot",input.deepCopy());take.set("assetViewIds",frame.path("assetViewIds").deepCopy());take.set("assetReferences",frame.path("assetReferences").deepCopy());copyProvenance(take,input); ObjectNode saved=store.create(VIDEO_TAKE,take);
                 if(!lipsync){ObjectNode current=store.getForUpdate(KEYFRAME,id(frame));store.update(KEYFRAME,id(current),revision(current),current.deepCopy().put("handoffStatus","HANDED_OFF").put("handedOffAt",Instant.now().toString()));}
                 jobs.mutate(id(job),j->{j.put("providerTaskId",submission.taskId()).put("providerRequestId",submission.requestId()).put("progress",20).put("simulated",submission.simulated());j.set("outputSnapshot",obj().put("takeId",id(saved)));});
                 if(!lipsync&&text(frame,"archiveUrl").isBlank())jobs.enqueue(project(job),required(job,"shotId"),"ARCHIVE",obj().put("targetKind","keyframes").put("targetId",id(frame)).put("providerUrl",required(frame,"providerUrl")).put("simulated",submission.simulated()),"archive:keyframe:"+id(frame));
@@ -224,6 +225,7 @@ public class GenerationWorker {
         return raw.substring(0,head)+marker+raw.substring(raw.length()-tail);
     }
     private ObjectNode usage(long prompt,long completion,long total){return obj().put("promptTokens",prompt).put("completionTokens",completion).put("totalTokens",total);}
+    private void copyProvenance(ObjectNode target,JsonNode source){for(String field:List.of("productionInputSnapshotId","assetSnapshotHash","scriptVersionId","scriptHash"))if(source.hasNonNull(field))target.set(field,source.path(field).deepCopy());}
     private String redact(String value){return value==null?"模型调用失败":value.replaceAll("https?://\\S+","[模型地址]").replaceAll("(?i)(bearer\\s+)[^\\s]+","$1[hidden]");}
     private List<String> strings(JsonNode list){List<String> result=new ArrayList<>();list.forEach(n->result.add(n.asText()));return result;}
     private Map<String,Object> map(JsonNode object){return mapper.convertValue(object,new com.fasterxml.jackson.core.type.TypeReference<Map<String,Object>>(){});}

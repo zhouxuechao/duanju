@@ -7,6 +7,7 @@ import com.yourapp.drama.persistence.DocumentStore;
 import com.yourapp.drama.workflow.WorkflowException;
 import com.yourapp.drama.workflow.ModelRoutingPolicy;
 import com.yourapp.drama.workflow.TestBudgetGuard;
+import com.yourapp.drama.workflow.ProductionInputSnapshotService;
 import com.yourapp.drama.production.GenerationProfilePolicy;
 import org.springframework.stereotype.Service;
 import java.time.Instant;
@@ -20,12 +21,16 @@ public class JobService {
     private static final Set<String> PIPELINE_PAID_JOB_TYPES=Set.of(
         "STORY","SCRIPT","STORY_QA","DIRECTOR_PLAN","SHOT_DETAIL",
         "ASSET_IMAGE","STORYBOARD","KEYFRAME","KEYFRAME_QC","VIDEO_QC","VIDEO","TTS","LIPSYNC");
+    private static final Set<String> PROVENANCE_JOB_TYPES=Set.of(
+        "STORY","SCRIPT","STORY_QA","DIRECTOR_PLAN","SHOT_DETAIL",
+        "ASSET_IMAGE","STORYBOARD","KEYFRAME","KEYFRAME_QC","VIDEO_QC","VIDEO","TTS","LIPSYNC","TIMELINE","RENDER");
     private final DocumentStore store;
     private final JobEvents events;
     private final ModelRoutingPolicy routing;
     private final TestBudgetGuard testBudget;
     private final GenerationProfilePolicy generationProfiles;
-    public JobService(DocumentStore store,JobEvents events,ModelRoutingPolicy routing,TestBudgetGuard testBudget,GenerationProfilePolicy generationProfiles){this.store=store;this.events=events;this.routing=routing;this.testBudget=testBudget;this.generationProfiles=generationProfiles;}
+    private final ProductionInputSnapshotService productionSnapshots;
+    public JobService(DocumentStore store,JobEvents events,ModelRoutingPolicy routing,TestBudgetGuard testBudget,GenerationProfilePolicy generationProfiles,ProductionInputSnapshotService productionSnapshots){this.store=store;this.events=events;this.routing=routing;this.testBudget=testBudget;this.generationProfiles=generationProfiles;this.productionSnapshots=productionSnapshots;}
     public ObjectNode enqueue(String projectId,String shotId,String type,JsonNode input,String requestKey){
         try{JobType.valueOf(type);}catch(IllegalArgumentException error){throw new WorkflowException("JOB_TYPE_INVALID","当前流程不支持任务类型："+type);}
         ObjectNode job=store.transaction(()->{
@@ -38,6 +43,11 @@ public class JobService {
             testBudget.applyEstimatedCost(type,frozen);
             if(Set.of("STORYBOARD","KEYFRAME","ASSET_IMAGE").contains(type)){frozen.putIfAbsent("modelId",settings.path("imageModel"));frozen.putIfAbsent("imageSize",settings.path("imageSize"));}
             if(Set.of("VIDEO","LIPSYNC").contains(type)){frozen.putIfAbsent("modelId",settings.path("videoModel"));frozen.putIfAbsent("resolution",settings.path("videoResolution"));}
+            if(PROVENANCE_JOB_TYPES.contains(type)){
+                ObjectNode productionSnapshot=productionSnapshots.freeze(projectId,shotId,type,frozen);
+                frozen.put("productionInputSnapshotId",id(productionSnapshot)).put("assetSnapshotHash",text(productionSnapshot,"assetSnapshotHash"));
+                for(String field:List.of("scriptVersionId","scriptHash"))if(productionSnapshot.hasNonNull(field))frozen.set(field,productionSnapshot.path(field).deepCopy());
+            }
             if(requestKey!=null&&!requestKey.isBlank())for(ObjectNode old:store.list(GENERATION_JOB,projectId,null))if(requestKey.equals(text(old,"requestKey"))){
                 if(!type.equals(text(old,"type"))||!Objects.equals(shotId,old.hasNonNull("shotId")?text(old,"shotId"):null)||!old.path("inputSnapshot").equals(frozen))throw new WorkflowException("IDEMPOTENCY_CONFLICT","此请求标识已用于不同操作或输入");
                 return old;
@@ -51,7 +61,7 @@ public class JobService {
             if(reserved)next.put("testBudgetReserved",true).put("testBudgetReservationStatus","RESERVED");
             if(shotId!=null)next.put("shotId",shotId);
             ObjectNode routingDecision=routing.decide(type,frozen.path("complexity").asText("MEDIUM"),frozen.path("qualityTier").asText("BALANCED"));if(frozen.hasNonNull("modelId"))routingDecision.put("plannedModel",text(frozen,"modelId")).put("chosenModel",text(frozen,"modelId"));next.set("routingDecision",routingDecision);next.put("provider",routingDecision.path("chosenProvider").asText()).put("model",routingDecision.path("chosenModel").asText()).put("plannedModel",routingDecision.path("plannedModel").asText()).put("qualityTier",routingDecision.path("qualityTier").asText());
-            for(String field:List.of("compilerVersion","sequenceCompilerVersion","normalizedPromptHash","referenceBindingsHash","referenceAuthorityFingerprint","continuitySnapshotHash","sequenceStateFingerprint","providerCapabilitiesVersion","capabilityFingerprint","sequenceStrategy","sequenceRelation","parentTakeId","continuationDepth","reanchorReason","resolution"))if(frozen.has(field))next.set(field,frozen.path(field).deepCopy());
+            for(String field:List.of("compilerVersion","sequenceCompilerVersion","normalizedPromptHash","referenceBindingsHash","referenceAuthorityFingerprint","continuitySnapshotHash","sequenceStateFingerprint","providerCapabilitiesVersion","capabilityFingerprint","sequenceStrategy","sequenceRelation","parentTakeId","continuationDepth","reanchorReason","resolution","productionInputSnapshotId","assetSnapshotHash","scriptVersionId","scriptHash"))if(frozen.has(field))next.set(field,frozen.path(field).deepCopy());
             next.set("inputSnapshot",frozen); next.set("outputSnapshot",obj());
             next.putArray("statusHistory").add(obj().put("to","QUEUED").put("at",java.time.Instant.now().toString()));
             try{return store.create(GENERATION_JOB,next);}catch(RuntimeException error){if(reserved)testBudget.release(type,frozen);throw error;}
