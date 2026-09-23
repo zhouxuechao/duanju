@@ -61,7 +61,7 @@ public enum ResourceKind {
     public String path() { return path; }
     public ResourceKind parentKind() { return parent; }
     public String parentField() { return parentField; }
-    public boolean immutable() { return this == STORY_FACT_MUTATION || this == PROMPT_VERSION || this == COST_RECORD || this == PRICE_SNAPSHOT || this == HUMAN_EDIT_FEEDBACK || this == QC_RESULT; }
+    public boolean immutable() { return this == STORY_FACT_MUTATION || this == CHARACTER_KNOWLEDGE || this == PROMPT_VERSION || this == COST_RECORD || this == PRICE_SNAPSHOT || this == HUMAN_EDIT_FEEDBACK || this == QC_RESULT; }
     public static ResourceKind fromPath(String value) {
         String normalized = value.toLowerCase(Locale.ROOT).replace('_', '-');
         return Arrays.stream(values()).filter(k -> k.path.equals(normalized)

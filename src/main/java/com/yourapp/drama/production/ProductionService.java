@@ -38,7 +38,7 @@ public class ProductionService {
     public JsonNode prepareVideo(JsonNode request) { return prompts.prepareVideo(request); }
     public JsonNode routeVideo(JsonNode request) { return prompts.routeVideo(request); }
     public JsonNode imageCapabilities(){return capabilities.image();}
-    public JsonNode imageCapabilities(String modelId){ObjectNode value=capabilities.image().deepCopy();value.put("modelId",modelId);return value;}
+    public JsonNode imageCapabilities(String modelId){return capabilities.image(modelId);}
     public JsonNode videoCapabilities(){return capabilities.video();}
     public JsonNode videoCapabilities(String modelId){return capabilities.video(modelId);}
     public JsonNode transitionShot(JsonNode request) { return states.transitionShot(request); }

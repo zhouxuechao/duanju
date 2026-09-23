@@ -18,6 +18,7 @@ public final class GenerationProfilePolicy {
             value.putIfAbsent("videoResolution",text(profile==GenerationProfile.STANDARD?"720p":capabilities.defaultVideoResolution()));
         }
         if(profile!=GenerationProfile.FINAL&&!"2K".equals(value.path("imageSize").asText()))throw new IllegalArgumentException("TEST / STANDARD 的 Seedream 5.0 图片尺寸固定为 2K");
+        capabilities.imageProfile(value.path("imageModel").asText()).requireSize(value.path("imageSize").asText());
         capabilities.profile(value.path("videoModel").asText()).requireResolution(value.path("videoResolution").asText());
         return value;
     }

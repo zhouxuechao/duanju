@@ -12,6 +12,9 @@ public interface DocumentStore {
     List<ObjectNode> list(ResourceKind kind, String projectId, String parentId);
     ObjectNode create(ResourceKind kind, ObjectNode document);
     ObjectNode update(ResourceKind kind, String id, long expectedRevision, ObjectNode document);
+    default ObjectNode closeCharacterKnowledgeInterval(String id, long expectedRevision, double validToStoryTime) {
+        throw new UnsupportedOperationException("Controlled character-knowledge transitions are not supported by this store");
+    }
     ObjectNode getForUpdate(ResourceKind kind, String id);
     <T> T transaction(Supplier<T> work);
 }

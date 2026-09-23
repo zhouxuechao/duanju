@@ -34,7 +34,7 @@ class PostgresV16ToCurrentMigrationTest {
                 .locations("classpath:db/migration/common").load();
         flyway.migrate();
 
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("25");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("26");
         try (Connection connection = connection()) {
             try (PreparedStatement statement = connection.prepareStatement("SELECT semantic_text,spoken_text,subtitle_text,document FROM \"dialogue_line\" WHERE id=?")) {
                 statement.setObject(1, fixture.dialogue());

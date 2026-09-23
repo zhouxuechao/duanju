@@ -167,6 +167,7 @@ public class WorkflowService {
                 JsonNode previous=sourceJob.path("inputSnapshot");
                 input.put("promptVersionId",required(previous,"promptVersionId"));input.put("prompt",required(previous,"prompt"));
                 input.set("providerOptions",previous.path("providerOptions").deepCopy());input.set("referenceImageUrls",previous.path("referenceImageUrls").deepCopy());input.set("context",previous.path("context").deepCopy());
+                for(String field:List.of("generationProfile","modelId","imageSize","ratio","compilerVersion","normalizedPromptHash","referenceBindingsHash","referenceAuthorityFingerprint","continuitySnapshotHash","providerCapabilitiesVersion","capabilityFingerprint","sequenceCompilerVersion"))if(previous.has(field))input.set(field,previous.path(field).deepCopy());
                 // A regeneration is a new take of the same approved visual setup. Keep
                 // the exact reference view/version snapshot used by the source frame;
                 // the shot may have been edited since that frame was created.
@@ -285,7 +286,7 @@ public class WorkflowService {
     }
     private ObjectNode compactKeyframeSnapshot(ObjectNode source){
         ObjectNode snapshot=obj();
-        for(String field:List.of("id","projectId","shotId","version","attemptNo","provider","sourceModel","providerUrl","providerUrlExpiresAt","archiveUrl","generationJobId","providerRequestId","promptVersionId","handoffStatus","qcStatus","qcScore","locked","selected","simulated","assetViewIds","assetReferences","regeneratedFromId","regenerationMode","directorPlanVersion","dramaticBeatVersion","shotPlanVersion","semanticRole","timeSec","stateVersion","providerFrameMode"))
+        for(String field:List.of("id","projectId","shotId","version","attemptNo","provider","sourceModel","providerUrl","providerUrlExpiresAt","archiveUrl","generationJobId","providerRequestId","promptVersionId","handoffStatus","qcStatus","qcScore","locked","selected","simulated","generationProfile","imageSize","assetViewIds","assetReferences","regeneratedFromId","regenerationMode","directorPlanVersion","dramaticBeatVersion","shotPlanVersion","semanticRole","timeSec","stateVersion","providerFrameMode"))
             if(source.has(field))snapshot.set(field,source.get(field).deepCopy());
         return snapshot;
     }
@@ -322,7 +323,7 @@ public class WorkflowService {
                     JsonNode observedStart=body.path("observedStartState").isObject()?body.path("observedStartState"):shot.path("startState");ArrayNode seamRisks=crossShotRisks(shot,observedStart);qc.set("crossShotRisks",seamRisks);if(body.path("passed").asBoolean()&&!seamRisks.isEmpty())throw new WorkflowException("CROSS_SHOT_QC_BLOCKED","当前视频起始状态与上一条已采用视频的实际末态不连续，请重生成或修正接镜策略");
                     if(differences.isEmpty())qc.put("deviationDecision","MATCH");else{String deviation=text(body,"deviationDecision");if(!Set.of("REGENERATE","ACCEPT_CANONICAL").contains(deviation))throw new WorkflowException("OBSERVED_DEVIATION_DECISION_REQUIRED","视频实际末态与计划不一致，请明确选择重生成或接受偏差并更新连续性状态");if("ACCEPT_CANONICAL".equals(deviation)&&!"HUMAN".equals(reviewer))throw new WorkflowException("HUMAN_DEVIATION_REVIEW_REQUIRED","只有人工审查可以接受实际偏差并更新连续性状态");if("REGENERATE".equals(deviation)&&body.path("passed").asBoolean())throw new WorkflowException("REGENERATE_CANNOT_PASS","选择重生成时不能把当前视频标记为通过");qc.put("deviationDecision",deviation);}}
             }
-            store.create(QC_RESULT,qc);
+            store.create(QC_RESULT,QcGenerationProvenance.attach(qc,item));
             ObjectNode next=item.deepCopy().put("qcStatus",body.path("passed").asBoolean()?"PASSED":"FAILED").put("qcScore",score);
             if(revokeLocked)next.put("locked",false).put("selected",false).put("revokedAt",Instant.now().toString());
             if(body.has("observedState")){next.set("observedState",body.path("observedState").deepCopy());if(qc.has("observedDifferences"))next.set("observedDifferences",qc.path("observedDifferences").deepCopy());if(qc.has("deviationDecision"))next.set("deviationDecision",qc.path("deviationDecision"));}

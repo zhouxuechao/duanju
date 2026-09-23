@@ -24,10 +24,12 @@ class GenerationProfilePolicyTest {
 
     @Test void finalRequiresExplicitConfigurationAndFastProfileUsesRangeDurations(){
         assertThatThrownBy(()->policy.applyDefaults(obj().put("generationProfile","FINAL"))).hasMessageContaining("FINAL");
-        ObjectNode configuredFinal=policy.applyDefaults(obj().put("generationProfile","FINAL").put("imageModel","future-image-model")
-                .put("videoModel",ProviderCapabilityRegistry.SEEDANCE_20_FAST).put("videoResolution","720p").put("imageSize","4K"));
-        assertThat(configuredFinal.path("imageModel").asText()).isEqualTo("future-image-model");
-        assertThat(configuredFinal.path("imageSize").asText()).isEqualTo("4K");
+        assertThatThrownBy(()->policy.applyDefaults(obj().put("generationProfile","FINAL").put("imageModel","future-image-model")
+                .put("videoModel",ProviderCapabilityRegistry.SEEDANCE_20_FAST).put("videoResolution","720p").put("imageSize","2K"))).hasMessageContaining("UNVERIFIED_PROVIDER_MODEL");
+        ObjectNode configuredFinal=policy.applyDefaults(obj().put("generationProfile","FINAL").put("imageModel",ProviderCapabilityRegistry.SEEDREAM_50)
+                .put("videoModel",ProviderCapabilityRegistry.SEEDANCE_20_FAST).put("videoResolution","720p").put("imageSize","2K"));
+        assertThat(configuredFinal.path("imageModel").asText()).isEqualTo(ProviderCapabilityRegistry.SEEDREAM_50);
+        assertThat(configuredFinal.path("imageSize").asText()).isEqualTo("2K");
         VideoModelProfile fast=capabilities.profile(ProviderCapabilityRegistry.SEEDANCE_20_FAST);
         assertThat(fast.family()).isEqualTo("SEEDANCE_2_0_FAST");
         assertThat(fast.supportedResolutions()).containsExactly("480p","720p");

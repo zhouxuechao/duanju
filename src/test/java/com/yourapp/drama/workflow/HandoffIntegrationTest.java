@@ -325,12 +325,14 @@ class HandoffIntegrationTest {
     }
     @Test void keyframeRegenerationReusesOriginalPromptReferencesAndProviderOptions(){
         ObjectNode frame=generateFrame(),originalJob=store.get(GENERATION_JOB,required(frame,"generationJobId"));
+        ObjectNode project=store.get(PROJECT,projectId);store.update(PROJECT,projectId,revision(project),project.deepCopy().put("generationProfile","STANDARD").put("videoResolution","720p"));
         ObjectNode regenerated=workflow.regenerateKeyframe(id(frame),obj().put("requestKey","same-settings"));
         JsonNode original=originalJob.path("inputSnapshot"),next=regenerated.path("inputSnapshot");
         assertThat(text(next,"regenerationMode")).isEqualTo("REPLAY_ORIGINAL");
         assertThat(text(next,"parentKeyframeId")).isEqualTo(id(frame));
         assertThat(text(next,"promptVersionId")).isEqualTo(text(original,"promptVersionId"));
         assertThat(next.path("prompt")).isEqualTo(original.path("prompt"));assertThat(next.path("referenceImageUrls")).isEqualTo(original.path("referenceImageUrls"));assertThat(next.path("providerOptions")).isEqualTo(original.path("providerOptions"));
+        for(String field:List.of("generationProfile","modelId","imageSize","ratio"))assertThat(next.path(field)).as(field).isEqualTo(original.path(field));
     }
     @Test void keyframePinsTheDirectorVersionsActuallyUsed(){
         ObjectNode shot=store.get(SHOT,shotId);store.update(SHOT,shotId,revision(shot),shot.deepCopy().put("directorPlanVersion",7).put("dramaticBeatVersion",6).put("shotPlanVersion",9));
@@ -350,10 +352,12 @@ class HandoffIntegrationTest {
     @Test void latestRegenerationIsExplicitAndKeepsLineage(){
         ObjectNode frame=generateFrame(); ObjectNode shot=store.get(SHOT,shotId);
         store.update(SHOT,shotId,revision(shot),shot.deepCopy().put("action","LATEST_ACTION_MARKER"));
+        ObjectNode project=store.get(PROJECT,projectId);store.update(PROJECT,projectId,revision(project),project.deepCopy().put("generationProfile","STANDARD").put("videoResolution","720p"));
         ObjectNode regenerated=workflow.regenerateLatestKeyframe(id(frame),obj().put("requestKey","latest-lineage"));
         assertThat(regenerated.path("inputSnapshot").path("regenerationMode").asText()).isEqualTo("LATEST");
         assertThat(regenerated.path("inputSnapshot").path("parentKeyframeId").asText()).isEqualTo(id(frame));
         assertThat(regenerated.path("inputSnapshot").path("context").path("shot").path("action").asText()).isEqualTo("LATEST_ACTION_MARKER");
+        assertThat(regenerated.path("inputSnapshot").path("generationProfile").asText()).isEqualTo("STANDARD");
     }
     @Test void imageRequestLocksTheProjectAspectRatio(){
         ObjectNode frame=generateFrame(),job=store.get(GENERATION_JOB,required(frame,"generationJobId"));
@@ -389,6 +393,7 @@ class HandoffIntegrationTest {
     }
     @Test void projectQualityMetricsAreQueryable() throws Exception{
         ObjectNode frame=generateFrame();workflow.review(KEYFRAME,id(frame),obj().put("passed",false).put("notes","人物身份错误"));
+        ObjectNode qc=store.list(QC_RESULT,projectId,null).getLast();assertThat(text(qc,"generationProfile")).isEqualTo("TEST");assertThat(text(qc,"model")).isEqualTo("configured-seedream");assertThat(text(qc,"resolution")).isEqualTo("UNKNOWN");assertThat(text(qc,"imageSize")).isEqualTo("2K");
         MockMvcBuilders.webAppContextSetup(web).build().perform(get("/api/projects/{id}/quality-metrics",projectId))
             .andExpect(status().isOk()).andExpect(jsonPath("$.reviewedShots").value(1)).andExpect(jsonPath("$.firstPassRate").value(0.0))
             .andExpect(jsonPath("$.identityFailureRate").value(1.0)).andExpect(jsonPath("$.clothingFailureRate").value(0.0))
@@ -408,7 +413,7 @@ class HandoffIntegrationTest {
         ObjectNode frame=generateFrame();ObjectNode review=obj().put("projectId",projectId).put("targetKind","keyframes").put("targetId",id(frame)).put("shotId",shotId).put("reviewer","AUTOMATIC").put("shadow",false).put("passed",false);
         review.putObject("diagnosis").put("failureOrigin","PROVIDER_OUTPUT").putArray("failureCodes").add("POSITION_MISMATCH");store.create(QC_RESULT,review);
         MockMvcBuilders.webAppContextSetup(web).build().perform(get("/api/projects/{id}/quality-metrics",projectId))
-            .andExpect(status().isOk()).andExpect(jsonPath("$.spatialFailureRate").value(1.0));
+            .andExpect(status().isOk()).andExpect(jsonPath("$.spatialFailureRate").value(1.0)).andExpect(jsonPath("$.qualityByGenerationProfile.UNKNOWN.reviewedAttempts").value(1));
     }
     @Test void qualityMetricsCountHumanPassOrRegenerateAsManualIntervention() throws Exception{
         ObjectNode frame=generateFrame();workflow.review(KEYFRAME,id(frame),obj().put("passed",true).put("notes","人工确认画面通过"));
@@ -454,6 +459,7 @@ class HandoffIntegrationTest {
         ObjectNode assessment=store.list(QC_RESULT,projectId,null).getLast();
         assertThat(assessment.path("reviewer").asText()).isEqualTo("AUTOMATIC");
         assertThat(assessment.path("shadow").asBoolean()).isTrue();
+        assertThat(text(assessment,"generationProfile")).isEqualTo("TEST");assertThat(text(assessment,"model")).isEqualTo("configured-seedream");assertThat(text(assessment,"imageSize")).isEqualTo("2K");assertThat(text(assessment,"resolution")).isEqualTo("UNKNOWN");
         assertThat(assessment.path("routingDecision").asText()).isNotBlank();
         assertThat(assessment.path("expectedContext").findValues("url")).isEmpty();
     }
@@ -479,7 +485,7 @@ class HandoffIntegrationTest {
         workflow.video(id(frame),obj().put("requestKey","video-vlm-shadow"));worker.tick();worker.tick();worker.tick();
         ObjectNode take=store.list(VIDEO_TAKE,projectId,shotId).getFirst();ObjectNode reviewed=automaticVideoReview.review(id(take),obj());
         assertThat(text(reviewed,"qcStatus")).isEqualTo("PENDING");
-        ObjectNode assessment=store.list(QC_RESULT,projectId,null).getLast();assertThat(assessment.path("targetKind").asText()).isEqualTo("video-takes");assertThat(assessment.path("shadow").asBoolean()).isTrue();
+        ObjectNode assessment=store.list(QC_RESULT,projectId,null).getLast();assertThat(assessment.path("targetKind").asText()).isEqualTo("video-takes");assertThat(assessment.path("shadow").asBoolean()).isTrue();assertThat(text(assessment,"generationProfile")).isEqualTo("TEST");assertThat(text(assessment,"model")).isNotBlank();assertThat(text(assessment,"resolution")).isEqualTo("480p");assertThat(text(assessment,"imageSize")).isEqualTo("2K");
         verify(videoFrames).extract("archive.png");
     }
     @Test void deterministicContextFailureStopsBeforePaidVideoReview(){
@@ -592,13 +598,13 @@ class HandoffIntegrationTest {
     @Test void uncertainVlmFailureIsRecordedAndSameKeyIsNeverResubmitted(){
         ObjectNode frame=generateFrame();doThrow(new ProviderException("REQUEST_TIMEOUT","质检请求超时",null,0,false,true).withRawOutput("{\"partial\":true}")).when(visualReviewer).review(any(),any());ObjectNode request=obj().put("requestKey","uncertain-vlm-once");
         assertThatThrownBy(()->automaticVisualReview.review(id(frame),request)).isInstanceOf(ProviderException.class);
-        ObjectNode failure=store.list(QC_RESULT,projectId,null).getLast();assertThat(text(failure,"assessmentKey")).isEqualTo("uncertain-vlm-once");assertThat(failure.path("submissionUncertain").asBoolean()).isTrue();assertThat(text(failure,"providerOutputRaw")).isEqualTo("{\"partial\":true}");
+        ObjectNode failure=store.list(QC_RESULT,projectId,null).getLast();assertThat(text(failure,"assessmentKey")).isEqualTo("uncertain-vlm-once");assertThat(failure.path("submissionUncertain").asBoolean()).isTrue();assertThat(text(failure,"providerOutputRaw")).isEqualTo("{\"partial\":true}");assertThat(text(failure,"generationProfile")).isEqualTo("TEST");assertThat(text(failure,"model")).isEqualTo("configured-seedream");assertThat(text(failure,"imageSize")).isEqualTo("2K");assertThat(text(failure,"resolution")).isEqualTo("UNKNOWN");
         automaticVisualReview.review(id(frame),request);verify(visualReviewer,times(1)).review(any(),any());
     }
     @Test void uncertainVideoVlmFailureIsRecordedAndSameKeyIsNeverResubmitted(){
         ObjectNode frame=generateFrame();workflow.review(KEYFRAME,id(frame),obj().put("passed",true));workflow.lock(KEYFRAME,id(frame),obj().put("generateVideo",false));workflow.video(id(frame),obj().put("requestKey","video-vlm-failure-source"));worker.tick();worker.tick();worker.tick();ObjectNode take=store.list(VIDEO_TAKE,projectId,shotId).getFirst();
         doThrow(new ProviderException("REQUEST_TIMEOUT","视频质检请求超时",null,0,false,true)).when(videoReviewer).review(any(),anyList());ObjectNode request=obj().put("requestKey","uncertain-video-vlm-once");
-        assertThatThrownBy(()->automaticVideoReview.review(id(take),request)).isInstanceOf(ProviderException.class);ObjectNode failure=store.list(QC_RESULT,projectId,null).getLast();assertThat(failure.path("submissionUncertain").asBoolean()).isTrue();
+        assertThatThrownBy(()->automaticVideoReview.review(id(take),request)).isInstanceOf(ProviderException.class);ObjectNode failure=store.list(QC_RESULT,projectId,null).getLast();assertThat(failure.path("submissionUncertain").asBoolean()).isTrue();assertThat(text(failure,"generationProfile")).isEqualTo("TEST");assertThat(text(failure,"model")).isNotBlank();assertThat(text(failure,"resolution")).isEqualTo("480p");assertThat(text(failure,"imageSize")).isEqualTo("2K");
         automaticVideoReview.review(id(take),request);verify(videoReviewer,times(1)).review(any(),anyList());
     }
 }

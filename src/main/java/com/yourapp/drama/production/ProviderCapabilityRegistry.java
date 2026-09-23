@@ -26,6 +26,7 @@ public class ProviderCapabilityRegistry {
     private final String defaultVideoResolution;
     private final String defaultImageSize;
     private final Map<String,VideoModelProfile> verifiedProfiles;
+    private final Map<String,ImageModelProfile> verifiedImageProfiles;
     public ProviderCapabilityRegistry(){this(SEEDANCE_20_FAST,SEEDREAM_50,"480p","2K",4,15,1);}
     public ProviderCapabilityRegistry(String configuredVideoModel){this(configuredVideoModel,SEEDREAM_50,"480p","2K",4,15,1);}
     @Autowired public ProviderCapabilityRegistry(@Value("${drama.provider.volcengine.video-model:doubao-seedance-2-0-fast-260128}") String configuredVideoModel,
@@ -37,14 +38,21 @@ public class ProviderCapabilityRegistry {
         @Value("${drama.provider.volcengine.video-duration-step:1}") int durationStep){
         this.configuredVideoModel=blank(configuredVideoModel,SEEDANCE_20_FAST);this.configuredImageModel=blank(configuredImageModel,SEEDREAM_50);this.defaultVideoResolution=blank(defaultVideoResolution,"480p");this.defaultImageSize=blank(defaultImageSize,"2K");
         this.verifiedProfiles=Map.of(SEEDANCE_20,buildLegacy(SEEDANCE_20,false),SEEDANCE_25,buildLegacy(SEEDANCE_25,true),SEEDANCE_20_FAST,buildFast(minDuration,maxDuration,durationStep));
+        this.verifiedImageProfiles=Map.of(SEEDREAM_50,buildSeedream50());
     }
-    public ObjectNode image(){ObjectNode value=obj().put("version",VERSION).put("modelId",configuredImageModel).put("modelFamily","SEEDREAM_5_0").put("profileVersion","seedream-5.0-profile-v1").put("verificationStatus","STATIC_UNVERIFIED").put("source","MODEL_PROFILE").put("defaultSize",defaultImageSize).put("supportsMultipleImages",true).put("supportsRegionEdit",false).put("maxImageRefs",10);value.putArray("supportedRatios").add("9:16").add("16:9").add("1:1");return value;}
+    public ObjectNode image(){return imageProfile(configuredImageModel).toJson();}
+    public ObjectNode image(String modelId){return imageProfile(modelId).toJson();}
     public ObjectNode video(){return profile(configuredVideoModel).toJson();}
     public ObjectNode video(String modelId){return profile(modelId).toJson();}
     public VideoModelProfile profile(String modelId){
         String fallback=configuredVideoModel;
         String id=modelId==null||modelId.isBlank()?fallback:modelId.trim();
         VideoModelProfile profile=verifiedProfiles.get(id);
+        if(profile==null)throw new IllegalArgumentException("UNVERIFIED_PROVIDER_MODEL: no explicit capability profile for "+id);
+        return profile;
+    }
+    public ImageModelProfile imageProfile(String modelId){
+        String id=modelId==null||modelId.isBlank()?configuredImageModel:modelId.trim();ImageModelProfile profile=verifiedImageProfiles.get(id);
         if(profile==null)throw new IllegalArgumentException("UNVERIFIED_PROVIDER_MODEL: no explicit capability profile for "+id);
         return profile;
     }
@@ -70,6 +78,11 @@ public class ProviderCapabilityRegistry {
         Set<VideoTaskType> tasks=Set.of(VideoTaskType.REFERENCE_GENERATE,VideoTaskType.FIRST_FRAME_GENERATE,VideoTaskType.FIRST_LAST_FRAME_GENERATE,VideoTaskType.KEYFRAME_GENERATE,VideoTaskType.STORYBOARD_GUIDED);
         String version="seedance-2.0-fast-profile-v1",fingerprint=sha256(SEEDANCE_20_FAST+"|"+version+"|"+min+"|"+max+"|"+step+"|480p,720p|"+tasks);
         return new VideoModelProfile(SEEDANCE_20_FAST,"SEEDANCE_2_0_FAST",version,fingerprint,true,true,true,true,true,true,true,true,true,true,true,hard,recommended,30,30,"RANGE",min,max,step,List.of(),List.of("adaptive","16:9","9:16","1:1","4:3","3:4","21:9"),List.of("480p","720p"),List.of("mp4"),tasks);
+    }
+    private ImageModelProfile buildSeedream50(){
+        String profileVersion="seedream-5.0-profile-v1",verification="STATIC_UNVERIFIED";List<String> sizes=List.of("2K"),ratios=List.of("9:16","16:9","1:1");
+        String fingerprint=sha256(SEEDREAM_50+"|"+profileVersion+"|"+sizes+"|"+ratios+"|10|true|true|false|false");
+        return new ImageModelProfile(SEEDREAM_50,"SEEDREAM_5_0",profileVersion,fingerprint,verification,sizes,"2K",ratios,true,true,10,false,true,false);
     }
     private static String blank(String value,String fallback){return value==null||value.isBlank()?fallback:value.trim();}
     private String sha256(String value){try{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));}catch(Exception e){throw new IllegalStateException(e);}}

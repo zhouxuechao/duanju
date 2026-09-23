@@ -29,6 +29,36 @@ public class StudioService {
     public StudioService(DocumentStore store,DirectorStyleResolver directorStyles,StoryProfilePolicy storyProfiles,EpisodeFormatResolver episodeFormats,StoryFormatResolver storyFormats,SemanticDependencyResolver dependencies,StoryFactResolver storyFacts,GenerationProfilePolicy generationProfiles) { this.store=store;this.directorStyles=directorStyles;this.storyProfiles=storyProfiles;this.episodeFormats=episodeFormats;this.storyFormats=storyFormats;this.dependencies=dependencies;this.storyFacts=storyFacts;this.generationProfiles=generationProfiles; }
     public List<ObjectNode> list(ResourceKind kind,String projectId,String parentId) { return store.list(kind,projectId,parentId); }
     public ObjectNode get(ResourceKind kind,String id) { return store.get(kind,id); }
+    public ObjectNode transitionCharacterKnowledge(ObjectNode request) {
+        String projectId=required(request,"projectId"),characterId=required(request,"characterId"),factId=required(request,"factId");
+        String state=required(request,"newKnowledgeState").toUpperCase(Locale.ROOT),reason=required(request,"reason");
+        String sourceSceneId=required(request,"sourceSceneId"),sourceBeatId=required(request,"sourceBeatId");
+        if(!Set.of("KNOWN","UNKNOWN","SUSPECTED","MISUNDERSTOOD").contains(state))throw new IllegalArgumentException("newKnowledgeState 只能为 KNOWN、UNKNOWN、SUSPECTED 或 MISUNDERSTOOD");
+        if(!request.path("effectiveFromStoryTime").isNumber())throw new IllegalArgumentException("effectiveFromStoryTime 必须为数字");
+        if("MISUNDERSTOOD".equals(state)&&text(request,"believedStatement").isBlank())throw new IllegalArgumentException("MISUNDERSTOOD 必须包含 believedStatement");
+        double effectiveFrom=request.path("effectiveFromStoryTime").asDouble();
+        return store.transaction(()->{
+            store.getForUpdate(PROJECT,projectId);
+            sameProject(CHARACTER,characterId,projectId);sameProject(STORY_FACT,factId,projectId);
+            ObjectNode scene=store.get(SCENE,sourceSceneId),beat=store.get(BEAT,sourceBeatId);
+            if(!project(scene).equals(projectId)||!project(beat).equals(projectId)||!sourceSceneId.equals(text(beat,"sceneId")))throw new IllegalArgumentException("知识迁移的 sourceSceneId/sourceBeatId 归属不一致");
+            List<ObjectNode> history=store.list(CHARACTER_KNOWLEDGE,projectId,null).stream()
+                    .filter(value->characterId.equals(text(value,"characterId"))&&factId.equals(text(value,"factId")))
+                    .sorted(Comparator.comparingDouble(this::knowledgeFrom)).toList();
+            for(ObjectNode existing:history)if(Double.compare(knowledgeFrom(existing),effectiveFrom)==0)throw new WorkflowException("KNOWLEDGE_TIME_CONFLICT","同一角色对同一事实在同一故事时间只能有一个知识状态");
+            ObjectNode previous=history.isEmpty()?null:history.get(history.size()-1);
+            if(previous!=null&&effectiveFrom<knowledgeFrom(previous))throw new WorkflowException("KNOWLEDGE_TRANSITION_OUT_OF_ORDER","角色知识迁移不能写入最新状态之前的故事时间");
+            if(previous!=null&&previous.path("validToStoryTime").isNumber()&&effectiveFrom<previous.path("validToStoryTime").asDouble())throw new WorkflowException("KNOWLEDGE_TRANSITION_OUT_OF_ORDER","角色知识迁移不能落入已有历史区间");
+            if(previous!=null&&!previous.path("validToStoryTime").isNumber())store.closeCharacterKnowledgeInterval(id(previous),revision(previous),effectiveFrom);
+            ObjectNode next=obj().put("projectId",projectId).put("characterId",characterId).put("factId",factId)
+                    .put("knowledgeState",state).put("validFromStoryTime",effectiveFrom).put("knownFromStoryTime",effectiveFrom)
+                    .put("transitionReason",reason).put("sourceSceneId",sourceSceneId).put("sourceBeatId",sourceBeatId);
+            if(previous!=null)next.put("previousKnowledgeId",id(previous));
+            if(request.hasNonNull("believedStatement"))next.set("believedStatement",request.path("believedStatement").deepCopy());
+            validate(CHARACTER_KNOWLEDGE,next);validateKnowledgeInterval(next);
+            return store.create(CHARACTER_KNOWLEDGE,next);
+        });
+    }
     public ObjectNode create(ResourceKind kind,ObjectNode request) {
         editable(kind);
         ObjectNode body=request.deepCopy(); PROTECTED.forEach(body::remove);
@@ -185,6 +215,7 @@ public class StudioService {
         return "INTENTIONAL_NEXT_SHOT";
     }
     private void validateKnowledgeInterval(ObjectNode body){double from=body.path("validFromStoryTime").asDouble(),to=body.path("validToStoryTime").isNumber()?body.path("validToStoryTime").asDouble():Double.POSITIVE_INFINITY;for(ObjectNode existing:store.list(CHARACTER_KNOWLEDGE,required(body,"projectId"),null)){if(!text(existing,"characterId").equals(text(body,"characterId"))||!text(existing,"factId").equals(text(body,"factId")))continue;double otherFrom=existing.path("validFromStoryTime").isNumber()?existing.path("validFromStoryTime").asDouble():existing.path("knownFromStoryTime").asDouble(),otherTo=existing.path("validToStoryTime").isNumber()?existing.path("validToStoryTime").asDouble():Double.POSITIVE_INFINITY;if(from<otherTo&&otherFrom<to)throw new WorkflowException("KNOWLEDGE_TIME_CONFLICT","同一角色对同一事实的知识时间区间不能重叠");}}
+    private double knowledgeFrom(JsonNode knowledge){return knowledge.path("validFromStoryTime").isNumber()?knowledge.path("validFromStoryTime").asDouble():knowledge.path("knownFromStoryTime").asDouble();}
     private void validateTemporalInterval(ResourceKind kind,ObjectNode body){
         double from=body.path("validFromStoryTime").asDouble(),to=body.path("validToStoryTime").isNumber()?body.path("validToStoryTime").asDouble():Double.POSITIVE_INFINITY;if(to<=from)throw new IllegalArgumentException("validToStoryTime 必须晚于 validFromStoryTime");
         List<String> keys=switch(kind){case CHARACTER_STATE->List.of("characterId");case LOCATION_STATE->List.of("locationId");case PROP_STATE->List.of("propId");case VOICE_STATE->List.of("voiceProfileId");case RELATIONSHIP->List.of("subjectCharacterId","objectCharacterId","relationshipType");default->throw new IllegalArgumentException("非时间版本资源");};

@@ -63,7 +63,7 @@ public class AutomaticVisualReviewService {
         for(String field:List.of("characterConsistency","clothingConsistency","locationConsistency","propConsistency","composition","actionAccuracy","styleConsistency","visualQuality"))qc.set(field,body.path(field).deepCopy());
         qc.set("failureCodes",body.path("failureCodes").deepCopy());qc.set("expectedContext",body.path("expectedContext").deepCopy());qc.set("qualityReviewResult",body.path("qualityReviewResult").deepCopy());
         String providerRequestId=text(body.path("qualityReviewResult").path("_provider"),"requestId");if(!providerRequestId.isBlank())qc.put("providerRequestId",providerRequestId);
-        ObjectNode saved=store.create(QC_RESULT,qc);ObjectNode response=frame.deepCopy();response.set("automaticReview",saved);return response;
+        ObjectNode saved=store.create(QC_RESULT,QcGenerationProvenance.attach(qc,frame));ObjectNode response=frame.deepCopy();response.set("automaticReview",saved);return response;
     }
     private void addReviewPolicy(ObjectNode expected,ObjectNode frame,JsonNode generation){
         ObjectNode shot=store.get(SHOT,required(frame,"shotId"));boolean firstCharacter=false,firstLocation=true;
@@ -91,7 +91,7 @@ public class AutomaticVisualReviewService {
         ObjectNode qc=obj().put("projectId",project(frame)).put("targetKind",KEYFRAME.path()).put("targetId",id(frame)).put("shotId",required(frame,"shotId"))
             .put("reviewSequence",nextReviewSequence(frame)).put("reviewer","AUTOMATIC").put("assessmentKey",assessmentKey).put("assessmentStatus","FAILED").put("shadow",shadow).put("passed",false)
             .put("decision","MANUAL_FIX").put("routingDecision","MANUAL_REVIEW").put("failureCode",failure.code()).put("failureReason",failure.getMessage()==null?"视觉模型请求失败":failure.getMessage())
-            .put("retryable",failure.retryable()).put("submissionUncertain",failure.uncertain());if(failure.requestId()!=null&&!failure.requestId().isBlank())qc.put("providerRequestId",failure.requestId());if(failure.rawOutput()!=null)qc.put("providerOutputRaw",bounded(failure.rawOutput()));store.create(QC_RESULT,qc);
+            .put("retryable",failure.retryable()).put("submissionUncertain",failure.uncertain());if(failure.requestId()!=null&&!failure.requestId().isBlank())qc.put("providerRequestId",failure.requestId());if(failure.rawOutput()!=null)qc.put("providerOutputRaw",bounded(failure.rawOutput()));store.create(QC_RESULT,QcGenerationProvenance.attach(qc,frame));
     }
     private String bounded(String value){return value.length()<=16000?value:value.substring(0,16000);}
     private long nextReviewSequence(ObjectNode frame){return store.list(QC_RESULT,project(frame),null).stream().filter(review->id(frame).equals(text(review,"targetId"))).mapToLong(review->review.path("reviewSequence").asLong(0)).max().orElse(0)+1;}

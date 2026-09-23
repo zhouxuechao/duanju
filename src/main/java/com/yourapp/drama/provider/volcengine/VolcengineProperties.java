@@ -3,7 +3,6 @@ package com.yourapp.drama.provider.volcengine;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import java.net.URI;
 import java.time.Duration;
-import java.util.List;
 
 @ConfigurationProperties("drama.provider.volcengine")
 public class VolcengineProperties {
@@ -26,8 +25,6 @@ public class VolcengineProperties {
     private int maxOutputTokens = 16384;
     private Duration imageUrlTtl = Duration.ofHours(24);
     private Duration videoUrlTtl = Duration.ofHours(24);
-    /** Durations accepted by the configured video model; requests are rounded up to one of these. */
-    private List<Integer> videoSupportedDurations = List.of(4, 8, 12);
 
     public void validate() {
         if (apiKey == null || apiKey.isBlank() || textModel == null || textModel.isBlank()
@@ -48,9 +45,6 @@ public class VolcengineProperties {
             throw new IllegalStateException("模型最大输出 token 数应为 1024 到 65536");
         if (imageUrlTtl == null || imageUrlTtl.isNegative() || videoUrlTtl == null || videoUrlTtl.isNegative())
             throw new IllegalStateException("URL 有效期配置不得为负数");
-        if (videoSupportedDurations == null || videoSupportedDurations.isEmpty() || videoSupportedDurations.stream().anyMatch(v -> v == null || v < 1 || v > 60)
-                || videoSupportedDurations.stream().distinct().count() != videoSupportedDurations.size())
-            throw new IllegalStateException("video-supported-durations 必须是 1 至 60 秒的非重复列表");
         if(videoMinDuration<1||videoMaxDuration<videoMinDuration||videoDurationStep<1)throw new IllegalStateException("视频时长范围配置无效");
         if(imageSize==null||imageSize.isBlank()||videoResolution==null||videoResolution.isBlank())throw new IllegalStateException("图片尺寸和视频分辨率必须显式配置");
     }
@@ -93,6 +87,4 @@ public class VolcengineProperties {
     public void setImageUrlTtl(Duration value) { imageUrlTtl = value; }
     public Duration getVideoUrlTtl() { return videoUrlTtl; }
     public void setVideoUrlTtl(Duration value) { videoUrlTtl = value; }
-    public List<Integer> getVideoSupportedDurations() { return videoSupportedDurations; }
-    public void setVideoSupportedDurations(List<Integer> value) { videoSupportedDurations = value; }
 }

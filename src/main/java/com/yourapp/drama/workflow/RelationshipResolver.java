@@ -17,7 +17,7 @@ public class RelationshipResolver {
         ObjectNode result=obj().put("storyTime",storyTime);ArrayNode out=result.putArray("relationships");Set<String> actors=new HashSet<>(characterIds==null?List.of():characterIds);Map<String,ObjectNode> selected=new LinkedHashMap<>();
         for(ObjectNode relation:store.list(RELATIONSHIP,projectId,null)){
             String a=text(relation,"subjectCharacterId"),b=text(relation,"objectCharacterId");if(!actors.contains(a)&&!actors.contains(b))continue;if(!activeAt(relation,storyTime))continue;
-            String pair=a.compareTo(b)<=0?a+":"+b:b+":"+a,key=pair+":"+text(relation,"relationshipType");ObjectNode current=selected.get(key);if(current==null||number(relation,"validFromStoryTime")>number(current,"validFromStoryTime"))selected.put(key,relation);
+            String key=a+":"+b+":"+text(relation,"relationshipType");ObjectNode current=selected.get(key);if(current==null||number(relation,"validFromStoryTime")>number(current,"validFromStoryTime"))selected.put(key,relation);
         }
         selected.values().forEach(relation->{ObjectNode copy=obj();for(String field:List.of("id","subjectCharacterId","objectCharacterId","relationshipType","state","trustLevel","conflictLevel","intimacyLevel","powerBalance","lastChangedEpisode","lastChangedScene","changeReason","validFromStoryTime","validToStoryTime","sourceSceneId","sourceShotId"))if(relation.has(field))copy.set(field,relation.get(field).deepCopy());out.add(copy);});return result;
     }

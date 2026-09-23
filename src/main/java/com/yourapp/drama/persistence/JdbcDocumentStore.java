@@ -120,6 +120,18 @@ public class JdbcDocumentStore implements DocumentStore {
             return doc.deepCopy();
         });
     }
+    @Override public ObjectNode closeCharacterKnowledgeInterval(String id,long expectedRevision,double validToStoryTime) {
+        if(!TransactionSynchronizationManager.isActualTransactionActive())throw new IllegalStateException("closeCharacterKnowledgeInterval requires transaction()");
+        ObjectNode current=getForUpdate(CHARACTER_KNOWLEDGE,id);
+        if(current.path("revision").asLong()!=expectedRevision)throw new RevisionConflictException(CHARACTER_KNOWLEDGE,id);
+        double from=current.path("validFromStoryTime").isNumber()?current.path("validFromStoryTime").asDouble():current.path("knownFromStoryTime").asDouble();
+        if(current.path("validToStoryTime").isNumber()||validToStoryTime<=from)throw new IllegalArgumentException("只能关闭仍然开放且结束时间晚于开始时间的角色知识区间");
+        ObjectNode closed=current.deepCopy().put("validToStoryTime",validToStoryTime).put("revision",expectedRevision+1).put("updatedAt",Instant.now().toString());
+        int changed=jdbc.update("UPDATE "+table(CHARACTER_KNOWLEDGE)+" SET revision=?,updated_at=?,document=?,valid_to_story_time=? WHERE id=? AND revision=? AND valid_to_story_time IS NULL",
+                closed.path("revision").asLong(),timestamp(closed.path("updatedAt").asText()),closed.toString(),BigDecimal.valueOf(validToStoryTime),uuid(id),expectedRevision);
+        if(changed!=1)throw new RevisionConflictException(CHARACTER_KNOWLEDGE,id);
+        return closed.deepCopy();
+    }
     private void defaults(ResourceKind kind,ObjectNode doc) {
         if(kind==SHOT) { putDefault(doc,"duration",3); putDefault(doc,"status","DRAFT"); }
         if(kind==CHARACTER_KNOWLEDGE) {
@@ -157,7 +169,7 @@ public class JdbcDocumentStore implements DocumentStore {
                 if(!projectId.equals(linked.path("projectId").asText()))throw new IllegalArgumentException("linkedVideoTimelineItemId belongs to another project");
             }
         }
-        var references=Map.ofEntries(Map.entry("episodeId",EPISODE),Map.entry("sceneId",SCENE),Map.entry("shotId",SHOT),Map.entry("characterId",CHARACTER),Map.entry("entityId",CHARACTER),Map.entry("voiceProfileId",VOICE_PROFILE),Map.entry("locationId",LOCATION),Map.entry("propId",PROP),Map.entry("sourceKeyframeId",KEYFRAME),Map.entry("keyframeId",KEYFRAME),Map.entry("videoTakeId",VIDEO_TAKE),Map.entry("audioClipId",AUDIO_CLIP),Map.entry("dialogueLineId",DIALOGUE_LINE),Map.entry("generationJobId",GENERATION_JOB),Map.entry("promptVersionId",PROMPT_VERSION),Map.entry("promptTemplateId",PROMPT_TEMPLATE),Map.entry("timelineId",TIMELINE),Map.entry("factId",STORY_FACT),Map.entry("sourceSceneId",SCENE),Map.entry("sourceShotId",SHOT),Map.entry("knownFromSceneId",SCENE),Map.entry("subjectCharacterId",CHARACTER),Map.entry("objectCharacterId",CHARACTER));
+        var references=Map.ofEntries(Map.entry("episodeId",EPISODE),Map.entry("sceneId",SCENE),Map.entry("shotId",SHOT),Map.entry("characterId",CHARACTER),Map.entry("entityId",CHARACTER),Map.entry("voiceProfileId",VOICE_PROFILE),Map.entry("locationId",LOCATION),Map.entry("propId",PROP),Map.entry("sourceKeyframeId",KEYFRAME),Map.entry("keyframeId",KEYFRAME),Map.entry("videoTakeId",VIDEO_TAKE),Map.entry("audioClipId",AUDIO_CLIP),Map.entry("dialogueLineId",DIALOGUE_LINE),Map.entry("generationJobId",GENERATION_JOB),Map.entry("promptVersionId",PROMPT_VERSION),Map.entry("promptTemplateId",PROMPT_TEMPLATE),Map.entry("timelineId",TIMELINE),Map.entry("factId",STORY_FACT),Map.entry("sourceSceneId",SCENE),Map.entry("sourceShotId",SHOT),Map.entry("sourceBeatId",BEAT),Map.entry("knownFromSceneId",SCENE),Map.entry("subjectCharacterId",CHARACTER),Map.entry("objectCharacterId",CHARACTER));
         references.forEach((field,target)->{
             if(doc.hasNonNull(field) && target!=kind) {
                 if(doc.get(field).asText().isBlank()) { doc.remove(field); return; }
