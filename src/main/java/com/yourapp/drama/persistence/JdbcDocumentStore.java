@@ -51,6 +51,8 @@ public class JdbcDocumentStore implements DocumentStore {
         m.get(DEPENDENCY_EDGE).addAll(List.of(col("sourceKind","text"),col("sourceId","uuid"),col("targetKind","text"),col("targetId","uuid"),col("dependencyType","text"),col("episodeNo","int"),col("sceneNo","int"),col("storyTime","decimal")));
         m.get(REVALIDATION_MARKER).addAll(List.of(col("resourceKind","text"),col("resourceId","uuid"),col("sourceVersionId","uuid"),col("status","text")));
         m.get(PRODUCTION_INPUT_SNAPSHOT).addAll(List.of(col("sourceKind","text"),col("sourceId","uuid"),col("promptVersionId","uuid"),col("scriptVersionId","uuid"),col("assetSnapshotHash","text"),col("snapshotKey","text")));
+        m.get(EPISODE_SCRIPT_VERSION).addAll(List.of(col("version","int"),col("supersedesId","uuid"),col("sourceVersionId","uuid"),col("status","text"),col("contentHash","text"),col("sourceMode","text")));
+        m.get(PRODUCTION_SCRIPT_SNAPSHOT).addAll(List.of(col("scriptVersionId","uuid"),col("scriptHash","text"),col("continuitySnapshotHash","text")));
         m.get(PROMPT_VERSION).addAll(List.of(col("shotId","uuid"),col("version","int"),col("promptTemplateId","uuid")));
         m.get(STORYBOARD).add(col("version","int"));
         m.get(DIALOGUE_LINE).addAll(List.of(col("characterId","uuid"),col("semanticText","text"),col("spokenText","text"),col("subtitleText","text")));

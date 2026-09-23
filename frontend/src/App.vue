@@ -2,9 +2,10 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import StoryReview from './components/StoryReview.vue'
 import AssetViews from './components/AssetViews.vue'
+import ScriptWorkspace from './components/ScriptWorkspace.vue'
 import { canAcceptObservedDeviation, canResumePipeline, creativeQaCanRelease, directorStageForScene, keyframePrimaryAction, pipelineStageLabel, productionDashboard, reconciliationChoices, storyboardPrimaryAction, taskRuntimeLabel, timelinePreviewLabel } from './ui-policy.js'
 
-const tabs=[['create','创作'],['review','审查台'],['assets','素材多视图'],['director','导演台'],['edit','剪辑台'],['health','系统自检']]
+const tabs=[['create','创作'],['review','审查台'],['script','剧本工作台'],['assets','素材多视图'],['director','导演台'],['edit','剪辑台'],['health','系统自检']]
 const active=ref('create'), system=ref(null), projects=ref([]), projectId=ref(localStorage.getItem('drama.projectId')||''), workspace=ref(null), selectedShotId=ref(''), busy=ref(false), toast=ref(''), error=ref(''), editingStory=ref(false), preflight=ref(null), pipelineRun=ref(null), qualityMetrics=ref(null), regression=ref(null)
 const debugMode=new URLSearchParams(window.location.search).get('debug')==='1'
 const soundPlans=reactive({}), soundItems=reactive({}), voiceDrafts=reactive({}), previewLoad=reactive({}), reviewedEndStates=reactive({}), finalReviewDrafts=reactive({}), videoPreviews=reactive({})
@@ -62,7 +63,7 @@ async function api(path,options={}){const response=await fetch('/api'+path,{head
 async function act(label,fn){busy.value=true;error.value='';try{const result=await fn();toast.value=label;await refresh();return result}catch(e){error.value=e.message;return null}finally{busy.value=false;setTimeout(()=>toast.value='',2400)}}
 async function loadProjects(){projects.value=await api('/resources/projects');if(!projectId.value&&projects.value.length)projectId.value=projects.value[0].id}
 async function refresh(){if(!projectId.value){workspace.value=null;return}workspace.value=await api(`/resources/projects/${projectId.value}/workspace`);if(!selectedShotId.value&&shots.value.length)selectedShotId.value=shots.value[0].id}
-async function createProject(){await act('项目已创建',async()=>{const {directorPreset,episodeFormatPreset,settingGenre,storyType,tropes,audience,tones,intensity,...base}=projectForm;const episodeFormat=formatPresets[episodeFormatPreset]?{...formatPresets[episodeFormatPreset],targetDurationSec:base.targetDuration}:undefined;const storyProfile={settingGenre,storyType,tropes:[...tropes],audience,tones:[...tones],intensity,sourceMode:'ORIGINAL_IDEA'};const p=await api('/resources/projects',{method:'POST',body:JSON.stringify({...base,storyProfile,...(episodeFormat?{episodeFormat}:{}),directorStyleProfile:directorPresets[directorPreset]})});projectId.value=p.id;await loadProjects()})}
+async function createProject(){await act('项目已创建',async()=>{const {directorPreset,episodeFormatPreset,settingGenre,storyType,tropes,audience,tones,intensity,...base}=projectForm;const episodeFormat=formatPresets[episodeFormatPreset]?{...formatPresets[episodeFormatPreset],targetDurationSec:base.targetDuration}:undefined;const storyProfile={settingGenre,storyType,tropes:[...tropes],audience,tones:[...tones],intensity,sourceMode:'ORIGINAL_IDEA'};const p=await api('/resources/projects',{method:'POST',body:JSON.stringify({...base,sourceMode:'IDEA',scriptWorkspaceRequired:true,storyProfile,...(episodeFormat?{episodeFormat}:{}),directorStyleProfile:directorPresets[directorPreset]})});projectId.value=p.id;await loadProjects()})}
 async function uploadVoice(actor,event){const file=event.target.files?.[0];if(!file)return;if(!/audio\/(mpeg|wav|x-wav|wave)/i.test(file.type)&&!/[.]wav$|[.]mp3$/i.test(file.name)){error.value='请上传 MP3 或 WAV 音频';event.target.value='';return}busy.value=true;error.value='';try{const form=new FormData();form.append('file',file);const response=await fetch('/api/media',{method:'POST',body:form});const saved=await response.json();if(!response.ok)throw new Error(saved?.message||'音色上传失败');voiceDrafts[actor.id]={url:saved.url,name:file.name};toast.value='音色已上传，可试听后确认'}catch(e){error.value=e.message}finally{busy.value=false;event.target.value=''}}
 async function approveVoice(actor){const draft=voiceDrafts[actor.id];if(!draft?.url)return;if(!window.confirm('请先试听这段音频，确认音色、清晰度和人物匹配后再保存。'))return;const name=window.prompt('声音档案名称',`${actor.name}的声音`)||`${actor.name}的声音`;await act('音色已确认',()=>api('/resources/voice-profiles',{method:'POST',body:JSON.stringify({projectId:projectId.value,characterId:actor.id,name,referenceAudioUrl:draft.url,approved:true,dialect:project.value?.dialect||'MANDARIN',status:'AVAILABLE'})}));delete voiceDrafts[actor.id]}
 async function reviseAndRegenerate(){if(!selectedShot.value)return;await act('已创建局部重拍版本',async()=>{await api(`/shots/${selectedShot.value.id}/revise`,{method:'POST'});return api(`/shots/${selectedShot.value.id}/keyframe`,{method:'POST',body:JSON.stringify({requestKey:crypto.randomUUID()})})})}
@@ -110,6 +111,8 @@ onBeforeUnmount(()=>{events?.close();clearTimeout(refreshTimer)})
   </main>
 
   <StoryReview v-else-if="active==='review'" :project="project" :workspace="workspace" :busy="busy" @refresh="refresh" @editing="editingStory=$event" @message="(message, isError) => { (isError ? error = message : toast = message) }" />
+
+  <ScriptWorkspace v-else-if="active==='script'" :project="project" :workspace="workspace" :busy="busy" @refresh="refresh" @message="(message, isError) => { (isError ? error = message : toast = message) }" />
 
   <AssetViews v-else-if="active==='assets'" :project="project" :workspace="workspace" :busy="busy" @refresh="refresh" @message="(message, isError) => { (isError ? error = message : toast = message) }" />
 

@@ -52,11 +52,12 @@ public class StoryDevelopmentService {
    private final StoryContractValidator storyContracts;
    private final StoryQualityService storyQuality;
    private final PromptCompiler prompts;
+   private final ScriptWorkspaceService scriptWorkspace;
 
    public StoryDevelopmentService(DocumentStore store, JobService jobs, LlmGateway llm, ObjectMapper mapper, Validator validator,
                                   StoryProfilePolicy storyProfiles, EpisodeFormatResolver episodeFormats,
                                   StoryFormatResolver storyFormats, ScreenwritingRuleResolver ruleResolver, StoryContractValidator storyContracts,
-                                  StoryQualityService storyQuality,PromptCompiler prompts) {
+                                  StoryQualityService storyQuality,PromptCompiler prompts,ScriptWorkspaceService scriptWorkspace) {
       this.store = store;
       this.jobs = jobs;
       this.llm = llm;
@@ -69,6 +70,7 @@ public class StoryDevelopmentService {
       this.storyContracts = storyContracts;
       this.storyQuality = storyQuality;
       this.prompts=prompts;
+      this.scriptWorkspace=scriptWorkspace;
    }
 
    public ObjectNode start(String projectId, ObjectNode request) {
@@ -1003,6 +1005,7 @@ public class StoryDevelopmentService {
       ObjectNode ep = Documents.obj().put("projectId", Documents.project(doc)).put("storyBibleId", Documents.text(doc, "coreId")).put("storyDocumentId", Documents.id(doc)).put("episodeNo", doc.path("episodeNo").asInt()).put("name", Documents.text(doc.path("content"), "title")).put("summary", Documents.text(doc.path("content"), "summary")).put("script", Documents.text(doc.path("content"), "script")).put("scriptReviewStatus", "CONFIRMED").put("locked", true).put("continuityHash", Documents.text(doc, "continuityHash"));
       for (String field : List.of("episodeFormatId", "beatMode", "targetDurationSec", "beatBoundaries", "midHook")) if (doc.path("content").has(field)) ep.set(field, doc.path("content").path(field).deepCopy());
       ObjectNode saved = this.store.create(ResourceKind.EPISODE, ep);
+      this.scriptWorkspace.current(Documents.id(saved));
       int no = 0;
 
       for(JsonNode s : doc.path("content").path("scenes")) {
@@ -1086,6 +1089,8 @@ public class StoryDevelopmentService {
       } else if (!episode.hasNonNull("storyDocumentId")) {
          throw new WorkflowException("SCRIPT_REVIEW_REQUIRED", "请在审查台确认当前版本的单集剧本后再生产");
       } else {
+         ObjectNode project=this.store.get(ResourceKind.PROJECT,Documents.project(episode));
+         if(project.path("scriptWorkspaceRequired").asBoolean())this.scriptWorkspace.requireProductionReady(Documents.id(episode),Documents.text(episode,"confirmedScriptVersionId"));
          ObjectNode doc = this.store.get(ResourceKind.STORY_DOCUMENT, Documents.text(episode, "storyDocumentId"));
          this.requireConfirmed(doc);
          return this.store.get(ResourceKind.STORY_DOCUMENT, Documents.text(doc, "coreId")).path("continuitySnapshot").deepCopy();
@@ -1114,6 +1119,8 @@ public class StoryDevelopmentService {
 
          if (!episodeId.isBlank()) {
             this.approvedSnapshot(this.store.get(ResourceKind.EPISODE, episodeId));
+            ObjectNode project=this.store.get(ResourceKind.PROJECT,Documents.project(this.store.get(ResourceKind.EPISODE,episodeId)));
+            if(project.path("scriptWorkspaceRequired").asBoolean())this.scriptWorkspace.requireProductionReady(episodeId,Documents.text(input,"scriptVersionId"));
          }
 
       }

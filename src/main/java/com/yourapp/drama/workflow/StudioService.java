@@ -71,7 +71,11 @@ public class StudioService {
             body.putArray("statusHistory").add(obj().put("to","PLANNED").put("at",java.time.Instant.now().toString()));
             return store.transaction(()->{store.getForUpdate(SCENE,required(body,"sceneId"));body.putIfAbsent("shotNo",IntNode.valueOf(store.list(SHOT,null,required(body,"sceneId")).size()+1));body.putIfAbsent("presentationOrder",body.path("shotNo"));return store.create(kind,body);});
         }
-        if (kind==PROJECT) body.put("status","IDEA");
+        if (kind==PROJECT) {
+            body.put("status","IDEA");
+            String legacySource=body.path("storyProfile").path("sourceMode").asText();
+            body.putIfAbsent("sourceMode",com.fasterxml.jackson.databind.node.TextNode.valueOf(Set.of("NOVEL","SCRIPT").contains(legacySource)?legacySource:"IDEA"));
+        }
         if (kind==CHARACTER) body.put("identityLocked",false);
         return store.create(kind,body);
     }
