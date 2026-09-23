@@ -19,6 +19,9 @@ class PipelineCanarySafetyContractTest {
         ObjectNode ready=LiveCanaryPlan.pipeline().validateLive(environment(true),List.of());
 
         assertThat(ready.path("ready").asBoolean()).as(ready.path("blocking").toString()).isTrue();
+        assertThat(ready.path("plan").path("assetDependency").asText()).isEqualTo("A1");
+        assertThat(ready.path("plan").path("requests").path("image").asInt()).isEqualTo(8);
+        assertThat(ready.path("plan").path("requests").path("storyDirectorLlm").asInt()).isEqualTo(11);
 
         Map<String,String> missingMarker=environment(false);
         assertThat(LiveCanaryPlan.pipeline().validateLive(missingMarker,List.of()).path("blocking").toString()).contains("PIPELINE_RUNNER_PREFLIGHT");
@@ -33,19 +36,32 @@ class PipelineCanarySafetyContractTest {
                 .hasMessageContaining("CANARY_PIPELINE_RUNNER_PREFLIGHT_REQUIRED");
     }
 
-    @Test void pipelineBudgetUsesIndependentLimitsAndFailsBeforeTheFifthImage(){
+    @Test void liveConfigurationGatesEveryPaidModelReviewerAndVoiceBeforeExecution(){
+        Map<String,String> values=environment(true);
+        for(String key:List.of("ARK_TEXT_MODEL","ARK_DIRECTOR_MODEL","ARK_VLM_MODEL","SEED_AUDIO_API_KEY","CANARY_TTS_VOICE_ID")){
+            Map<String,String> missing=new HashMap<>(values);missing.remove(key);
+            assertThat(LiveCanaryPlan.pipeline().validateLive(missing,List.of()).path("ready").asBoolean()).as(key).isFalse();
+        }
+        Map<String,String> fakeReviewer=new HashMap<>(values);fakeReviewer.put("VISUAL_REVIEWER","fake");
+        assertThat(LiveCanaryPlan.pipeline().validateLive(fakeReviewer,List.of()).path("blocking").toString()).contains("REAL_VLM_REVIEWER");
+        Map<String,String> mockVoice=new HashMap<>(values);mockVoice.put("CANARY_TTS_VOICE_ID","mock-voice");
+        assertThat(LiveCanaryPlan.pipeline().validateLive(mockVoice,List.of()).path("blocking").toString()).contains("TTS_VOICE");
+    }
+
+    @Test void pipelineBudgetUsesIndependentLimitsAndFailsBeforeTheNinthImage(){
         MockEnvironment environment=new MockEnvironment()
                 .withProperty("drama.provider.mode","volcengine")
-                .withProperty("PIPELINE_TEST_MAX_COST_CNY","20")
-                .withProperty("PIPELINE_TEST_MAX_REAL_IMAGE_REQUESTS","4")
+                .withProperty("PIPELINE_TEST_MAX_COST_CNY","35")
+                .withProperty("PIPELINE_TEST_MAX_REAL_IMAGE_REQUESTS","8")
                 .withProperty("PIPELINE_TEST_MAX_REAL_VIDEO_REQUESTS","4")
                 .withProperty("PIPELINE_TEST_MAX_REAL_AUDIO_REQUESTS","2")
-                .withProperty("PIPELINE_TEST_MAX_REAL_LLM_REQUESTS","2")
-                .withProperty("PIPELINE_TEST_MAX_REAL_VLM_REQUESTS","8");
+                .withProperty("PIPELINE_TEST_MAX_REAL_LLM_REQUESTS","11")
+                .withProperty("PIPELINE_TEST_MAX_REAL_VLM_REQUESTS","8")
+                .withProperty("PIPELINE_TEST_IMAGE_ESTIMATED_COST_CNY","16");
         TestBudgetGuard guard=new TestBudgetGuard(environment);
         ObjectNode input=obj().put("testRun",true).put("testRunId","pipeline-budget").put("testPhase","PIPELINE").put("estimatedCost",1);
 
-        for(int i=0;i<4;i++)assertThat(guard.reserve("KEYFRAME",input)).isTrue();
+        for(int i=0;i<8;i++)assertThat(guard.reserve("KEYFRAME",input)).isTrue();
 
         assertThatThrownBy(()->guard.reserve("KEYFRAME",input))
                 .isInstanceOfSatisfying(WorkflowException.class,error->assertThat(error.code()).isEqualTo("TEST_BUDGET_EXCEEDED"));
@@ -65,6 +81,9 @@ class PipelineCanarySafetyContractTest {
         assertThat(marker).isGreaterThan(tests).isGreaterThan(capability);
         assertThat(live).isGreaterThan(marker);
         assertThat(runner.split("\\$env:CANARY_PIPELINE_RUNNER_PREFLIGHT_OK='true'",-1)).hasSize(2);
+        assertThat(runner).contains("ARK_TEXT_MODEL","ARK_DIRECTOR_MODEL","ARK_VLM_MODEL","VISUAL_REVIEWER","CANARY_TTS_VOICE_ID");
+        assertThat(runner).contains("PIPELINE_TEST_MAX_REAL_IMAGE_REQUESTS='8'","PIPELINE_TEST_MAX_REAL_LLM_REQUESTS='11'");
+        assertThat(runner).contains("assetDependency='A1'");
     }
 
     private Map<String,String> environment(boolean runnerAuthorized){
@@ -76,14 +95,25 @@ class PipelineCanarySafetyContractTest {
         values.put("ARK_VIDEO_MODEL","doubao-seedance-2-0-fast-260128");
         values.put("ARK_VIDEO_RESOLUTION","480p");
         values.put("ARK_API_KEY","test-only-placeholder");
-        values.put("PIPELINE_TEST_MAX_REAL_IMAGE_REQUESTS","4");
+        values.put("ARK_TEXT_MODEL","writer-model");
+        values.put("ARK_DIRECTOR_MODEL","director-model");
+        values.put("ARK_VLM_MODEL","vision-model");
+        values.put("VISUAL_REVIEWER","volcengine");
+        values.put("SEED_AUDIO_API_KEY","audio-test-placeholder");
+        values.put("CANARY_TTS_VOICE_ID","canary-real-voice");
+        values.put("CANARY_ASSET_DEPENDENCY","A1");
+        values.put("PIPELINE_TEST_MAX_REAL_IMAGE_REQUESTS","8");
         values.put("PIPELINE_TEST_MAX_REAL_VIDEO_REQUESTS","4");
         values.put("PIPELINE_TEST_MAX_REAL_AUDIO_REQUESTS","2");
-        values.put("PIPELINE_TEST_MAX_REAL_LLM_REQUESTS","2");
+        values.put("PIPELINE_TEST_MAX_REAL_LLM_REQUESTS","11");
         values.put("PIPELINE_TEST_MAX_REAL_VLM_REQUESTS","8");
-        values.put("PIPELINE_TEST_MAX_COST_CNY","20");
-        values.put("PIPELINE_TEST_IMAGE_ESTIMATED_COST_CNY","8");
+        values.put("PIPELINE_TEST_MAX_REAL_LIPSYNC_REQUESTS","0");
+        values.put("PIPELINE_TEST_MAX_COST_CNY","35");
+        values.put("PIPELINE_TEST_IMAGE_ESTIMATED_COST_CNY","16");
         values.put("PIPELINE_TEST_VIDEO_ESTIMATED_COST_CNY","12");
+        values.put("PIPELINE_TEST_LLM_ESTIMATED_COST_CNY","1");
+        values.put("PIPELINE_TEST_VLM_ESTIMATED_COST_CNY","1");
+        values.put("PIPELINE_TEST_TTS_ESTIMATED_COST_CNY","0.5");
         if(runnerAuthorized)values.put("CANARY_PIPELINE_RUNNER_PREFLIGHT_OK","true");
         return values;
     }

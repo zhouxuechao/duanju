@@ -65,6 +65,7 @@ public class PipelineRunService {
     private void drive(ObjectNode run){
         String projectId=project(run),mode=text(run,"mode");
         boolean pipelineCanary=pipelineCanary(projectId);
+        if(pipelineCanary)requirePipelineProfile(store.get(PROJECT,projectId),run);
         ObjectNode readiness=preflight.review(projectId,mode);
         if(!readiness.path("ready").asBoolean())throw new WorkflowException("PREFLIGHT_BLOCKED","Pipeline 自检未通过："+readiness.path("blocking"));
         driveStory(projectId);
@@ -167,11 +168,12 @@ public class PipelineRunService {
     }
 
     private void driveAudio(String projectId,boolean pipelineCanary){
+        ObjectNode projectDocument=store.get(PROJECT,projectId);String canaryVoice=pipelineCanary?PipelineLiveExecutionProfile.phaseB().requireVoiceId(text(projectDocument,"canaryTtsVoiceId")):"";
         Map<String,String> voices=new HashMap<>();
-        for(ObjectNode profile:store.list(VOICE_PROFILE,projectId,null))if(profile.hasNonNull("characterId")&&profile.path("approved").asBoolean())voices.put(text(profile,"characterId"),id(profile));
+        for(ObjectNode profile:store.list(VOICE_PROFILE,projectId,null))if(profile.hasNonNull("characterId")&&profile.path("approved").asBoolean()&&(!pipelineCanary||canaryVoice.equals(text(profile,"providerVoiceId"))))voices.put(text(profile,"characterId"),id(profile));
         for(ObjectNode line:store.list(DIALOGUE_LINE,projectId,null)){
             String characterId=required(line,"characterId"),voiceId=voices.get(characterId);
-            if(voiceId==null){ObjectNode character=store.get(CHARACTER,characterId);ObjectNode profile=studio.create(VOICE_PROFILE,obj().put("projectId",projectId).put("characterId",characterId).put("name",text(character,"name")+" · FREE 音色").put("providerVoiceId","mock-voice-"+characterId).put("approved",true));voiceId=id(profile);voices.put(characterId,voiceId);}
+            if(voiceId==null){ObjectNode character=store.get(CHARACTER,characterId);String providerVoiceId=pipelineCanary?canaryVoice:"mock-voice-"+characterId;ObjectNode profile=studio.create(VOICE_PROFILE,obj().put("projectId",projectId).put("characterId",characterId).put("name",text(character,"name")+(pipelineCanary?" · Canary 普通话音色":" · FREE 音色")).put("providerVoiceId",providerVoiceId).put("approved",true));voiceId=id(profile);voices.put(characterId,voiceId);}
             if(!voiceId.equals(text(line,"voiceProfileId"))){ObjectNode change=obj().put("revision",revision(line)).put("voiceProfileId",voiceId);line=studio.update(DIALOGUE_LINE,id(line),change);}
             if(text(line,"spokenText").isBlank())line=post.dialect(id(line),obj().put("dialect",line.path("dialect").asText("MANDARIN")));
             String lineId=id(line),shotId=required(line,"shotId");
@@ -201,6 +203,7 @@ public class PipelineRunService {
     private List<ObjectNode> ordered(ResourceKind kind,String projectId,String parentId,String field){List<ObjectNode> values=new ArrayList<>(store.list(kind,projectId,parentId));values.sort(Comparator.comparingInt(v->v.path(field).asInt(Integer.MAX_VALUE)));return values;}
     private List<ObjectNode> orderedShots(String projectId){List<ObjectNode> result=new ArrayList<>();for(ObjectNode episode:ordered(EPISODE,projectId,null,"episodeNo"))for(ObjectNode scene:ordered(SCENE,projectId,id(episode),"sceneNo"))result.addAll(ordered(SHOT,projectId,id(scene),"shotNo").stream().filter(s->!s.path("stale").asBoolean()).toList());return result;}
     private boolean pipelineCanary(String projectId){ObjectNode project=store.get(PROJECT,projectId);return project.path("testRun").asBoolean(false)&&"PIPELINE".equalsIgnoreCase(text(project,"testPhase"));}
+    private void requirePipelineProfile(ObjectNode project,ObjectNode run){String voice=text(project,"canaryTtsVoiceId");PipelineLiveExecutionProfile.phaseB().requireVoiceId(voice);if(!"phase-b-production".equals(text(run,"scenarioId"))||!"phase-b-production".equals(text(project,"scenarioId"))||!"A1".equals(text(project,"assetDependencyLevel")))throw new WorkflowException("PIPELINE_EXECUTION_PROFILE_MISMATCH","Phase B Pipeline Canary 必须使用 phase-b-production / A1 固定执行档位");}
     private boolean hasJob(String projectId,String shotId,String type){return store.list(GENERATION_JOB,projectId,null).stream().anyMatch(job->type.equals(text(job,"type"))&&shotId.equals(text(job,"shotId")));}
     private Optional<ObjectNode> jobForInput(String projectId,String type,String field,String value){return store.list(GENERATION_JOB,projectId,null).stream().filter(job->type.equals(text(job,"type"))&&value.equals(text(job.path("inputSnapshot"),field))).findFirst();}
     private ObjectNode complete(ObjectNode submitted){for(int step=0;step<1024;step++){ObjectNode job=store.get(GENERATION_JOB,id(submitted));if("SUCCESS".equals(text(job,"status")))return job;if(Set.of("FAILED","CANCELLED").contains(text(job,"status")))throw new WorkflowException(text(job,"failureCode"),text(job,"failureReason"));if(Set.of("UNKNOWN","WAITING_HUMAN").contains(text(job,"status")))throw new WorkflowException("PROVIDER_STATUS_UNKNOWN","任务 "+id(job)+" 的服务商状态未知，必须先对账");if(!worker.tickProject(project(job)))throw stalled(project(job),text(job,"type"),"任务未结束且没有可执行工作");}throw new WorkflowException("PIPELINE_STEP_LIMIT","任务超过安全执行步数："+id(submitted));}

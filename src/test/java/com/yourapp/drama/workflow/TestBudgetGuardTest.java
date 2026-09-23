@@ -1,5 +1,6 @@
 package com.yourapp.drama.workflow;
 
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.env.MockEnvironment;
 import static com.yourapp.drama.workflow.Documents.obj;
@@ -45,7 +46,7 @@ class TestBudgetGuardTest {
                 .withProperty("PIPELINE_TEST_MAX_REAL_AUDIO_REQUESTS","2")
                 .withProperty("PIPELINE_TEST_MAX_REAL_LLM_REQUESTS","2")
                 .withProperty("PIPELINE_TEST_MAX_REAL_VLM_REQUESTS","8");
-        var guard=new TestBudgetGuard(env);var input=obj().put("testRun",true).put("testRunId","vlm-hard-limit").put("testPhase","PIPELINE");
+        var guard=new TestBudgetGuard(env);var input=obj().put("testRun",true).put("testRunId","vlm-hard-limit").put("testPhase","PIPELINE").put("estimatedCost",0);
         AtomicInteger providerCalls=new AtomicInteger();
         for(int i=0;i<4;i++){guard.reserve("KEYFRAME_QC",input);providerCalls.incrementAndGet();}
         assertThatThrownBy(()->guard.reserve("KEYFRAME_QC",input)).isInstanceOfSatisfying(WorkflowException.class,e->assertThat(e.code()).isEqualTo("TEST_BUDGET_EXCEEDED"));
@@ -55,4 +56,32 @@ class TestBudgetGuardTest {
         assertThat(guard.snapshot("vlm-hard-limit").path("keyframeQc").asInt()).isEqualTo(4);
         assertThat(guard.snapshot("vlm-hard-limit").path("videoQc").asInt()).isEqualTo(4);
     }
+
+    @Test void phaseBLiveProfileEnforcesEveryExactLimitAndReservesConfiguredEstimates(){
+        var env=new MockEnvironment().withProperty("drama.provider.mode","volcengine")
+                .withProperty("PIPELINE_TEST_MAX_COST_CNY","35")
+                .withProperty("PIPELINE_TEST_MAX_REAL_IMAGE_REQUESTS","8")
+                .withProperty("PIPELINE_TEST_MAX_REAL_VIDEO_REQUESTS","4")
+                .withProperty("PIPELINE_TEST_MAX_REAL_AUDIO_REQUESTS","2")
+                .withProperty("PIPELINE_TEST_MAX_REAL_LLM_REQUESTS","11")
+                .withProperty("PIPELINE_TEST_MAX_REAL_VLM_REQUESTS","8")
+                .withProperty("PIPELINE_TEST_IMAGE_ESTIMATED_COST_CNY","16")
+                .withProperty("PIPELINE_TEST_VIDEO_ESTIMATED_COST_CNY","12")
+                .withProperty("PIPELINE_TEST_LLM_ESTIMATED_COST_CNY","1")
+                .withProperty("PIPELINE_TEST_VLM_ESTIMATED_COST_CNY","1")
+                .withProperty("PIPELINE_TEST_TTS_ESTIMATED_COST_CNY","0.5");
+        var guard=new TestBudgetGuard(env);var input=obj().put("testRun",true).put("testRunId","phase-b-exact").put("testPhase","PIPELINE");
+        AtomicInteger calls=new AtomicInteger();
+        reserve(guard,input,"STORY",11,calls);blocked(guard,input,"STORY",calls,11);
+        reserve(guard,input,"KEYFRAME",8,calls);blocked(guard,input,"KEYFRAME",calls,19);
+        reserve(guard,input,"VIDEO",4,calls);blocked(guard,input,"VIDEO",calls,23);
+        reserve(guard,input,"TTS",2,calls);blocked(guard,input,"TTS",calls,25);
+        for(int i=0;i<4;i++){guard.reserve("KEYFRAME_QC",input);calls.incrementAndGet();}
+        for(int i=0;i<4;i++){guard.reserve("VIDEO_QC",input);calls.incrementAndGet();}
+        blocked(guard,input,"VIDEO_QC",calls,33);
+        assertThat(guard.snapshot("phase-b-exact").path("plannedCost").asDouble()).isGreaterThan(0);
+    }
+
+    private void reserve(TestBudgetGuard guard,ObjectNode input,String type,int count,AtomicInteger calls){for(int i=0;i<count;i++){guard.reserve(type,input);calls.incrementAndGet();}}
+    private void blocked(TestBudgetGuard guard,ObjectNode input,String type,AtomicInteger calls,int expected){assertThatThrownBy(()->guard.reserve(type,input)).isInstanceOfSatisfying(WorkflowException.class,e->assertThat(e.code()).isEqualTo("TEST_BUDGET_EXCEEDED"));assertThat(calls).hasValue(expected);}
 }

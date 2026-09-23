@@ -101,7 +101,7 @@ public class AutomaticVisualReviewService {
             .put("retryable",failure.retryable()).put("submissionUncertain",failure.uncertain());if(failure.requestId()!=null&&!failure.requestId().isBlank())qc.put("providerRequestId",failure.requestId());if(failure.rawOutput()!=null)qc.put("providerOutputRaw",bounded(failure.rawOutput()));store.create(QC_RESULT,QcGenerationProvenance.attach(qc,frame));
     }
     private String bounded(String value){return value.length()<=16000?value:value.substring(0,16000);}
-    private ObjectNode reviewBudgetInput(JsonNode generation){ObjectNode input=obj();for(String field:List.of("testRun","testRunId","testPhase","estimatedCost"))if(generation.has(field))input.set(field,generation.path(field).deepCopy());return input;}
+    private ObjectNode reviewBudgetInput(JsonNode generation){ObjectNode input=obj();for(String field:List.of("testRun","testRunId","testPhase"))if(generation.has(field))input.set(field,generation.path(field).deepCopy());return input;}
     private long nextReviewSequence(ObjectNode frame){return store.list(QC_RESULT,project(frame),null).stream().filter(review->id(frame).equals(text(review,"targetId"))).mapToLong(review->review.path("reviewSequence").asLong(0)).max().orElse(0)+1;}
     private double score(JsonNode result,String metric){return result.path(metric).path("score").asDouble();}
 }

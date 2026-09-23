@@ -24,7 +24,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.ArgumentMatchers.any;
 
-@SpringBootTest(properties={"drama.render.ffmpeg=frontend/node_modules/ffmpeg-static/ffmpeg.exe","drama.render.ffprobe=frontend/node_modules/ffprobe-static/bin/win32/x64/ffprobe.exe"})
+@SpringBootTest(properties={"drama.render.ffmpeg=frontend/node_modules/ffmpeg-static/ffmpeg.exe","drama.render.ffprobe=frontend/node_modules/ffprobe-static/bin/win32/x64/ffprobe.exe","CANARY_TTS_VOICE_ID=canary-real-voice"})
 @ActiveProfiles("test")
 @Transactional
 class PipelineCanaryProductionIntegrationTest {
@@ -86,6 +86,7 @@ class PipelineCanaryProductionIntegrationTest {
         assertThat(text(timeline,"finalQaStatus")).isEqualTo("PASSED");
 
         List<ObjectNode> jobs=store.list(GENERATION_JOB,projectId,null);
+        assertThat(jobs.stream().filter(job->"ASSET_IMAGE".equals(text(job,"type")))).hasSize(4);
         assertThat(jobs.stream().filter(job->"KEYFRAME".equals(text(job,"type")))).hasSize(4);
         assertThat(jobs.stream().filter(job->"VIDEO".equals(text(job,"type")))).hasSize(4);
         assertThat(jobs.stream().filter(job->"TTS".equals(text(job,"type")))).hasSize(2);
@@ -93,6 +94,20 @@ class PipelineCanaryProductionIntegrationTest {
         assertThat(jobs.stream().filter(job->Set.of("STORY","SCRIPT","STORY_QA","DIRECTOR_PLAN","SHOT_DETAIL","ASSET_IMAGE","STORYBOARD","KEYFRAME","KEYFRAME_QC","VIDEO_QC","VIDEO","TTS","LIPSYNC").contains(text(job,"type"))))
             .allSatisfy(job->assertThat(job.path("maxAttempts").asInt()).as(text(job,"type")).isEqualTo(1));
         assertThat(store.list(DIALOGUE_LINE,projectId,null)).allSatisfy(line->{assertThat(text(line,"semanticText")).isNotBlank();assertThat(text(line,"spokenText")).isNotBlank();assertThat(text(line,"subtitleText")).isNotBlank();assertThat(text(line,"voiceProfileId")).isNotBlank();});
+        assertThat(store.list(VOICE_PROFILE,projectId,null)).isNotEmpty().allSatisfy(profile->{assertThat(text(profile,"providerVoiceId")).isEqualTo("canary-real-voice");assertThat(text(profile,"providerVoiceId")).doesNotStartWith("mock-");});
+        assertThat(store.list(DIALOGUE_LINE,projectId,null)).allSatisfy(line->assertThat(text(store.get(VOICE_PROFILE,text(line,"voiceProfileId")),"providerVoiceId")).isEqualTo("canary-real-voice"));
+        assertThat(store.list(ASSET_VIEW,projectId,null).stream().filter(view->view.path("generationJobId").isTextual())).hasSize(4).allSatisfy(view->assertThat(view.path("master").asBoolean()).isTrue());
+        assertThat(result.path("assetDependency").asText()).isEqualTo("A1");
+        assertThat(result.path("jobCounts").path("ASSET_IMAGE").asInt()).isEqualTo(4);
+        assertThat(result.path("jobCounts").path("KEYFRAME").asInt()).isEqualTo(4);
+        assertThat(result.path("llmStageCounts").path("STORY_BRIEF").asInt()).isEqualTo(1);
+        assertThat(result.path("llmStageCounts").path("PREMISE").asInt()).isEqualTo(1);
+        assertThat(result.path("llmStageCounts").path("CORE").asInt()).isEqualTo(1);
+        assertThat(result.path("llmStageCounts").path("OUTLINE_BATCH").asInt()).isEqualTo(1);
+        assertThat(result.path("llmStageCounts").path("EPISODE_SCRIPT").asInt()).isEqualTo(1);
+        assertThat(result.path("llmStageCounts").path("STORY_QA").asInt()).isEqualTo(1);
+        assertThat(result.path("llmStageCounts").path("DIRECTOR_PLAN").asInt()).isEqualTo(1);
+        assertThat(result.path("llmStageCounts").path("SHOT_DETAIL").asInt()).isEqualTo(4);
         assertThat(store.list(AUDIO_CLIP,projectId,null)).allSatisfy(clip->{assertThat(clip.path("locked").asBoolean()).isTrue();assertThat(clip.path("selected").asBoolean()).isTrue();assertThat(clip.path("voiceSnapshot").isObject()).isTrue();});
         List<ObjectNode> reviews=store.list(QC_RESULT,projectId,null);
         assertThat(reviews.stream().filter(review->KEYFRAME.path().equals(text(review,"targetKind"))&&"AUTOMATIC".equals(text(review,"reviewer"))&&!review.path("shadow").asBoolean()&&review.path("passed").asBoolean())).hasSize(4);
@@ -124,7 +139,7 @@ class PipelineCanaryProductionIntegrationTest {
 
     @Test void restartAfterProjectCommitContinuesTheSameProjectInsteadOfCreatingAnother(){
         String runId="project-committed-before-pipeline";
-        ObjectNode orphan=studio.create(PROJECT,PipelineCanaryFixture.standard().productionProject(mapper).put("pipelineCanaryRunId",runId).put("testRun",true).put("testRunId",runId).put("testPhase","PIPELINE"));
+        ObjectNode orphan=studio.create(PROJECT,PipelineCanaryFixture.standard().productionProject(mapper).put("pipelineCanaryRunId",runId).put("testRun",true).put("testRunId",runId).put("testPhase","PIPELINE").put("canaryTtsVoiceId","canary-real-voice"));
 
         ObjectNode result=adapter.start(PipelineCanaryFixture.standard(),runId,"MOCK");
 

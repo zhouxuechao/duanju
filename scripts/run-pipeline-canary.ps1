@@ -18,11 +18,11 @@ $root=Split-Path -Parent $PSScriptRoot
 $target=Join-Path $root 'target\canary'
 New-Item -ItemType Directory -Force -Path $target | Out-Null
 $plan=[ordered]@{
-  phase='PIPELINE';generationProfile='TEST';shots=4;targetDurationSeconds=20
+  phase='PIPELINE';generationProfile='TEST';assetDependency='A1';shots=4;targetDurationSeconds=20
   characters=2;locations=1;props=1;dialogueLines=2
   imageModel='doubao-seedream-5-0-260128';imageSize='2K';aspectRatioIntent='9:16'
   videoModel='doubao-seedance-2-0-fast-260128';videoResolution='480p';videoDurationSeconds=5
-  requests=[ordered]@{storyDirectorLlm=2;image=4;video=4;audio=2;vlmQc=8}
+  requests=[ordered]@{storyLlm=6;directorLlm=5;storyDirectorLlm=11;assetImage=4;keyframe=4;image=8;video=4;audio=2;vlmQc=8;lipsync=0}
   automaticRetry=$false;automaticSecondTake=$false;resume=$true;productionIntegration='PRODUCTION_PIPELINE_READY'
 }
 $plan | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $target 'pipeline-canary-dry-run.json') -Encoding utf8
@@ -30,16 +30,23 @@ $plan | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $target 'p
 # Pipeline Canary Dry Run
 
 - GenerationProfile: TEST
+- AssetDependency: A1
 - Shots: 4
 - Target video duration: 20s
 - Characters: 2
 - Locations: 1
 - Props: 1
 - Dialogue lines / TTS: 2
-- Image requests: 4 (doubao-seedream-5-0-260128 / 2K / 9:16)
+- Asset master image requests: 4
+- Keyframe requests: 4
+- Image requests: 8 (doubao-seedream-5-0-260128 / 2K / 9:16)
 - Video submissions: 4 (doubao-seedance-2-0-fast-260128 / 480p / 5s)
-- Story/Director LLM: <= 2
+- Story LLM: <= 6
+- Director LLM: <= 5
+- Story/Director LLM: <= 11
 - VLM QC: <= 8
+- TTS: <= 2
+- Lipsync: 0
 - Automatic retry: false
 - Automatic second take: false
 - Resume: enabled
@@ -83,16 +90,28 @@ try{
   if(-not $env:ARK_VIDEO_RESOLUTION){$env:ARK_VIDEO_RESOLUTION='480p'}
   if($env:ARK_IMAGE_MODEL -ne $plan.imageModel -or $env:ARK_IMAGE_SIZE -ne '2K' -or $env:ARK_VIDEO_MODEL -ne $plan.videoModel -or $env:ARK_VIDEO_RESOLUTION -ne '480p'){throw 'Only the fixed TEST generation profile is allowed.'}
   if(-not $env:ARK_API_KEY){throw 'ARK_API_KEY must be present in the local process environment.'}
+  if(-not $env:ARK_TEXT_MODEL){throw 'ARK_TEXT_MODEL must be explicitly configured for Pipeline Canary.'}
+  if(-not $env:ARK_DIRECTOR_MODEL){throw 'ARK_DIRECTOR_MODEL must be explicitly configured; Pipeline Canary cannot use an implicit fallback.'}
+  if(-not $env:ARK_VLM_MODEL){throw 'ARK_VLM_MODEL must be explicitly configured for Pipeline Canary.'}
+  if($env:VISUAL_REVIEWER -ne 'volcengine'){throw 'PIPELINE CANARY BLOCKED: REAL VLM REVIEWER REQUIRED'}
   if(-not $env:SEED_AUDIO_API_KEY){throw 'SEED_AUDIO_API_KEY must be present in the local process environment.'}
   if(-not $env:CANARY_TTS_VOICE_ID){throw 'CANARY_TTS_VOICE_ID must be configured for the two Mandarin lines.'}
-  $env:PIPELINE_TEST_MAX_REAL_IMAGE_REQUESTS='4'
+  if($env:CANARY_TTS_VOICE_ID.ToLowerInvariant().StartsWith('mock-')){throw 'CANARY_TTS_VOICE_ID must be a real Provider voice, not a mock voice.'}
+  $env:CANARY_ASSET_DEPENDENCY=$plan.assetDependency
+  $env:PIPELINE_TEST_MAX_REAL_IMAGE_REQUESTS='8'
   $env:PIPELINE_TEST_MAX_REAL_VIDEO_REQUESTS='4'
   $env:PIPELINE_TEST_MAX_REAL_AUDIO_REQUESTS='2'
-  $env:PIPELINE_TEST_MAX_REAL_LLM_REQUESTS='2'
+  $env:PIPELINE_TEST_MAX_REAL_LLM_REQUESTS='11'
   $env:PIPELINE_TEST_MAX_REAL_VLM_REQUESTS='8'
-  if(-not $env:PIPELINE_TEST_MAX_COST_CNY){$env:PIPELINE_TEST_MAX_COST_CNY='20'}
-  if(-not $env:PIPELINE_TEST_IMAGE_ESTIMATED_COST_CNY){$env:PIPELINE_TEST_IMAGE_ESTIMATED_COST_CNY='8'}
+  $env:PIPELINE_TEST_MAX_REAL_LIPSYNC_REQUESTS='0'
+  if(-not $env:PIPELINE_TEST_MAX_COST_CNY){$env:PIPELINE_TEST_MAX_COST_CNY='35'}
+  if(-not $env:PIPELINE_TEST_IMAGE_ESTIMATED_COST_CNY){$env:PIPELINE_TEST_IMAGE_ESTIMATED_COST_CNY='16'}
   if(-not $env:PIPELINE_TEST_VIDEO_ESTIMATED_COST_CNY){$env:PIPELINE_TEST_VIDEO_ESTIMATED_COST_CNY='12'}
+  if(-not $env:PIPELINE_TEST_LLM_ESTIMATED_COST_CNY){$env:PIPELINE_TEST_LLM_ESTIMATED_COST_CNY='1'}
+  if(-not $env:PIPELINE_TEST_VLM_ESTIMATED_COST_CNY){$env:PIPELINE_TEST_VLM_ESTIMATED_COST_CNY='1'}
+  if(-not $env:PIPELINE_TEST_TTS_ESTIMATED_COST_CNY){$env:PIPELINE_TEST_TTS_ESTIMATED_COST_CNY='0.5'}
+  $plannedEstimate=[double]$env:PIPELINE_TEST_IMAGE_ESTIMATED_COST_CNY+[double]$env:PIPELINE_TEST_VIDEO_ESTIMATED_COST_CNY+[double]$env:PIPELINE_TEST_LLM_ESTIMATED_COST_CNY+[double]$env:PIPELINE_TEST_VLM_ESTIMATED_COST_CNY+[double]$env:PIPELINE_TEST_TTS_ESTIMATED_COST_CNY
+  if($plannedEstimate -gt [double]$env:PIPELINE_TEST_MAX_COST_CNY){throw 'Pipeline Canary planned estimates exceed PIPELINE_TEST_MAX_COST_CNY.'}
   $env:DRAMA_TEST_RUN='true'
   $env:DRAMA_TEST_RUN_ID="pipeline-canary-$([guid]::NewGuid())"
   $env:SPRING_PROFILES_ACTIVE='demo,live'

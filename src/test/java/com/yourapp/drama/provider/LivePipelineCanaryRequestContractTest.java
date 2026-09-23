@@ -21,7 +21,12 @@ class LivePipelineCanaryRequestContractTest {
                 "production.start",
                 "production.reconcile",
                 "production.resume",
-                "state.productionSnapshot");
+                "state.productionSnapshot",
+                "budgetGuard.snapshot",
+                "budgetSnapshot",
+                "jobCounts",
+                "budgetSettledEstimate",
+                "providerActualCost");
         assertThat(source).doesNotContain("new VolcengineImageGenerator","new SeedAudioVoiceGenerator","new PipelineCanaryEngine","ffmpeg","video.submit","keyframePrompt(","videoPrompt(");
         assertThat(source).doesNotContain("RUN_LIVE_PIPELINE_CANARY\",matches=\"(?i)false\"");
     }

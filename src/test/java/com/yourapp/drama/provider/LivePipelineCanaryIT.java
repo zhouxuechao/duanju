@@ -8,6 +8,8 @@ import com.yourapp.drama.workflow.PipelineCanaryFixture;
 import com.yourapp.drama.workflow.PipelineCanaryProductionAdapter;
 import com.yourapp.drama.workflow.PipelineCanaryProductionGate;
 import com.yourapp.drama.workflow.PipelineCanaryState;
+import com.yourapp.drama.workflow.PipelineLiveExecutionProfile;
+import com.yourapp.drama.workflow.TestBudgetGuard;
 import com.yourapp.drama.workflow.WorkflowException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -30,6 +32,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class LivePipelineCanaryIT {
     @Autowired PipelineCanaryProductionAdapter production;
     @Autowired ObjectMapper mapper;
+    @Autowired TestBudgetGuard budgetGuard;
 
     @Test
     @EnabledIfEnvironmentVariable(named="RUN_LIVE_PIPELINE_CANARY",matches="(?i)true")
@@ -62,14 +65,22 @@ class LivePipelineCanaryIT {
 
     private void writeEvidence(Path path,ObjectNode state) throws Exception {
         ObjectNode productionCursor=(ObjectNode)state.path("production");
+        String runId=state.path("runId").asText();ObjectNode budgetSnapshot=budgetGuard.snapshot(runId),jobCounts=productionCursor.path("jobCounts").isObject()?(ObjectNode)productionCursor.path("jobCounts"):obj();
         ObjectNode evidence=obj().put("runId",state.path("runId").asText()).put("commit",state.path("commit").asText())
                 .put("status",state.path("status").asText()).put("checkedAt",Instant.now().toString()).put("source","PRODUCTION_WORKFLOW");
         evidence.set("production",productionCursor.deepCopy());
-        int images=0,videos=0,audio=0;for(var job:productionCursor.path("providerJobs")){switch(job.path("type").asText()){case "KEYFRAME"->images++;case "VIDEO"->videos++;case "TTS"->audio++;default->{}}}
-        evidence.set("budget",obj().put("realImageRequests",images).put("realVideoSubmissions",videos).put("realAudioRequests",audio).put("retryCount",0).put("billing","UNPRICED"));
+        evidence.set("executionProfile",PipelineLiveExecutionProfile.phaseB().toJson());evidence.set("jobCounts",jobCounts.deepCopy());evidence.set("llmStageCounts",productionCursor.path("llmStageCounts").deepCopy());evidence.set("budgetSnapshot",budgetSnapshot.deepCopy());
+        int images=jobCounts.path("ASSET_IMAGE").asInt()+jobCounts.path("KEYFRAME").asInt(),videos=jobCounts.path("VIDEO").asInt(),audio=jobCounts.path("TTS").asInt();
+        ObjectNode budget=obj().put("maxCost",decimal("PIPELINE_TEST_MAX_COST_CNY")).put("billingStatus","UNPRICED").put("providerActualCost","UNKNOWN")
+                .put("budgetSettledEstimate",budgetSnapshot.path("actualCost").asDouble()).put("plannedCost",budgetSnapshot.path("plannedCost").asDouble())
+                .put("reservedCost",budgetSnapshot.path("reservedCost").asDouble()).put("wasteCost",budgetSnapshot.path("wasteCost").asDouble())
+                .put("realImageRequests",images).put("realVideoSubmissions",videos).put("realAudioRequests",audio).put("retryCount",0);
+        for(String field:List.of("llm","vlm","keyframeQc","videoQc","image","video","tts","lipsync"))budget.set(field,budgetSnapshot.path(field).deepCopy());
+        evidence.set("budget",budget);
         Files.createDirectories(path.toAbsolutePath().getParent());mapper.writerWithDefaultPrettyPrinter().writeValue(path.toFile(),evidence);
     }
 
     private String gitCommit() throws Exception {Process process=new ProcessBuilder("git","rev-parse","HEAD").redirectErrorStream(true).start();String value=new String(process.getInputStream().readAllBytes(),StandardCharsets.UTF_8).trim();if(!process.waitFor(10,TimeUnit.SECONDS)||process.exitValue()!=0||!value.matches("[a-f0-9]{40}"))throw new IllegalStateException("Git commit cannot be resolved");return value;}
     private static String optional(String name,String fallback){String value=System.getenv(name);return value==null||value.isBlank()?fallback:value;}
+    private static double decimal(String name){try{return Double.parseDouble(optional(name,"0"));}catch(NumberFormatException error){return 0;}}
 }

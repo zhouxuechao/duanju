@@ -14,7 +14,7 @@ import static com.yourapp.drama.workflow.Documents.obj;
 public record LiveCanaryPlan(String phase,int imageRequests,int videoRequests,int audioRequests,int llmRequests,int vlmRequests,
                              int shots,int videoDurationSeconds) {
     public static LiveCanaryPlan provider(){return new LiveCanaryPlan("PROVIDER",1,1,0,0,0,1,5);}
-    public static LiveCanaryPlan pipeline(){return new LiveCanaryPlan("PIPELINE",4,4,2,2,8,4,5);}
+    public static LiveCanaryPlan pipeline(){var profile=PipelineLiveExecutionProfile.phaseB();return new LiveCanaryPlan("PIPELINE",profile.imageMax(),profile.videoMax(),profile.ttsMax(),profile.llmMax(),profile.vlmMax(),4,profile.videoDurationSeconds());}
 
     public ObjectNode toJson(){
         ObjectNode value=obj().put("phase",phase).put("generationProfile","TEST")
@@ -25,6 +25,7 @@ public record LiveCanaryPlan(String phase,int imageRequests,int videoRequests,in
                 .put("secondPaidAttemptAutomatic",false);
         value.set("requests",obj().put("image",imageRequests).put("video",videoRequests).put("audio",audioRequests)
                 .put("storyDirectorLlm",llmRequests).put("vlmQc",vlmRequests));
+        if("PIPELINE".equals(phase))value.setAll(PipelineLiveExecutionProfile.phaseB().toJson());
         return value;
     }
 
@@ -44,6 +45,17 @@ public record LiveCanaryPlan(String phase,int imageRequests,int videoRequests,in
         check(checks,blocking,"VIDEO_RESOLUTION","480p".equalsIgnoreCase(value(environment,"ARK_VIDEO_RESOLUTION","480p")),"视频分辨率必须为 480p");
         check(checks,blocking,"FINAL_DISABLED",!"true".equalsIgnoreCase(environment.get("CANARY_ENABLE_FINAL")),"Canary 禁止启用 FINAL");
         check(checks,blocking,"API_KEY_PRESENT",!value(environment,"ARK_API_KEY","").isBlank(),"ARK_API_KEY 只能从本机环境变量提供");
+        if("PIPELINE".equals(phase)){
+            var profile=PipelineLiveExecutionProfile.phaseB();
+            check(checks,blocking,"ASSET_DEPENDENCY",profile.assetDependency().equalsIgnoreCase(value(environment,"CANARY_ASSET_DEPENDENCY","")),"Phase B Pipeline Canary 素材依赖必须显式为 A1");
+            check(checks,blocking,"TEXT_MODEL",!value(environment,"ARK_TEXT_MODEL","").isBlank(),"ARK_TEXT_MODEL 必须显式配置");
+            check(checks,blocking,"DIRECTOR_MODEL",!value(environment,"ARK_DIRECTOR_MODEL","").isBlank(),"ARK_DIRECTOR_MODEL 必须显式配置，不能静默回退");
+            check(checks,blocking,"VLM_MODEL",!value(environment,"ARK_VLM_MODEL","").isBlank(),"ARK_VLM_MODEL 必须显式配置");
+            check(checks,blocking,"REAL_VLM_REVIEWER","volcengine".equalsIgnoreCase(value(environment,"VISUAL_REVIEWER","")),"PIPELINE CANARY BLOCKED: REAL VLM REVIEWER REQUIRED");
+            check(checks,blocking,"TTS_API_KEY",!value(environment,"SEED_AUDIO_API_KEY","").isBlank(),"SEED_AUDIO_API_KEY 必须显式配置");
+            String voice=value(environment,"CANARY_TTS_VOICE_ID","");
+            check(checks,blocking,"TTS_VOICE",!voice.isBlank()&&!voice.toLowerCase(java.util.Locale.ROOT).startsWith("mock-"),"CANARY_TTS_VOICE_ID 必须是真实 Provider 音色，禁止 mock 音色");
+        }
         String prefix="PIPELINE".equals(phase)?"PIPELINE_":"";boolean required="PIPELINE".equals(phase);
         int maxImages=integer(environment,prefix+"TEST_MAX_REAL_IMAGE_REQUESTS",required?-1:imageRequests),maxVideos=integer(environment,prefix+"TEST_MAX_REAL_VIDEO_REQUESTS",required?-1:videoRequests),maxAudio=integer(environment,prefix+"TEST_MAX_REAL_AUDIO_REQUESTS",required?-1:audioRequests),maxLlm=integer(environment,prefix+"TEST_MAX_REAL_LLM_REQUESTS",required?-1:llmRequests),maxVlm=integer(environment,prefix+"TEST_MAX_REAL_VLM_REQUESTS",required?-1:vlmRequests);
         double maxCost=decimal(environment,prefix+"TEST_MAX_COST_CNY",required?Double.NaN:5);
@@ -52,9 +64,12 @@ public record LiveCanaryPlan(String phase,int imageRequests,int videoRequests,in
         check(checks,blocking,"AUDIO_BUDGET",maxAudio==audioRequests,"Phase "+phase+" 音频请求硬上限必须等于计划数 "+audioRequests);
         check(checks,blocking,"LLM_BUDGET",maxLlm==llmRequests,"Phase "+phase+" LLM 请求硬上限必须等于计划数 "+llmRequests);
         check(checks,blocking,"VLM_BUDGET",maxVlm==vlmRequests,"Phase "+phase+" VLM 请求硬上限必须等于计划数 "+vlmRequests);
+        if("PIPELINE".equals(phase))check(checks,blocking,"LIPSYNC_BUDGET",integer(environment,"PIPELINE_TEST_MAX_REAL_LIPSYNC_REQUESTS",-1)==PipelineLiveExecutionProfile.phaseB().lipsyncMax(),"Phase PIPELINE Lipsync 请求硬上限必须为 0");
         check(checks,blocking,"COST_BUDGET",Double.isFinite(maxCost)&&maxCost>0,prefix+"TEST_MAX_COST_CNY 必须是正有限数值");
         double imageEstimate=decimal(environment,prefix+"TEST_IMAGE_ESTIMATED_COST_CNY",required?Double.NaN:maxCost/2),videoEstimate=decimal(environment,prefix+"TEST_VIDEO_ESTIMATED_COST_CNY",required?Double.NaN:maxCost/2);
-        check(checks,blocking,"PLANNED_COST",Double.isFinite(imageEstimate)&&imageEstimate>=0&&Double.isFinite(videoEstimate)&&videoEstimate>=0&&imageEstimate+videoEstimate<=maxCost,"图片与视频预计成本之和不能超过 "+prefix+"TEST_MAX_COST_CNY");
+        double llmEstimate=required?decimal(environment,prefix+"TEST_LLM_ESTIMATED_COST_CNY",Double.NaN):0,vlmEstimate=required?decimal(environment,prefix+"TEST_VLM_ESTIMATED_COST_CNY",Double.NaN):0,ttsEstimate=required?decimal(environment,prefix+"TEST_TTS_ESTIMATED_COST_CNY",Double.NaN):0;
+        boolean estimates=Double.isFinite(imageEstimate)&&imageEstimate>0&&Double.isFinite(videoEstimate)&&videoEstimate>0&&Double.isFinite(llmEstimate)&&llmEstimate>=0&&Double.isFinite(vlmEstimate)&&vlmEstimate>=0&&Double.isFinite(ttsEstimate)&&ttsEstimate>=0;
+        check(checks,blocking,"PLANNED_COST",estimates&&imageEstimate+videoEstimate+llmEstimate+vlmEstimate+ttsEstimate<=maxCost,"分类预计成本必须完整且总和不能超过 "+prefix+"TEST_MAX_COST_CNY");
         boolean unresolved=jobs.stream().anyMatch(job->"UNKNOWN".equalsIgnoreCase(job.path("status").asText())||job.path("submissionUncertain").asBoolean()||job.path("reconciliationRequired").asBoolean());
         check(checks,blocking,"NO_UNRESOLVED_PROVIDER_SUBMISSIONS",!unresolved,"存在 UNKNOWN 或待对账的 Provider 提交，禁止启动新 Canary");
         ObjectNode result=obj().put("ready",blocking.isEmpty()).put("phase",phase);result.set("checks",checks);result.set("blocking",blocking);result.set("plan",toJson());return result;

@@ -53,7 +53,8 @@ public record PipelineCanaryFixture(
     public ObjectNode productionProject(ObjectMapper mapper){
         ObjectNode project=obj().put("name",title).put("idea","林川在现代客厅查看手机；苏宁走近询问，林川把手机递给她，她看后得知一条重要消息。")
                 .put("episodeCount",1).put("targetDuration",20).put("ratio","9:16").put("resolution","480p")
-                .put("generationProfile","TEST").put("previsMode","SKIP").put("style","现代都市写实短剧").put("target","Pipeline Canary");
+                .put("generationProfile","TEST").put("previsMode","SKIP").put("style","现代都市写实短剧").put("target","Pipeline Canary")
+                .put("scenarioId","phase-b-production").put("assetDependencyLevel","A1");
         ObjectNode storyProfile=obj().put("settingGenre","MODERN_URBAN").put("storyType","INFORMATION_REVEAL")
                 .put("audience","GENERAL").put("intensity","MEDIUM").put("sourceMode","ORIGINAL_IDEA");
         storyProfile.putArray("tones").add("克制").add("悬念");storyProfile.putArray("tropes").add("信息揭示");project.set("storyProfile",storyProfile);

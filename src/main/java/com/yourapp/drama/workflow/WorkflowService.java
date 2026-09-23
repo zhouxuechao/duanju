@@ -54,7 +54,8 @@ public class WorkflowService {
         catalog.path("looks").forEach(l->{if(actors.contains(text(l,"characterId")))needed.add(id(l));});
         for(String field:List.of("locations","props"))catalog.path(field).forEach(a->{if(scriptKeys.get(field.equals("locations")?"locationKeys":"propKeys").contains(text(a,field.equals("locations")?"locationKey":"propKey")))needed.add(id(a));});
         double averageShotLength=directorStyles.resolve(projectDocument,scene).path("averageShotLength").asDouble(3);int estimatedShots=Math.max(1,(int)Math.ceil(scene.path("duration").asDouble(3)/Math.max(2,averageShotLength)));
-        AssetDependencyAnalyzer.Level assetDependency=new AssetDependencyAnalyzer().classify(actors.size(),scriptKeys.get("locationKeys").size(),estimatedShots,estimatedShots>1,projectDocument.path("episodeCount").asInt(1)>=30);
+        boolean phaseB=projectDocument.path("testRun").asBoolean()&&"PIPELINE".equalsIgnoreCase(text(projectDocument,"testPhase"))&&"phase-b-production".equals(text(projectDocument,"scenarioId"));
+        AssetDependencyAnalyzer.Level assetDependency=phaseB?AssetDependencyAnalyzer.Level.valueOf(PipelineLiveExecutionProfile.phaseB().assetDependency()):new AssetDependencyAnalyzer().classify(actors.size(),scriptKeys.get("locationKeys").size(),estimatedShots,estimatedShots>1,projectDocument.path("episodeCount").asInt(1)>=30);
         assetViews.requireReady(project(scene),required(episode,"storyBibleId"),needed,assetDependency);catalog=assets(project(scene),assetDependency);
         input.set("directorRuleProfile",obj().put("assetDependency",assetDependency.name()));
         Set<String> neededIds=new HashSet<>(needed);

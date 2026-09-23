@@ -21,6 +21,7 @@ public class ContinuityEngine {
         Shot shot = shot(request, mapper);
         JsonNode raw = shotNode(request);
         JsonNode assets = request.path("assets");
+        boolean masterOnly="A1".equals(text(raw.path("directorRuleProfile"),"assetDependency"))||"A1".equals(text(request.path("directorRuleProfile"),"assetDependency"));
         JsonNode previous = request.path("previousState");
         if (!previous.isObject()) previous = request.path("previousShot").path("endState");
         List<Risk> risks = new ArrayList<>();
@@ -78,7 +79,7 @@ public class ContinuityEngine {
                 locked.put("lookId", lookId);
                 JsonNode look = findAsset(assets, "looks", lookId);
                 if (look.isMissingNode() || look.isNull()) error(risks, "LOOK_ASSET_MISSING", "assets.looks." + lookId, "缺少当前定妆资产 " + lookId);
-                else { locked.set("wardrobe", look); requireAnchorSet(look,"assets.looks."+lookId,risks); if(!id.equals(text(look,"characterId")))error(risks,"LOOK_OWNER_MISMATCH","shot.startState.characters."+id+".lookId","定妆不属于当前人物"); }
+                else { locked.set("wardrobe", look); requireAnchorSet(look,"assets.looks."+lookId,masterOnly,risks); if(!id.equals(text(look,"characterId")))error(risks,"LOOK_OWNER_MISMATCH","shot.startState.characters."+id+".lookId","定妆不属于当前人物"); }
             }
             if (!inherited.path("characters").isObject()) inherited.putObject("characters");
             ObjectNode chars = (ObjectNode) inherited.path("characters");
@@ -94,7 +95,7 @@ public class ContinuityEngine {
             required.add("location:" + shot.locationId());
             JsonNode location = findAsset(assets, "locations", shot.locationId());
             if (location.isMissingNode() || location.isNull()) error(risks, "LOCATION_ASSET_MISSING", "assets.locations." + shot.locationId(), "缺少场景资产");
-            else { constraints.set("location", location); requireAnchorSet(location,"assets.locations."+shot.locationId(),risks); }
+            else { constraints.set("location", location); requireAnchorSet(location,"assets.locations."+shot.locationId(),masterOnly,risks); }
             if (spatial && inherited.has("locationId") && !shot.locationId().equals(text(inherited, "locationId")))
                 error(risks, "LOCATION_DRIFT", "shot.locationId", "场景变化需要 LOCATION_CHANGE 关系");
         }
@@ -103,7 +104,7 @@ public class ContinuityEngine {
             required.add("prop:" + id);
             JsonNode prop = findAsset(assets, "props", id);
             if (prop.isMissingNode() || prop.isNull()) error(risks, "PROP_ASSET_MISSING", "assets.props." + id, "缺少道具资产 " + id);
-            else { propConstraints.set(id, prop); requireAnchorSet(prop,"assets.props."+id,risks); }
+            else { propConstraints.set(id, prop); requireAnchorSet(prop,"assets.props."+id,masterOnly,risks); }
         }
 
         compareInherited(inherited, shot.startState(), "shot.startState", raw.path("authorizedChanges"), risks);
@@ -203,10 +204,10 @@ public class ContinuityEngine {
     private boolean sameComposition(JsonNode previous, JsonNode current) {
         return previous.isObject() && List.of("shotSize", "cameraAngle", "composition").stream().allMatch(k -> previous.path(k).equals(current.path(k)));
     }
-    private void requireAnchorSet(JsonNode asset,String path,List<Risk> risks){
+    private void requireAnchorSet(JsonNode asset,String path,boolean masterOnly,List<Risk> risks){
         JsonNode views=asset.path("approvedViews");Set<String> names=new HashSet<>();Set<Integer> versions=new HashSet<>();
         if(views.isArray())for(JsonNode view:views){if(!view.path("approved").asBoolean()||view.path("stale").asBoolean())continue;names.add(text(view,"view"));versions.add(view.path("setVersion").asInt());}
-        if(names.size()!=4||versions.size()!=1)error(risks,"ANCHOR_REVIEW_REQUIRED",path,"必须先生成并批准同一版本的四张素材视图");
+        int required=masterOnly?1:4;if(names.size()!=required||versions.size()!=1)error(risks,"ANCHOR_REVIEW_REQUIRED",path,masterOnly?"A1 生产必须先生成并批准唯一的素材主参考图":"必须先生成并批准同一版本的四张素材视图");
     }
     private void validateAtomicShot(Shot shot, JsonNode raw, List<Risk> risks) {
         if (!Double.isFinite(shot.duration()) || shot.duration() < EditorialTiming.MIN_SHOT_SECONDS)

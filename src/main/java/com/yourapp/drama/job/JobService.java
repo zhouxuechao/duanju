@@ -35,6 +35,7 @@ public class JobService {
                 frozen.put("testRun",true);
                 for(String field:List.of("testRunId","testPhase"))if(projectDocument.hasNonNull(field))frozen.set(field,projectDocument.path(field).deepCopy());
             }
+            testBudget.applyEstimatedCost(type,frozen);
             if(Set.of("STORYBOARD","KEYFRAME","ASSET_IMAGE").contains(type)){frozen.putIfAbsent("modelId",settings.path("imageModel"));frozen.putIfAbsent("imageSize",settings.path("imageSize"));}
             if(Set.of("VIDEO","LIPSYNC").contains(type)){frozen.putIfAbsent("modelId",settings.path("videoModel"));frozen.putIfAbsent("resolution",settings.path("videoResolution"));}
             if(requestKey!=null&&!requestKey.isBlank())for(ObjectNode old:store.list(GENERATION_JOB,projectId,null))if(requestKey.equals(text(old,"requestKey"))){
