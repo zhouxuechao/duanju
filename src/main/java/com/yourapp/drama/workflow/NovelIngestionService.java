@@ -41,5 +41,5 @@ public class NovelIngestionService {
     private int bumpParsing(String novelId){ObjectNode source=store.getForUpdate(NOVEL_SOURCE,novelId);int next=source.path("parsingRevision").asInt(1)+1;store.update(NOVEL_SOURCE,novelId,revision(source),source.deepCopy().put("parsingRevision",next));return next;}
     private static boolean validMime(String format,String mime){String value=mime.toLowerCase(Locale.ROOT);return switch(format){case "TXT"->value.startsWith("text/")||value.equals("application/octet-stream");case "DOCX"->value.contains("wordprocessingml")||value.equals("application/zip");case "EPUB"->value.contains("epub+zip")||value.equals("application/zip");default->false;};}
     private static String stripExtension(String value){int dot=value.lastIndexOf('.');return dot>0?value.substring(0,dot):value;}
-    private static String hashText(String value){return DependencyRevisionService.hash(com.fasterxml.jackson.databind.node.TextNode.valueOf(value));}
+    static String hashText(String value){return DependencyRevisionService.hash(com.fasterxml.jackson.databind.node.TextNode.valueOf(value));}
 }

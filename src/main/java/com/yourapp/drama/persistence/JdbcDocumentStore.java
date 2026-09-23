@@ -61,6 +61,12 @@ public class JdbcDocumentStore implements DocumentStore {
         m.get(NOVEL_CHAPTER).addAll(List.of(col("chapterNo","int"),col("contentHash","text"),col("sourceStart","int"),col("sourceEnd","int")));
         m.get(NOVEL_CHUNK).addAll(List.of(col("novelId","uuid"),col("chunkNo","int"),col("contentHash","text"),col("sourceStart","int"),col("sourceEnd","int")));
         m.get(SOURCE_REFERENCE).addAll(List.of(col("novelId","uuid"),col("sourceType","text"),col("startOffset","int"),col("endOffset","int"),col("contentHash","text")));
+        m.get(NOVEL_CHUNK_ANALYSIS).addAll(List.of(col("novelId","uuid"),col("contentHash","text"),col("analysisVersion","int"),col("profile","text")));
+        m.get(NOVEL_CHAPTER_ANALYSIS).addAll(List.of(col("novelId","uuid"),col("analysisRevision","int"),col("profile","text")));
+        m.get(ENTITY_CANDIDATE).addAll(List.of(col("novelId","uuid"),col("entityKind","text"),col("canonicalName","text"),col("status","text"),col("confidence","decimal")));
+        m.get(NOVEL_STORY_ARC).addAll(List.of(col("startChapter","int"),col("endChapter","int"),col("analysisRevision","int")));
+        m.get(NOVEL_STORY_GRAPH).addAll(List.of(col("analysisRevision","int"),col("profile","text")));
+        m.get(NOVEL_ANALYSIS_JOB).addAll(List.of(col("novelId","uuid"),col("chapterId","uuid"),col("status","text"),col("idempotencyKey","text"),col("contentHash","text"),col("profile","text"),col("analysisVersion","int")));
         m.get(PROMPT_VERSION).addAll(List.of(col("shotId","uuid"),col("version","int"),col("promptTemplateId","uuid")));
         m.get(STORYBOARD).add(col("version","int"));
         m.get(DIALOGUE_LINE).addAll(List.of(col("characterId","uuid"),col("semanticText","text"),col("spokenText","text"),col("subtitleText","text")));
@@ -183,9 +189,14 @@ public class JdbcDocumentStore implements DocumentStore {
                 if(!projectId.equals(linked.path("projectId").asText()))throw new IllegalArgumentException("linkedVideoTimelineItemId belongs to another project");
             }
         }
+        if(kind==ENTITY_ALIAS&&doc.hasNonNull("entityId")){
+            ResourceKind target=switch(doc.path("entityKind").asText("CHARACTER")){case "LOCATION"->LOCATION;case "PROP"->PROP;default->CHARACTER;};
+            ObjectNode referenced=get(target,doc.path("entityId").asText());
+            if(!projectId.equals(referenced.path("projectId").asText()))throw new IllegalArgumentException("entityId belongs to another project");
+        }
         var references=Map.ofEntries(Map.entry("episodeId",EPISODE),Map.entry("sceneId",SCENE),Map.entry("shotId",SHOT),Map.entry("characterId",CHARACTER),Map.entry("entityId",CHARACTER),Map.entry("voiceProfileId",VOICE_PROFILE),Map.entry("locationId",LOCATION),Map.entry("propId",PROP),Map.entry("sourceKeyframeId",KEYFRAME),Map.entry("keyframeId",KEYFRAME),Map.entry("videoTakeId",VIDEO_TAKE),Map.entry("audioClipId",AUDIO_CLIP),Map.entry("dialogueLineId",DIALOGUE_LINE),Map.entry("generationJobId",GENERATION_JOB),Map.entry("promptVersionId",PROMPT_VERSION),Map.entry("promptTemplateId",PROMPT_TEMPLATE),Map.entry("timelineId",TIMELINE),Map.entry("factId",STORY_FACT),Map.entry("sourceSceneId",SCENE),Map.entry("sourceShotId",SHOT),Map.entry("sourceBeatId",BEAT),Map.entry("knownFromSceneId",SCENE),Map.entry("subjectCharacterId",CHARACTER),Map.entry("objectCharacterId",CHARACTER));
         references.forEach((field,target)->{
-            if(doc.hasNonNull(field) && target!=kind) {
+            if(doc.hasNonNull(field) && target!=kind && !(kind==ENTITY_ALIAS&&field.equals("entityId"))) {
                 if(doc.get(field).asText().isBlank()) { doc.remove(field); return; }
                 ObjectNode referenced=get(target,doc.get(field).asText());
                 if(!projectId.equals(referenced.path("projectId").asText())) throw new IllegalArgumentException(field+" belongs to another project");

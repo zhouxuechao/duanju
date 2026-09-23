@@ -24,6 +24,12 @@ public enum ResourceKind {
     NOVEL_CHAPTER("novel_chapter", "novel-chapters", NOVEL_SOURCE, "novelId"),
     NOVEL_CHUNK("novel_chunk", "novel-chunks", NOVEL_CHAPTER, "chapterId"),
     SOURCE_REFERENCE("source_reference", "source-references", NOVEL_CHUNK, "chunkId"),
+    NOVEL_CHUNK_ANALYSIS("novel_chunk_analysis", "novel-chunk-analyses", NOVEL_CHUNK, "chunkId"),
+    NOVEL_CHAPTER_ANALYSIS("novel_chapter_analysis", "novel-chapter-analyses", NOVEL_CHAPTER, "chapterId"),
+    ENTITY_CANDIDATE("entity_candidate", "entity-candidates", null, null),
+    NOVEL_STORY_ARC("novel_story_arc", "novel-story-arcs", NOVEL_SOURCE, "novelId"),
+    NOVEL_STORY_GRAPH("novel_story_graph", "novel-story-graphs", NOVEL_SOURCE, "novelId"),
+    NOVEL_ANALYSIS_JOB("novel_analysis_job", "novel-analysis-jobs", NOVEL_CHUNK, "chunkId"),
     SCENE("scene", "scenes", EPISODE, "episodeId"),
     BEAT("beat", "beats", SCENE, "sceneId"),
     SHOT("shot", "shots", SCENE, "sceneId"),
@@ -80,7 +86,8 @@ public enum ResourceKind {
     public boolean immutable() { return this == STORY_FACT_MUTATION || this == CHARACTER_KNOWLEDGE || this == PROMPT_VERSION || this == COST_RECORD || this == PRICE_SNAPSHOT || this == HUMAN_EDIT_FEEDBACK || this == QC_RESULT
             || this == CHARACTER_DEFINITION_VERSION || this == LOCATION_DEFINITION_VERSION || this == PROP_DEFINITION_VERSION
             || this == DEPENDENCY_EDGE || this == REVALIDATION_MARKER || this == PRODUCTION_INPUT_SNAPSHOT || this == PRODUCTION_SCRIPT_SNAPSHOT
-            || this == IMPACT_PLAN || this == REBUILD_PLAN; }
+            || this == IMPACT_PLAN || this == REBUILD_PLAN || this == NOVEL_CHUNK_ANALYSIS || this == NOVEL_CHAPTER_ANALYSIS
+            || this == NOVEL_STORY_ARC || this == NOVEL_STORY_GRAPH; }
     public static ResourceKind fromPath(String value) {
         String normalized = value.toLowerCase(Locale.ROOT).replace('_', '-');
         return Arrays.stream(values()).filter(k -> k.path.equals(normalized)
