@@ -43,7 +43,7 @@ public class JdbcDocumentStore implements DocumentStore {
         m.get(GENERATION_JOB).addAll(List.of(col("shotId","uuid"),col("type","text"),col("status","text"),col("providerRequestId","text"),col("providerTaskId","text"),col("promptVersionId","uuid"),col("requestKey","text"),col("retryAt","time"),col("attempts","int"),col("maxAttempts","int"),col("progress","decimal"),col("cost","decimal"),col("failureReason","text"),col("cancelRequested","bool")));
         m.get(STORY_FACT).addAll(List.of(col("factKey","text"),col("predicate","text"),col("validFromStoryTime","decimal"),col("validToStoryTime","decimal"),col("revealedAtStoryTime","decimal"),col("status","text"),col("sourceSceneId","uuid"),col("sourceShotId","uuid")));
         m.get(STORY_FACT_MUTATION).addAll(List.of(col("factId","uuid"),col("operation","text"),col("effectiveFromStoryTime","decimal"),col("sceneId","uuid"),col("beatId","uuid")));
-        m.get(CHARACTER_KNOWLEDGE).addAll(List.of(col("characterId","uuid"),col("factId","uuid"),col("knowledgeState","text"),col("knownFromStoryTime","decimal"),col("knownFromSceneId","uuid")));
+        m.get(CHARACTER_KNOWLEDGE).addAll(List.of(col("characterId","uuid"),col("factId","uuid"),col("knowledgeState","text"),col("knownFromStoryTime","decimal"),col("validFromStoryTime","decimal"),col("validToStoryTime","decimal"),col("believedStatement","text"),col("knownFromSceneId","uuid")));
         m.get(ENTITY_ALIAS).addAll(List.of(col("entityId","uuid"),col("alias","text"),col("aliasType","text"),col("validFromStoryTime","decimal"),col("validToStoryTime","decimal"),col("source","text"),col("confidence","decimal")));
         m.get(RELATIONSHIP).addAll(List.of(col("subjectCharacterId","uuid"),col("objectCharacterId","uuid"),col("relationshipType","text"),col("state","text"),col("validFromStoryTime","decimal"),col("validToStoryTime","decimal"),col("sourceSceneId","uuid"),col("sourceShotId","uuid")));
         m.get(LOCATION_STATE).addAll(List.of(col("locationId","uuid"),col("state","text"),col("validFromStoryTime","decimal"),col("validToStoryTime","decimal"),col("sourceSceneId","uuid"),col("sourceShotId","uuid")));
@@ -122,6 +122,10 @@ public class JdbcDocumentStore implements DocumentStore {
     }
     private void defaults(ResourceKind kind,ObjectNode doc) {
         if(kind==SHOT) { putDefault(doc,"duration",3); putDefault(doc,"status","DRAFT"); }
+        if(kind==CHARACTER_KNOWLEDGE) {
+            if(!doc.path("validFromStoryTime").isNumber()&&doc.path("knownFromStoryTime").isNumber())doc.set("validFromStoryTime",doc.path("knownFromStoryTime").deepCopy());
+            if(!doc.path("knownFromStoryTime").isNumber()&&doc.path("validFromStoryTime").isNumber())doc.set("knownFromStoryTime",doc.path("validFromStoryTime").deepCopy());
+        }
         if(kind==KEYFRAME) { putDefault(doc,"handoffStatus","READY"); putDefault(doc,"qcStatus","PENDING"); }
         if(kind==KEYFRAME || kind==VIDEO_TAKE) { putDefault(doc,"selected",false); putDefault(doc,"locked",false); }
         if(kind==CHARACTER) putDefault(doc,"identityLocked",false);
@@ -144,6 +148,15 @@ public class JdbcDocumentStore implements DocumentStore {
         }
         String projectId=required(doc,"projectId"); get(PROJECT,projectId);
         if(!doc.hasNonNull("parentId")) doc.put("parentId",doc.hasNonNull("shotId") && kind!=SHOT && !doc.path("shotId").asText().isBlank() ? doc.path("shotId").asText() : projectId);
+        if(kind==TIMELINE_ITEM&&doc.hasNonNull("linkedVideoTimelineItemId")){
+            String linkedId=doc.path("linkedVideoTimelineItemId").asText();
+            if(linkedId.isBlank()){doc.remove("linkedVideoTimelineItemId");}
+            else{
+                if(linkedId.equals(doc.path("id").asText()))throw new IllegalArgumentException("时间线片段不能绑定自身");
+                ObjectNode linked=get(TIMELINE_ITEM,linkedId);
+                if(!projectId.equals(linked.path("projectId").asText()))throw new IllegalArgumentException("linkedVideoTimelineItemId belongs to another project");
+            }
+        }
         var references=Map.ofEntries(Map.entry("episodeId",EPISODE),Map.entry("sceneId",SCENE),Map.entry("shotId",SHOT),Map.entry("characterId",CHARACTER),Map.entry("entityId",CHARACTER),Map.entry("voiceProfileId",VOICE_PROFILE),Map.entry("locationId",LOCATION),Map.entry("propId",PROP),Map.entry("sourceKeyframeId",KEYFRAME),Map.entry("keyframeId",KEYFRAME),Map.entry("videoTakeId",VIDEO_TAKE),Map.entry("audioClipId",AUDIO_CLIP),Map.entry("dialogueLineId",DIALOGUE_LINE),Map.entry("generationJobId",GENERATION_JOB),Map.entry("promptVersionId",PROMPT_VERSION),Map.entry("promptTemplateId",PROMPT_TEMPLATE),Map.entry("timelineId",TIMELINE),Map.entry("factId",STORY_FACT),Map.entry("sourceSceneId",SCENE),Map.entry("sourceShotId",SHOT),Map.entry("knownFromSceneId",SCENE),Map.entry("subjectCharacterId",CHARACTER),Map.entry("objectCharacterId",CHARACTER));
         references.forEach((field,target)->{
             if(doc.hasNonNull(field) && target!=kind) {

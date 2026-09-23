@@ -83,14 +83,15 @@ public class GenerationWorker {
     }
     private void image(ObjectNode job){
         JsonNode input=job.path("inputSnapshot");
-        ImageGenerator.ImageResult result=images.generate(new ImageGenerator.ImageRequest(required(input,"prompt"),strings(input.path("referenceImageUrls")),map(input.path("providerOptions"))));
+        ImageGenerator.ImageResult result=images.generate(new ImageGenerator.ImageRequest(text(input,"modelId"),required(input,"prompt"),strings(input.path("referenceImageUrls")),map(input.path("providerOptions"))));
         ResourceKind kind=text(job,"type").equals("KEYFRAME")?KEYFRAME:STORYBOARD;
         try { store.transaction(()->{
             ObjectNode asset=obj().put("projectId",project(job)).put("shotId",required(job,"shotId")).put("version",input.path("version").asInt(1))
                 .put("attemptNo",input.path("version").asInt(1))
-                .put("provider","VOLCENGINE").put("sourceModel",result.model()).put("providerUrl",result.providerUrl())
+                .put("provider","VOLCENGINE").put("sourceModel",result.model()).put("generationProfile",input.path("generationProfile").asText("TEST")).put("providerUrl",result.providerUrl())
                 .put("generationJobId",id(job)).put("providerRequestId",result.requestId()).put("promptVersionId",required(input,"promptVersionId"))
                 .put("handoffStatus","READY").put("qcStatus","PENDING").put("locked",false).put("selected",false).put("simulated",result.simulated());
+            if(input.hasNonNull("imageSize"))asset.set("imageSize",input.path("imageSize").deepCopy());
             if(result.expiresAt()!=null)asset.put("providerUrlExpiresAt",result.expiresAt().toString());
             if(result.simulated())asset.put("previewUrl","/demo/keyframe.png");
             JsonNode plannedShot=input.path("context").path("shot");for(String field:List.of("directorPlanVersion","dramaticBeatVersion","shotPlanVersion"))if(plannedShot.has(field))asset.set(field,plannedShot.path(field).deepCopy());
@@ -128,7 +129,7 @@ public class GenerationWorker {
         if(!lipsync&&"CONTINUATION_LAST_FRAME".equals(route)&&!url.equals(text(input.path("context").path("previousTake"),"lastFrameUrl")))throw new WorkflowException("URL_SNAPSHOT_MISMATCH","续接尾帧与 previousTake 快照不一致");
         // The exact String returned by Seedream is the first frame. No storage call occurs on this path.
         List<VideoGenerator.Reference> references=new ArrayList<>();for(JsonNode ref:input.path("references"))references.add(new VideoGenerator.Reference(required(ref,"type"),required(ref,"url"),required(ref,"role")));
-        VideoGenerator.Submission submission=videos.submit(new VideoGenerator.VideoRequest(required(input,"prompt"),lipsync||url.isBlank()?null:url,references,map(input.path("providerOptions"))));
+        VideoGenerator.Submission submission=videos.submit(new VideoGenerator.VideoRequest(text(input,"modelId"),required(input,"prompt"),lipsync||url.isBlank()?null:url,references,map(input.path("providerOptions"))));
         try{
             jobs.mutate(id(job),j->j.put("providerTaskId",submission.taskId()).put("providerRequestId",submission.requestId()).put("providerAcceptedAt",Instant.now().toString()).put("phase","PROVIDER_POLLING").put("simulated",submission.simulated()));
             store.transaction(()->{
@@ -136,7 +137,7 @@ public class GenerationWorker {
                     .put("provider","VOLCENGINE").put("sourceKeyframeId",id(frame)).put("sourceProviderUrlSnapshot",required(frame,"providerUrl"))
                     .put("promptVersionId",required(input,"promptVersionId")).put("generationJobId",id(job)).put("providerRequestId",submission.requestId()).put("providerTaskId",submission.taskId())
                     .put("providerStatus","QUEUED").put("qcStatus","PENDING").put("selected",false).put("locked",false).put("simulated",submission.simulated());
-                for(String field:List.of("parentTakeId","continuationDepth","reanchorReason","sequenceStrategy","sequenceRelation","sequenceCompilerVersion","normalizedPromptHash","referenceBindingsHash","referenceAuthorityFingerprint","continuitySnapshotHash","sequenceStateFingerprint","providerCapabilitiesVersion","modelId","modelProfileVersion","capabilityFingerprint","taskType","lockMode","route","videoRequestRoute","activatedMaterials","excludedMaterials","referenceMapping","referenceAuthority","referenceBudget","providerParameters","prompt","rulePackFingerprint","rulePackUpstreamCommit","runtimeRuleIds","audioGenerationPolicy","modelProfile","preflight"))if(input.has(field))take.set(field,input.path(field).deepCopy());
+                for(String field:List.of("parentTakeId","continuationDepth","reanchorReason","sequenceStrategy","sequenceRelation","sequenceCompilerVersion","normalizedPromptHash","referenceBindingsHash","referenceAuthorityFingerprint","continuitySnapshotHash","sequenceStateFingerprint","providerCapabilitiesVersion","modelId","modelProfileVersion","capabilityFingerprint","taskType","lockMode","route","videoRequestRoute","activatedMaterials","excludedMaterials","referenceMapping","referenceAuthority","referenceBudget","providerParameters","prompt","rulePackFingerprint","rulePackUpstreamCommit","runtimeRuleIds","audioGenerationPolicy","modelProfile","preflight","generationProfile","resolution","ratio","desiredDuration","providerDuration","durationAdaptationReason","nativeAudio","watermark"))if(input.has(field))take.set(field,input.path(field).deepCopy());
                 if(input.path("retake").isObject())take.set("retakeAudit",input.path("retake").deepCopy());
                 if(lipsync)take.put("variantType","LIPSYNC").put("sourceVideoTakeId",required(input,"sourceTakeId"));
                 take.set("inputSnapshot",input.deepCopy());take.set("assetViewIds",frame.path("assetViewIds").deepCopy());take.set("assetReferences",frame.path("assetReferences").deepCopy()); ObjectNode saved=store.create(VIDEO_TAKE,take);

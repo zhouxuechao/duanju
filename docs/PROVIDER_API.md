@@ -29,11 +29,15 @@ drama:
       base-url: https://ark.cn-beijing.volces.com/api/v3
       api-key: ${ARK_API_KEY}
       text-model: ${ARK_TEXT_MODEL}
-      image-model: ${ARK_IMAGE_MODEL}
-      video-model: ${ARK_VIDEO_MODEL}
+      image-model: ${ARK_IMAGE_MODEL:doubao-seedream-5-0-260128}
+      image-size: ${ARK_IMAGE_SIZE:2K}
+      video-model: ${ARK_VIDEO_MODEL:doubao-seedance-2-0-fast-260128}
+      video-resolution: ${ARK_VIDEO_RESOLUTION:480p}
       text-api-style: responses # or chat
 ```
 
-The production adapter fails fast at startup when key/model IDs are missing. Model IDs intentionally have no invented defaults; model availability and endpoint IDs must be selected in the Volcengine console.
+The production adapter fails fast at startup when the API key or resolved model IDs are missing. Development defaults use Seedream 5.0 at `size=2K` and Seedance 2.0 Fast at `resolution=480p`; 720p is an explicit STANDARD choice. The image adapter never receives the video resolution field. `GenerationProfile` resolves project intent to model IDs, then `ProviderCapabilityRegistry` validates model capabilities before a request is built. FINAL remains explicit and has no automatically selected premium model.
+
+Every billable job freezes its `generationProfile`, model, image size or video resolution, ratio, desired/provider duration, audio flag, watermark, and capability fingerprint. Historical jobs keep that snapshot when defaults later change. Seedream's returned URL is handed to Seedance byte-for-byte.
 
 Official references (checked against the v3 SDK and documentation): [Seedream image generation](https://www.volcengine.com/docs/82379/1541523), [Seedance create/query](https://www.volcengine.com/docs/82379/1520757), [query task](https://www.volcengine.com/docs/82379/1521309), and [cancel/delete](https://www.volcengine.com/docs/82379/1521720). The SDK's typed request definitions are also available in the [official Ark runtime repository](https://github.com/volcengine/volcengine-python-sdk).

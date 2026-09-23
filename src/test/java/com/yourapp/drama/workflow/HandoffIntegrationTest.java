@@ -357,7 +357,8 @@ class HandoffIntegrationTest {
     }
     @Test void imageRequestLocksTheProjectAspectRatio(){
         ObjectNode frame=generateFrame(),job=store.get(GENERATION_JOB,required(frame,"generationJobId"));
-        assertThat(job.path("inputSnapshot").path("providerOptions").path("size").asText()).isEqualTo("1440x2560");
+        assertThat(job.path("inputSnapshot").path("ratio").asText()).isEqualTo("9:16");
+        assertThat(job.path("inputSnapshot").path("providerOptions").path("size").asText()).isEqualTo("2K");
         assertThat(job.path("inputSnapshot").path("providerOptions").path("watermark").isBoolean()).isTrue();
         assertThat(job.path("inputSnapshot").path("providerOptions").path("watermark").asBoolean()).isFalse();
     }

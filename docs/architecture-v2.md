@@ -59,6 +59,8 @@ Production SSOT 是可追踪的生产版本链：
 
 TimelineItem 保存 sourceTakeId/sourceAudioId、in/out、timelineStart、duration、speed、volume、transition、editOperations 和替换历史。`EditingEngine` 校验 CUT/TRIM/REACTION_SHOT/INSERT_SHOT/J_CUT/L_CUT/AUDIO_BRIDGE/DIALOGUE_GAP/PAUSE/CLIP_REPLACE；Clip Replace 只能使用同 Shot、已采用、已锁定、QC 通过且已归档的 Take。
 
+非视频 TimelineItem 通过 `linkedVideoTimelineItemId` 指向具体 VIDEO 片段，不再用 Shot ID 猜测 A-B-A 中的画面。V25 只自动接受唯一匹配；歧义和缺失进入人工重连门禁。
+
 ## Prompt Flow
 
 ```mermaid
@@ -98,6 +100,10 @@ sequenceDiagram
 ```
 
 Seedream 的原始 ProviderReference 优先交给 Seedance；下载归档只用于预览、QC 和恢复，不自动替代授权链引用。适配器在 HTTP 前拒绝不支持的参数和时长。
+
+生成档位采用 `GenerationProfile(TEST/STANDARD/FINAL) → 模型配置 → ProviderCapability → Provider Adapter`。默认 TEST 使用 Seedream 5.0、Seedance 2.0 Fast 和 480p。Story、Shot、Continuity、PromptIR、QC 与 Timeline 不包含具体模型分支；以后升级模型只改档位、能力表、适配器和价格快照。
+
+所有故事时间版本采用半开区间 `[validFromStoryTime, validToStoryTime)`。事实变更有稳定排序键；角色知识、人物状态、地点状态、道具状态、声音状态和关系状态禁止重叠，历史镜头回放不会读取未来状态。
 
 ## Task Flow
 

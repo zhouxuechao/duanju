@@ -11,8 +11,13 @@ public class VolcengineProperties {
     private String apiKey;
     private String textModel;
     private String directorModel;
-    private String imageModel;
-    private String videoModel;
+    private String imageModel = "doubao-seedream-5-0-260128";
+    private String videoModel = "doubao-seedance-2-0-fast-260128";
+    private String videoResolution = "480p";
+    private String imageSize = "2K";
+    private int videoMinDuration=4;
+    private int videoMaxDuration=15;
+    private int videoDurationStep=1;
     private String vlmModel;
     private String textApiStyle = "responses";
     private String directorApiStyle = "responses";
@@ -46,6 +51,8 @@ public class VolcengineProperties {
         if (videoSupportedDurations == null || videoSupportedDurations.isEmpty() || videoSupportedDurations.stream().anyMatch(v -> v == null || v < 1 || v > 60)
                 || videoSupportedDurations.stream().distinct().count() != videoSupportedDurations.size())
             throw new IllegalStateException("video-supported-durations 必须是 1 至 60 秒的非重复列表");
+        if(videoMinDuration<1||videoMaxDuration<videoMinDuration||videoDurationStep<1)throw new IllegalStateException("视频时长范围配置无效");
+        if(imageSize==null||imageSize.isBlank()||videoResolution==null||videoResolution.isBlank())throw new IllegalStateException("图片尺寸和视频分辨率必须显式配置");
     }
     public URI getBaseUrl() { return baseUrl; }
     public void setBaseUrl(URI value) { baseUrl = value; }
@@ -59,6 +66,16 @@ public class VolcengineProperties {
     public void setImageModel(String value) { imageModel = value; }
     public String getVideoModel() { return videoModel; }
     public void setVideoModel(String value) { videoModel = value; }
+    public String getVideoResolution(){return videoResolution;}
+    public void setVideoResolution(String value){videoResolution=value;}
+    public String getImageSize(){return imageSize;}
+    public void setImageSize(String value){imageSize=value;}
+    public int getVideoMinDuration(){return videoMinDuration;}
+    public void setVideoMinDuration(int value){videoMinDuration=value;}
+    public int getVideoMaxDuration(){return videoMaxDuration;}
+    public void setVideoMaxDuration(int value){videoMaxDuration=value;}
+    public int getVideoDurationStep(){return videoDurationStep;}
+    public void setVideoDurationStep(int value){videoDurationStep=value;}
     public String getVlmModel() { return vlmModel; }
     public void setVlmModel(String value) { vlmModel = value; }
     public void validateVlm(){if(vlmModel==null||vlmModel.isBlank())throw new IllegalStateException("真实视觉质检需要配置 vlm-model");}

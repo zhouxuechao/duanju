@@ -79,6 +79,32 @@ class TimelineEditingIntegrationTest {
         assertThat(store.get(TIMELINE_ITEM,id(audioA2)).path("startMs").asLong()).isEqualTo(5600);
     }
 
+    @Test void timelineClipAnchorRejectsSelfCrossTimelineAndVideoLinks(){
+        ObjectNode project=store.create(PROJECT,obj().put("name","锚点约束").put("idea","严格绑定具体视频片段"));
+        ObjectNode episode=store.create(EPISODE,obj().put("projectId",id(project)).put("name","第一集"));
+        ObjectNode scene=store.create(SCENE,obj().put("projectId",id(project)).put("episodeId",id(episode)).put("name","室内"));
+        ObjectNode shot=store.create(SHOT,obj().put("projectId",id(project)).put("sceneId",id(scene)).put("purpose","动作").put("action","转身").put("duration",3));
+        ObjectNode take=createTake(project,shot,"anchor"),timelineA=store.create(TIMELINE,obj().put("projectId",id(project)).put("episodeId",id(episode))),timelineB=store.create(TIMELINE,obj().put("projectId",id(project)).put("episodeId",id(episode)));
+        ObjectNode clip=store.create(TIMELINE_ITEM,videoItem(project,timelineA,shot,take,0,3000));
+
+        assertThatThrownBy(()->studio.create(TIMELINE_ITEM,videoItem(project,timelineA,shot,take,3000,3000).put("linkedVideoTimelineItemId",id(clip))))
+                .hasMessageContaining("VIDEO");
+        assertThatThrownBy(()->studio.create(TIMELINE_ITEM,obj().put("projectId",id(project)).put("timelineId",id(timelineB)).put("shotId",id(shot)).put("track","DIALOGUE").put("startMs",0).put("durationMs",500).put("linkedVideoTimelineItemId",id(clip))))
+                .hasMessageContaining("同一时间线");
+        String selfId=java.util.UUID.randomUUID().toString();
+        assertThatThrownBy(()->store.create(TIMELINE_ITEM,obj().put("id",selfId).put("projectId",id(project)).put("timelineId",id(timelineA)).put("shotId",id(shot)).put("track","DIALOGUE").put("startMs",0).put("durationMs",500).put("linkedVideoTimelineItemId",selfId)))
+                .hasMessageContaining("自身");
+    }
+
+    @Test void timelineQualityBlocksLegacyItemsThatNeedManualRelinking(){
+        ObjectNode project=store.create(PROJECT,obj().put("name","旧时间线重连").put("idea","歧义必须人工处理"));
+        ObjectNode episode=store.create(EPISODE,obj().put("projectId",id(project)).put("name","第一集"));
+        ObjectNode timeline=store.create(TIMELINE,obj().put("projectId",id(project)).put("episodeId",id(episode)).put("durationMs",0).put("contentRevision",1));
+        store.create(TIMELINE_ITEM,obj().put("projectId",id(project)).put("timelineId",id(timeline)).put("track","BGM").put("startMs",0).put("durationMs",500).put("timelineRelinkRequired",true).put("timelineRelinkReason","AMBIGUOUS_REPEATED_SHOT"));
+
+        assertThat(quality.review(id(timeline)).path("failureCodes").toString()).contains("TIMELINE_RELINK_REQUIRED");
+    }
+
     private ObjectNode videoItem(ObjectNode project,ObjectNode timeline,ObjectNode shot,ObjectNode take,long start,long duration){return obj().put("projectId",id(project)).put("timelineId",id(timeline)).put("shotId",id(shot)).put("videoTakeId",id(take)).put("track","VIDEO").put("startMs",start).put("sourceInMs",0).put("sourceOutMs",duration).put("durationMs",duration).put("sourceUrl",text(take,"archiveUrl")).put("transition","CUT").put("transitionDurationMs",0);}
 
     private ObjectNode createTake(ObjectNode project,ObjectNode shot,String suffix){String providerUrl="https://fixture/"+suffix+".png";ObjectNode keyframe=store.create(KEYFRAME,obj().put("projectId",id(project)).put("shotId",id(shot)).put("provider","FIXTURE").put("providerUrl",providerUrl).put("archiveUrl","/frames/"+suffix+".png").put("handoffStatus","HANDED_OFF").put("locked",true).put("selected",true).put("qcStatus","PASSED"));return store.create(VIDEO_TAKE,obj().put("projectId",id(project)).put("shotId",id(shot)).put("sourceKeyframeId",id(keyframe)).put("sourceProviderUrlSnapshot",providerUrl).put("actualDurationMs",3000).put("archiveUrl","/takes/"+suffix+".mp4").put("locked",true).put("selected",true).put("qcStatus","PASSED"));}

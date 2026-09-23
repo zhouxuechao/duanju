@@ -141,15 +141,15 @@ public class AssetViewService {
             if(!source.path("approved").asBoolean())throw new WorkflowException("MASTER_REVIEW_REQUIRED","主参考图尚未确认");
             references.add(referenceUrl(source));
         }
-        Map<String,Object> options=new LinkedHashMap<>();options.put("size","2K");options.put("watermark",false);
+        Map<String,Object> options=new LinkedHashMap<>();String imageSize=text(job.path("inputSnapshot"),"imageSize");if(!imageSize.isBlank())options.put("size",imageSize);options.put("watermark",false);
         if("LOCATION".equals(text(view,"assetKind"))&&!view.path("master").asBoolean()){
             options.put("optimize_prompt_options",Map.of("mode","standard"));
         }
-        ImageGenerator.ImageResult result=images.generate(new ImageGenerator.ImageRequest(required(job.path("inputSnapshot"),"prompt"),references,options));
+        ImageGenerator.ImageResult result=images.generate(new ImageGenerator.ImageRequest(text(job.path("inputSnapshot"),"modelId"),required(job.path("inputSnapshot"),"prompt"),references,options));
         jobs.mutate(id(job),j->{j.put("providerRequestId",result.requestId()).put("model",result.model()).put("simulated",result.simulated());});
         ObjectNode saved=store.transaction(()->{
             ObjectNode now=store.getForUpdate(ASSET_VIEW,id(view));boolean stale=now.path("stale").asBoolean()||!isCurrent(now);
-            ObjectNode next=now.deepCopy().put("providerUrl",result.providerUrl()).put("providerRequestId",result.requestId()).put("model",result.model()).put("simulated",result.simulated()).put("approved",false).put("status",stale?"STALE":"REVIEW").put("stale",stale);
+            ObjectNode next=now.deepCopy().put("providerUrl",result.providerUrl()).put("providerRequestId",result.requestId()).put("model",result.model()).put("generationProfile",job.path("generationProfile").asText("TEST")).put("simulated",result.simulated()).put("approved",false).put("status",stale?"STALE":"REVIEW").put("stale",stale);if(!imageSize.isBlank())next.put("imageSize",imageSize);
             for(String field:List.of("compilerVersion","normalizedPromptHash","referenceBindingsHash","referenceAuthorityFingerprint","continuitySnapshotHash","providerCapabilitiesVersion"))if(job.path("inputSnapshot").has(field))next.set(field,job.path("inputSnapshot").path(field).deepCopy());
             if(result.expiresAt()!=null)next.put("providerUrlExpiresAt",result.expiresAt().toString());
             return store.update(ASSET_VIEW,id(now),revision(now),next);

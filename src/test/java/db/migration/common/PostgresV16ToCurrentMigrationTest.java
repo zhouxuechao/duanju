@@ -18,13 +18,13 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @Testcontainers(disabledWithoutDocker = true)
-class PostgresV16ToV22MigrationTest {
+class PostgresV16ToCurrentMigrationTest {
     private static final ObjectMapper JSON = new ObjectMapper();
     @Container
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
 
     @Test
-    void historicalV16SchemaAndDataUpgradeThroughV22AndCurrentTimelineMigration() throws Exception {
+    void historicalV16SchemaAndDataUpgradeThroughCurrentMigrations() throws Exception {
         Flyway.configure().dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
                 .locations("classpath:db/migration/common").target("16").load().migrate();
         Fixture fixture;
@@ -34,7 +34,7 @@ class PostgresV16ToV22MigrationTest {
                 .locations("classpath:db/migration/common").load();
         flyway.migrate();
 
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("23");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("25");
         try (Connection connection = connection()) {
             try (PreparedStatement statement = connection.prepareStatement("SELECT semantic_text,spoken_text,subtitle_text,document FROM \"dialogue_line\" WHERE id=?")) {
                 statement.setObject(1, fixture.dialogue());

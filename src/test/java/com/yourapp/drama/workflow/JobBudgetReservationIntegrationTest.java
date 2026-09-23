@@ -17,6 +17,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 
 @SpringBootTest @ActiveProfiles("test") @Transactional
 class JobBudgetReservationIntegrationTest {
@@ -25,7 +27,8 @@ class JobBudgetReservationIntegrationTest {
     @Test void idempotentEnqueueLooksUpExistingJobBeforeReservingBudget(){
         ObjectNode project=store.create(PROJECT,obj().put("name","预算幂等").put("idea","同一请求只预留一次"));ObjectNode input=obj().put("testRun",true).put("testRunId","budget-idempotent");
         ObjectNode first=jobs.enqueue(id(project),null,"STORY",input,"same-request");ObjectNode second=jobs.enqueue(id(project),null,"STORY",input,"same-request");
-        assertThat(id(second)).isEqualTo(id(first));verify(budget,times(1)).reserve("STORY",input);
+        assertThat(id(second)).isEqualTo(id(first));verify(budget,times(1)).reserve(eq("STORY"),argThat(snapshot->
+            "budget-idempotent".equals(snapshot.path("testRunId").asText())&&"TEST".equals(snapshot.path("generationProfile").asText())));
     }
     @Test void sameRequestKeyWithDifferentInputCannotSilentlyReturnAnOldPaidJob(){
         ObjectNode project=store.create(PROJECT,obj().put("name","请求内容校验").put("idea","两次输入不一样"));

@@ -42,8 +42,10 @@ public final class VolcengineVideoGenerator implements VideoGenerator {
         if (!firstFrame && request.references().stream().anyMatch(r -> "last_frame".equals(r.role())))
             throw ProviderException.invalid("FIRST_FRAME_REQUIRED", "使用尾帧前必须提供首帧");
         Map<String, Object> body = ProviderInputs.options(request.options(), Set.of("duration", "frames", "resolution", "ratio", "seed", "watermark", "camera_fixed", "generate_audio", "return_last_frame", "execution_expires_after", "service_tier", "priority", "draft"));
-        body.put("model", properties.getVideoModel());
-        if (body.get("duration") instanceof Number value) body.put("duration", providerDuration(value.doubleValue()));
+        String model=model(request);VideoModelProfile profile=capabilities.profile(model);body.put("model",model);
+        if (body.get("duration") instanceof Number value)try{body.put("duration",profile.providerDuration(value.doubleValue()));}catch(IllegalArgumentException error){throw ProviderException.invalid("DURATION_UNSUPPORTED",error.getMessage());}
+        body.putIfAbsent("resolution",properties.getVideoResolution());
+        try{profile.requireResolution(body.get("resolution").toString());}catch(IllegalArgumentException error){throw ProviderException.invalid("RESOLUTION_UNSUPPORTED",error.getMessage());}
         if(firstFrame)body.remove("ratio");
         List<Map<String, Object>> content = new ArrayList<>();
         content.add(Map.of("type", "text", "text", request.prompt()));
@@ -85,13 +87,6 @@ public final class VolcengineVideoGenerator implements VideoGenerator {
         http.exchange("DELETE", "/contents/generations/tasks/" + taskId, null, false);
     }
     private Map<String, Object> media(String type, String url, String role) { return Map.of("type", type, type, Map.of("url", url), "role", role); }
-    private void validateLimits(VideoRequest request,boolean firstFrame){VideoModelProfile.ReferenceLimits limits=capabilities.profile(properties.getVideoModel()).hardLimits();int images=firstFrame?1:0,videos=0,audios=0;for(Reference ref:request.references())switch(ref.type()){case "image_url"->images++;case "video_url"->videos++;case "audio_url"->audios++;default->{}}int total=images+videos+audios;if(images>limits.images()||videos>limits.videos()||audios>limits.audios()||total>limits.total())throw ProviderException.invalid("REFERENCE_LIMIT_EXCEEDED","REFERENCE_LIMIT_EXCEEDED: 当前模型引用数量超过硬限制 images="+images+", videos="+videos+", audios="+audios+", total="+total);}
-    private int providerDuration(double requested) {
-        if(!Double.isFinite(requested)||requested<=0)
-            throw ProviderException.invalid("DURATION_UNSUPPORTED","DURATION_UNSUPPORTED: 视频时长必须为正数");
-        int rounded=(int)Math.ceil(requested);
-        List<Integer> supported=capabilities.profile(properties.getVideoModel()).supportedDurations();
-        return supported.stream().sorted().filter(v->v>=rounded).findFirst().orElseThrow(()->
-            ProviderException.invalid("DURATION_UNSUPPORTED","DURATION_UNSUPPORTED: "+requested+" 秒超过当前视频模型支持时长 "+supported));
-    }
+    private void validateLimits(VideoRequest request,boolean firstFrame){VideoModelProfile.ReferenceLimits limits=capabilities.profile(model(request)).hardLimits();int images=firstFrame?1:0,videos=0,audios=0;for(Reference ref:request.references())switch(ref.type()){case "image_url"->images++;case "video_url"->videos++;case "audio_url"->audios++;default->{}}int total=images+videos+audios;if(images>limits.images()||videos>limits.videos()||audios>limits.audios()||total>limits.total())throw ProviderException.invalid("REFERENCE_LIMIT_EXCEEDED","REFERENCE_LIMIT_EXCEEDED: 当前模型引用数量超过硬限制 images="+images+", videos="+videos+", audios="+audios+", total="+total);}
+    private String model(VideoRequest request){return request.modelId()==null||request.modelId().isBlank()?properties.getVideoModel():request.modelId();}
 }

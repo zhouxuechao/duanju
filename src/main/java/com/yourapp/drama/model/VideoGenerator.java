@@ -9,8 +9,9 @@ public interface VideoGenerator {
     VideoTask poll(String taskId);
     void cancel(String taskId);
 
-    record VideoRequest(String prompt, String firstFrameUrl, List<Reference> references,
+    record VideoRequest(String modelId,String prompt, String firstFrameUrl, List<Reference> references,
                         Map<String, Object> options) {
+        public VideoRequest(String prompt,String firstFrameUrl,List<Reference> references,Map<String,Object> options){this(null,prompt,firstFrameUrl,references,options);}
         public VideoRequest {
             references = references == null ? List.of() : List.copyOf(references);
             options = options == null ? Map.of() : Map.copyOf(options);

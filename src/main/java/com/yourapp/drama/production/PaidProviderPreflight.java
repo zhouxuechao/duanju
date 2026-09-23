@@ -40,7 +40,8 @@ public final class PaidProviderPreflight {
     private void voice(JsonNode input){
         ObjectNode line=store.get(DIALOGUE_LINE,required(input,"dialogueLineId"));
         if(!required(line,"spokenText").equals(required(input,"spokenText")))throw failure("STALE_DIALOGUE_JOB","对白发音文本已变化，请重新创建配音任务");
-        ObjectNode profile=store.get(VOICE_PROFILE,required(input,"voiceProfileId"));String voice=text(input,"providerVoiceId"),reference=text(profile,"referenceAudioUrl");
+        if(!input.path("voiceProfile").isObject()||!input.path("voiceState").isObject())throw failure("VOICE_SNAPSHOT_REQUIRED","配音任务缺少冻结的音色与故事时间状态快照");
+        String voice=text(input,"providerVoiceId"),reference=text(input,"referenceAudioUrl");
         if(voice.isBlank()==reference.isBlank())throw failure("VOICE_PROFILE_INVALID","配音必须且只能使用固定音色 ID 或已批准声音参考之一");
     }
     private void lipsync(JsonNode input){

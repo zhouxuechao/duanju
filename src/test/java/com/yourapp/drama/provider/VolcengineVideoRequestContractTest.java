@@ -87,4 +87,12 @@ class VolcengineVideoRequestContractTest {
         generator.submit(new VideoGenerator.VideoRequest("continuous action",null,List.of(),Map.of("duration",8)));
         assertThat(captured.get().path("duration").asInt()).isEqualTo(10);
     }
+    @Test void fastModelAcceptsElevenSecondsAndOnlyTestResolutions(){
+        VideoGenerator.VideoRequest request=new VideoGenerator.VideoRequest("doubao-seedance-2-0-fast-260128","continuous action",null,List.of(),Map.of("duration",11,"resolution","720p"));
+        generator.submit(request);
+        assertThat(captured.get().path("duration").asInt()).isEqualTo(11);
+        assertThat(captured.get().path("resolution").asText()).isEqualTo("720p");
+        assertThatThrownBy(()->generator.requestBodySnapshot(new VideoGenerator.VideoRequest("doubao-seedance-2-0-fast-260128","action",null,List.of(),Map.of("duration",11,"resolution","1080p"))))
+                .isInstanceOf(com.yourapp.drama.model.ProviderException.class).hasMessageContaining("RESOLUTION");
+    }
 }

@@ -31,8 +31,13 @@ drama:
       base-url: ${ARK_BASE_URL:https://ark.cn-beijing.volces.com/api/v3}
       text-model: ${ARK_TEXT_MODEL:}
       director-model: ${ARK_DIRECTOR_MODEL:${ARK_TEXT_MODEL:}}
-      image-model: ${ARK_IMAGE_MODEL:}
-      video-model: ${ARK_VIDEO_MODEL:}
+      image-model: ${ARK_IMAGE_MODEL:doubao-seedream-5-0-260128}
+      image-size: ${ARK_IMAGE_SIZE:2K}
+      video-model: ${ARK_VIDEO_MODEL:doubao-seedance-2-0-fast-260128}
+      video-resolution: ${ARK_VIDEO_RESOLUTION:480p}
+      video-min-duration: ${ARK_VIDEO_MIN_DURATION:4}
+      video-max-duration: ${ARK_VIDEO_MAX_DURATION:15}
+      video-duration-step: ${ARK_VIDEO_DURATION_STEP:1}
       vlm-model: ${ARK_VLM_MODEL:}
       text-api-style: ${ARK_TEXT_API_STYLE:responses}
       director-api-style: ${ARK_DIRECTOR_API_STYLE:${ARK_TEXT_API_STYLE:responses}}

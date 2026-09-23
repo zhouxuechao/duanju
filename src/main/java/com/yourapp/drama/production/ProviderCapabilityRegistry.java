@@ -16,24 +16,43 @@ import static com.yourapp.drama.workflow.Documents.obj;
 /** Capabilities are restricted to parameters implemented by the current adapters. */
 @Component
 public class ProviderCapabilityRegistry {
-    public static final String VERSION="volcengine-model-profile-2026-09-21";
+    public static final String VERSION="volcengine-model-profile-2026-09-23";
     public static final String SEEDANCE_20="doubao-seedance-2-0";
     public static final String SEEDANCE_25="doubao-seedance-2-5-260628";
+    public static final String SEEDANCE_20_FAST="doubao-seedance-2-0-fast-260128";
+    public static final String SEEDREAM_50="doubao-seedream-5-0-260128";
     private final String configuredVideoModel;
+    private final String configuredImageModel;
+    private final String defaultVideoResolution;
+    private final String defaultImageSize;
     private final Map<String,VideoModelProfile> verifiedProfiles;
-    public ProviderCapabilityRegistry(){this(SEEDANCE_20);}
-    @Autowired public ProviderCapabilityRegistry(@Value("${drama.provider.volcengine.video-model:doubao-seedance-2-0}") String configuredVideoModel){this.configuredVideoModel=configuredVideoModel;this.verifiedProfiles=Map.of(SEEDANCE_20,build(SEEDANCE_20,false),SEEDANCE_25,build(SEEDANCE_25,true));}
-    public ObjectNode image(){ObjectNode value=obj().put("version",VERSION).put("source","ADAPTER_ALLOWLIST").put("supportsMultipleImages",true).put("supportsRegionEdit",false).put("maxImageRefs",10);value.putArray("supportedRatios").add("9:16").add("16:9").add("1:1");return value;}
+    public ProviderCapabilityRegistry(){this(SEEDANCE_20_FAST,SEEDREAM_50,"480p","2K",4,15,1);}
+    public ProviderCapabilityRegistry(String configuredVideoModel){this(configuredVideoModel,SEEDREAM_50,"480p","2K",4,15,1);}
+    @Autowired public ProviderCapabilityRegistry(@Value("${drama.provider.volcengine.video-model:doubao-seedance-2-0-fast-260128}") String configuredVideoModel,
+        @Value("${drama.provider.volcengine.image-model:doubao-seedream-5-0-260128}") String configuredImageModel,
+        @Value("${drama.provider.volcengine.video-resolution:480p}") String defaultVideoResolution,
+        @Value("${drama.provider.volcengine.image-size:2K}") String defaultImageSize,
+        @Value("${drama.provider.volcengine.video-min-duration:4}") int minDuration,
+        @Value("${drama.provider.volcengine.video-max-duration:15}") int maxDuration,
+        @Value("${drama.provider.volcengine.video-duration-step:1}") int durationStep){
+        this.configuredVideoModel=blank(configuredVideoModel,SEEDANCE_20_FAST);this.configuredImageModel=blank(configuredImageModel,SEEDREAM_50);this.defaultVideoResolution=blank(defaultVideoResolution,"480p");this.defaultImageSize=blank(defaultImageSize,"2K");
+        this.verifiedProfiles=Map.of(SEEDANCE_20,buildLegacy(SEEDANCE_20,false),SEEDANCE_25,buildLegacy(SEEDANCE_25,true),SEEDANCE_20_FAST,buildFast(minDuration,maxDuration,durationStep));
+    }
+    public ObjectNode image(){ObjectNode value=obj().put("version",VERSION).put("modelId",configuredImageModel).put("modelFamily","SEEDREAM_5_0").put("profileVersion","seedream-5.0-profile-v1").put("verificationStatus","STATIC_UNVERIFIED").put("source","MODEL_PROFILE").put("defaultSize",defaultImageSize).put("supportsMultipleImages",true).put("supportsRegionEdit",false).put("maxImageRefs",10);value.putArray("supportedRatios").add("9:16").add("16:9").add("1:1");return value;}
     public ObjectNode video(){return profile(configuredVideoModel).toJson();}
     public ObjectNode video(String modelId){return profile(modelId).toJson();}
     public VideoModelProfile profile(String modelId){
-        String fallback=configuredVideoModel==null||configuredVideoModel.isBlank()?SEEDANCE_20:configuredVideoModel.trim();
+        String fallback=configuredVideoModel;
         String id=modelId==null||modelId.isBlank()?fallback:modelId.trim();
         VideoModelProfile profile=verifiedProfiles.get(id);
         if(profile==null)throw new IllegalArgumentException("UNVERIFIED_PROVIDER_MODEL: no explicit capability profile for "+id);
         return profile;
     }
-    private VideoModelProfile build(String id,boolean seedance25){
+    public String configuredVideoModel(){return configuredVideoModel;}
+    public String configuredImageModel(){return configuredImageModel;}
+    public String defaultVideoResolution(){return defaultVideoResolution;}
+    public String defaultImageSize(){return defaultImageSize;}
+    private VideoModelProfile buildLegacy(String id,boolean seedance25){
         var hard=seedance25?new VideoModelProfile.ReferenceLimits(30,10,10,50):new VideoModelProfile.ReferenceLimits(1,1,1,3);
         var recommended=seedance25?new VideoModelProfile.ReferenceLimits(8,5,5,18):new VideoModelProfile.ReferenceLimits(1,1,1,2);
         Set<VideoTaskType> tasks=seedance25?Set.of(VideoTaskType.REFERENCE_GENERATE,VideoTaskType.FIRST_FRAME_GENERATE,VideoTaskType.FIRST_LAST_FRAME_GENERATE,VideoTaskType.KEYFRAME_GENERATE,VideoTaskType.STORYBOARD_GUIDED):Set.of(VideoTaskType.REFERENCE_GENERATE,VideoTaskType.FIRST_FRAME_GENERATE,VideoTaskType.FIRST_LAST_FRAME_GENERATE);
@@ -43,7 +62,15 @@ public class ProviderCapabilityRegistry {
         String taskFingerprint=tasks.stream().map(Enum::name).sorted().reduce((a,b)->a+","+b).orElse("");
         String fingerprint=sha256(id+"|"+version+"|"+hard+"|"+recommended+"|"+maxVideoSeconds+"|"+maxAudioSeconds+"|"+outputFormats+"|"+taskFingerprint);
         return new VideoModelProfile(id,family,version,fingerprint,true,true,true,true,true,seedance25,seedance25,seedance25,seedance25,seedance25,seedance25,hard,recommended,
-                maxVideoSeconds,maxAudioSeconds,seedance25?List.of(5,10,15,30):List.of(4,8,12),seedance25?List.of("adaptive","16:9","9:16","1:1","4:3","3:4","21:9"):List.of("16:9","9:16","1:1"),List.of("480p","720p","1080p"),outputFormats,tasks);
+                maxVideoSeconds,maxAudioSeconds,"ENUM",0,0,0,seedance25?List.of(5,10,15,30):List.of(4,8,12),seedance25?List.of("adaptive","16:9","9:16","1:1","4:3","3:4","21:9"):List.of("16:9","9:16","1:1"),List.of("480p","720p","1080p"),outputFormats,tasks);
     }
+    private VideoModelProfile buildFast(int min,int max,int step){
+        if(min<1||max<min||step<1)throw new IllegalArgumentException("Fast 模型时长范围配置无效");
+        var hard=new VideoModelProfile.ReferenceLimits(30,10,10,50);var recommended=new VideoModelProfile.ReferenceLimits(8,5,5,18);
+        Set<VideoTaskType> tasks=Set.of(VideoTaskType.REFERENCE_GENERATE,VideoTaskType.FIRST_FRAME_GENERATE,VideoTaskType.FIRST_LAST_FRAME_GENERATE,VideoTaskType.KEYFRAME_GENERATE,VideoTaskType.STORYBOARD_GUIDED);
+        String version="seedance-2.0-fast-profile-v1",fingerprint=sha256(SEEDANCE_20_FAST+"|"+version+"|"+min+"|"+max+"|"+step+"|480p,720p|"+tasks);
+        return new VideoModelProfile(SEEDANCE_20_FAST,"SEEDANCE_2_0_FAST",version,fingerprint,true,true,true,true,true,true,true,true,true,true,true,hard,recommended,30,30,"RANGE",min,max,step,List.of(),List.of("adaptive","16:9","9:16","1:1","4:3","3:4","21:9"),List.of("480p","720p"),List.of("mp4"),tasks);
+    }
+    private static String blank(String value,String fallback){return value==null||value.isBlank()?fallback:value.trim();}
     private String sha256(String value){try{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));}catch(Exception e){throw new IllegalStateException(e);}}
 }

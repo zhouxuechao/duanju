@@ -77,12 +77,21 @@ class VolcengineAdaptersTest {
         ArkHttpClient client=new ArkHttpClient(mapper,properties);ImageGenerator images=new VolcengineImageGenerator(client,properties);VideoGenerator videos=new VolcengineVideoGenerator(client,properties);
         ImageGenerator.ImageResult image=images.generate(new ImageGenerator.ImageRequest("稳定人物起始姿势",List.of("https://media.example.com/actor.png"),Map.of("seed",42)));
         assertThat(image.providerUrl()).isEqualTo(SIGNED);assertThat(imageBody.get().path("model").asText()).isEqualTo("image-configured");
-        assertThat(imageBody.get().has("sequential_image_generation")).isFalse();
+        assertThat(imageBody.get().path("sequential_image_generation").asText()).isEqualTo("disabled");
         VideoGenerator.Submission task=videos.submit(new VideoGenerator.VideoRequest("总时长3秒，人物转头一次",image.providerUrl(),List.of(),Map.of("duration",3,"ratio","9:16")));
         assertThat(task.taskId()).isEqualTo("task-123");JsonNode content=videoBody.get().path("content");assertThat(content.get(1).path("image_url").path("url").asText()).isEqualTo(SIGNED);assertThat(videoBody.get().toString()).doesNotContain("archive");
         assertThat(videoBody.get().path("duration").asInt()).isEqualTo(5);
         assertThat(videoBody.get().has("ratio")).as("I2V follows the accepted first frame geometry").isFalse();
         assertThat(videos.poll(task.taskId()).providerUrl()).contains("sig=x%2By");
+    }
+    @Test void defaultPropertiesUseTheTestModelsAndKeepImageAndVideoParametersSeparate(){
+        VolcengineProperties defaults=new VolcengineProperties();
+        assertThat(defaults.getImageModel()).isEqualTo(ProviderCapabilityRegistry.SEEDREAM_50);
+        assertThat(defaults.getVideoModel()).isEqualTo(ProviderCapabilityRegistry.SEEDANCE_20_FAST);
+        assertThat(defaults.getVideoResolution()).isEqualTo("480p");
+        assertThat(defaults.getImageSize()).isEqualTo("2K");
+        var image=new VolcengineImageGenerator(new ArkHttpClient(mapper,properties),properties).requestBodySnapshot(new ImageGenerator.ImageRequest(ProviderCapabilityRegistry.SEEDREAM_50,"测试",List.of(),Map.of()));
+        assertThat(image).containsEntry("size",properties.getImageSize()).doesNotContainKey("resolution");
     }
     @Test void rejectsReservedOverridesAndOnlyCancelsQueuedTasks(){
         ArkHttpClient client=new ArkHttpClient(mapper,properties);VideoGenerator videos=new VolcengineVideoGenerator(client,properties);

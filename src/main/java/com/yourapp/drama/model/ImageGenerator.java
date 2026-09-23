@@ -7,7 +7,8 @@ import java.util.Map;
 public interface ImageGenerator {
     ImageResult generate(ImageRequest request);
 
-    record ImageRequest(String prompt, List<String> referenceImageUrls, Map<String, Object> options) {
+    record ImageRequest(String modelId,String prompt, List<String> referenceImageUrls, Map<String, Object> options) {
+        public ImageRequest(String prompt,List<String> referenceImageUrls,Map<String,Object> options){this(null,prompt,referenceImageUrls,options);}
         public ImageRequest {
             referenceImageUrls = referenceImageUrls == null ? List.of() : List.copyOf(referenceImageUrls);
             options = options == null ? Map.of() : Map.copyOf(options);

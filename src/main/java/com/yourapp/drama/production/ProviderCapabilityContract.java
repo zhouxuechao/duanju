@@ -18,6 +18,10 @@ public final class ProviderCapabilityContract {
         catch (RuntimeException error) { throw invalid("checkedAt must be an ISO-8601 instant"); }
         JsonNode expected = profile.toJson();
         requireEqual(evidence, expected, "supportedDurations");
+        requireEqual(evidence, expected, "durationMode");
+        requireEqual(evidence, expected, "minDuration");
+        requireEqual(evidence, expected, "maxDuration");
+        requireEqual(evidence, expected, "durationStep");
         requireEqual(evidence, expected, "supportedResolutions");
         requireEqual(evidence, expected, "supportedRatios");
         requireEqual(evidence, expected, "supportedTaskTypes");
@@ -28,7 +32,7 @@ public final class ProviderCapabilityContract {
         ObjectNode snapshot = obj().put("provider", "VOLCENGINE").put("model", profile.modelId())
                 .put("checkedAt", required(evidence, "checkedAt")).put("verificationStatus", "LIVE_VERIFIED")
                 .put("profileVersion", profile.profileVersion()).put("capabilityFingerprint", profile.capabilityFingerprint());
-        for (String field : List.of("supportedDurations", "supportedResolutions", "supportedRatios", "supportedTaskTypes")) snapshot.set(field, expected.path(field).deepCopy());
+        for (String field : List.of("supportedDurations", "durationMode", "minDuration", "maxDuration", "durationStep", "supportedResolutions", "supportedRatios", "supportedTaskTypes")) snapshot.set(field, expected.path(field).deepCopy());
         snapshot.set("referenceLimits", expected.path("hardLimits").deepCopy());
         snapshot.set("providerRequestIds", evidence.path("providerRequestIds").deepCopy());
         return snapshot;

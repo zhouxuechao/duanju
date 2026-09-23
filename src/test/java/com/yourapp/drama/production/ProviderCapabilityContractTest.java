@@ -26,6 +26,7 @@ class ProviderCapabilityContractTest {
                 .put("checkedAt", Instant.parse("2026-09-23T00:00:00Z").toString())
                 .put("evidenceSource", "LIVE_CANARY");
         evidence.set("supportedDurations", profile.toJson().path("supportedDurations").deepCopy());
+        for(String field:java.util.List.of("durationMode","minDuration","maxDuration","durationStep"))evidence.set(field,profile.toJson().path(field).deepCopy());
         evidence.set("supportedResolutions", profile.toJson().path("supportedResolutions").deepCopy());
         evidence.set("supportedRatios", profile.toJson().path("supportedRatios").deepCopy());
         evidence.set("referenceLimits", profile.toJson().path("hardLimits").deepCopy());

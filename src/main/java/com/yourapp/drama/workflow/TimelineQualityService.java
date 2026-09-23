@@ -24,6 +24,7 @@ public class TimelineQualityService {
         ObjectNode timeline=store.getForUpdate(TIMELINE,timelineId);long contentRevision=timeline.path("contentRevision").asLong(1);
         ArrayNode failures=JsonNodeFactory.instance.arrayNode(),details=JsonNodeFactory.instance.arrayNode();
         List<ObjectNode> items=store.list(TIMELINE_ITEM,project(timeline),timelineId),videos=items.stream().filter(i->"VIDEO".equals(text(i,"track"))).sorted(Comparator.comparingLong(i->i.path("startMs").asLong())).toList();
+        if(items.stream().anyMatch(item->item.path("timelineRelinkRequired").asBoolean()))failure(failures,details,"TIMELINE_RELINK_REQUIRED","旧时间线片段无法安全绑定到唯一画面，请人工重新选择视频片段");
         ArrayNode editingItems=JsonNodeFactory.instance.arrayNode();items.forEach(editingItems::add);List<ProductionModels.Risk> editingRisks=new ArrayList<>();EditingEngine.validate(editingItems,editingRisks);for(ProductionModels.Risk risk:editingRisks)if("ERROR".equals(risk.severity()))failure(failures,details,risk.code(),risk.message());
         if(videos.isEmpty())failure(failures,details,"VIDEO_REQUIRED","时间线没有视频轨");
         long cursor=0;ObjectNode previousShot=null,previousTake=null;int videoIndex=0;

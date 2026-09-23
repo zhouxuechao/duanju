@@ -56,7 +56,7 @@ class LiveProviderCanaryIT {
         String imagePrompt="竖屏真人短剧连续性测试首帧。中国北方村庄旧祠堂前的青石院，夜晚冷月光；一位约六十五岁的中国老妇人，短灰发，深蓝色棉袄、黑布裤、黑布鞋，站在木门右侧半米处；她右手握住一只带缺口的黄铜手摇铃木柄，铃口垂直向下，左手自然下垂。门与供桌位于相对墙面，门上没有牌位、匾额或装饰。写实真人，人物全身可见，固定身份、服装、道具结构与空间关系，无文字。";
         ImageGenerator.ImageResult image;
         try {
-            image=new VolcengineImageGenerator(client,properties).generate(new ImageGenerator.ImageRequest(imagePrompt,List.of(),Map.of("watermark",false,"size","1080x1920")));
+            image=new VolcengineImageGenerator(client,properties).generate(new ImageGenerator.ImageRequest(imagePrompt,List.of(),Map.of("watermark",false,"size","2K")));
             budget.settle("KEYFRAME",imageBudget,false);
         } catch(RuntimeException failure) { budget.settle("KEYFRAME",imageBudget,true);throw failure; }
         assertThat(image.providerUrl()).startsWith("https://");
@@ -129,7 +129,7 @@ class LiveProviderCanaryIT {
 
     private ObjectNode shot(ObjectMapper mapper,int number,String route,String prompt,JsonNode requestBody,VideoGenerator.Submission submission,VideoGenerator.VideoTask task,String firstFrame,boolean referenceImage,boolean referenceVideo){ObjectNode shot=mapper.createObjectNode().put("shotNo",number).put("videoRequestRoute",route).put("prompt",prompt).put("taskId",safe(submission.taskId())).put("submitRequestId",safe(submission.requestId())).put("pollRequestId",safe(task.requestId())).put("providerUrl",task.providerUrl()).put("first_frame",firstFrame==null?"":firstFrame).put("reference_image",referenceImage).put("reference_video",referenceVideo);shot.set("requestBody",requestBody.deepCopy());return shot;}
     private ObjectNode budgetInput(ObjectMapper mapper,String run,double cost){return mapper.createObjectNode().put("testRun",true).put("testRunId",run).put("estimatedCost",cost);}
-    private Map<String,Object> videoOptions(){return Map.of("duration",4,"resolution","720p","watermark",false,"generate_audio",false,"return_last_frame",true);}
+    private Map<String,Object> videoOptions(){return Map.of("duration",4,"resolution","480p","watermark",false,"generate_audio",false,"return_last_frame",true);}
     private void archive(String url,Path path) throws Exception {HttpRequest request=HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofMinutes(5)).GET().build();HttpResponse<Path> response=HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).build().send(request,HttpResponse.BodyHandlers.ofFile(path));assertThat(response.statusCode()).isBetween(200,299);}
     private VideoGenerator.VideoTask waitFor(VideoGenerator generator,String taskId) throws InterruptedException {Instant deadline=Instant.now().plus(Duration.ofMinutes(12));while(Instant.now().isBefore(deadline)){VideoGenerator.VideoTask task=generator.poll(taskId);if(task.status()==VideoGenerator.Status.SUCCEEDED)return task;if(task.status()==VideoGenerator.Status.FAILED||task.status()==VideoGenerator.Status.CANCELLED||task.status()==VideoGenerator.Status.EXPIRED)fail("视频 Canary 失败；taskId="+taskId+" requestId="+safe(task.requestId())+" code="+safe(task.errorCode())+" message="+safe(task.errorMessage()));Thread.sleep(5_000);}return fail("视频 Canary 超时；taskId="+taskId+"，请核对服务商记录，禁止重复提交");}
     private String required(String name){String value=env(name);if(value==null||value.isBlank())throw new IllegalStateException("缺少 "+name);return value;}
