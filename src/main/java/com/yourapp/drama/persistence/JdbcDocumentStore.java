@@ -67,6 +67,8 @@ public class JdbcDocumentStore implements DocumentStore {
         m.get(NOVEL_STORY_ARC).addAll(List.of(col("startChapter","int"),col("endChapter","int"),col("analysisRevision","int")));
         m.get(NOVEL_STORY_GRAPH).addAll(List.of(col("analysisRevision","int"),col("profile","text")));
         m.get(NOVEL_ANALYSIS_JOB).addAll(List.of(col("novelId","uuid"),col("chapterId","uuid"),col("status","text"),col("idempotencyKey","text"),col("contentHash","text"),col("profile","text"),col("analysisVersion","int")));
+        m.get(ADAPTATION_PLAN).addAll(List.of(col("novelId","uuid"),col("analysisRevision","int"),col("version","int"),col("status","text"),col("adaptationStyle","text")));
+        m.get(EPISODE_ADAPTATION_PLAN).addAll(List.of(col("episodeNo","int"),col("status","text")));
         m.get(PROMPT_VERSION).addAll(List.of(col("shotId","uuid"),col("version","int"),col("promptTemplateId","uuid")));
         m.get(STORYBOARD).add(col("version","int"));
         m.get(DIALOGUE_LINE).addAll(List.of(col("characterId","uuid"),col("semanticText","text"),col("spokenText","text"),col("subtitleText","text")));
@@ -97,7 +99,16 @@ public class JdbcDocumentStore implements DocumentStore {
         if(projectId!=null) { sql.append(" AND project_id = ?"); args.add(uuid(projectId)); }
         if(parentId!=null) { sql.append(" AND parent_id = ?"); args.add(uuid(parentId)); }
         sql.append(" ORDER BY created_at, id");
-        return jdbc.query(sql.toString(),(rs,n)->read(rs.getString(1)),args.toArray());
+        List<ObjectNode> result=jdbc.query(sql.toString(),(rs,n)->read(rs.getString(1)),args.toArray());
+        Comparator<ObjectNode> domainOrder=switch(kind){
+            case NOVEL_CHAPTER -> Comparator.comparingDouble(value->value.path("displayOrder").asDouble(value.path("chapterNo").asDouble()));
+            case NOVEL_CHUNK -> Comparator.comparingInt(value->value.path("chunkNo").asInt());
+            case EPISODE_ADAPTATION_PLAN -> Comparator.comparingInt(value->value.path("episodeNo").asInt());
+            case CHARACTER_STATE,LOCATION_STATE,PROP_STATE,VOICE_STATE -> Comparator.comparingDouble(value->value.path("validFromStoryTime").asDouble());
+            default -> null;
+        };
+        if(domainOrder!=null)result.sort(domainOrder.thenComparing(value->value.path("id").asText()));
+        return result;
     }
     @Override public ObjectNode create(ResourceKind kind,ObjectNode input) {
         return transaction(()->{

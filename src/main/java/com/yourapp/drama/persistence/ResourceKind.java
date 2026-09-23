@@ -30,6 +30,8 @@ public enum ResourceKind {
     NOVEL_STORY_ARC("novel_story_arc", "novel-story-arcs", NOVEL_SOURCE, "novelId"),
     NOVEL_STORY_GRAPH("novel_story_graph", "novel-story-graphs", NOVEL_SOURCE, "novelId"),
     NOVEL_ANALYSIS_JOB("novel_analysis_job", "novel-analysis-jobs", NOVEL_CHUNK, "chunkId"),
+    ADAPTATION_PLAN("adaptation_plan", "adaptation-plans", null, null),
+    EPISODE_ADAPTATION_PLAN("episode_adaptation_plan", "episode-adaptation-plans", ADAPTATION_PLAN, "planId"),
     SCENE("scene", "scenes", EPISODE, "episodeId"),
     BEAT("beat", "beats", SCENE, "sceneId"),
     SHOT("shot", "shots", SCENE, "sceneId"),
@@ -87,7 +89,7 @@ public enum ResourceKind {
             || this == CHARACTER_DEFINITION_VERSION || this == LOCATION_DEFINITION_VERSION || this == PROP_DEFINITION_VERSION
             || this == DEPENDENCY_EDGE || this == REVALIDATION_MARKER || this == PRODUCTION_INPUT_SNAPSHOT || this == PRODUCTION_SCRIPT_SNAPSHOT
             || this == IMPACT_PLAN || this == REBUILD_PLAN || this == NOVEL_CHUNK_ANALYSIS || this == NOVEL_CHAPTER_ANALYSIS
-            || this == NOVEL_STORY_ARC || this == NOVEL_STORY_GRAPH; }
+            || this == NOVEL_STORY_ARC || this == NOVEL_STORY_GRAPH || this == EPISODE_ADAPTATION_PLAN; }
     public static ResourceKind fromPath(String value) {
         String normalized = value.toLowerCase(Locale.ROOT).replace('_', '-');
         return Arrays.stream(values()).filter(k -> k.path.equals(normalized)
