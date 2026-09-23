@@ -1,3 +1,6 @@
+param(
+    [switch]$SkipPackage
+)
 $ErrorActionPreference='Stop'
 Set-Location -LiteralPath (Split-Path -Parent $PSScriptRoot)
 $taskIsolationNames=@('DRAMA_PROVIDER_MODE','VISUAL_REVIEWER','RUN_LIVE_PROVIDER_CANARY','RUN_LIVE_PIPELINE_CANARY','CANARY_RUNNER_PREFLIGHT_OK','CANARY_PIPELINE_RUNNER_PREFLIGHT_OK')
@@ -24,7 +27,11 @@ try {
         & npm.cmd run build
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     } finally { Pop-Location }
-    & mvn -B -ntp verify
+    if($SkipPackage){
+        & mvn -B -ntp verify '-Dspring-boot.repackage.skip=true'
+    } else {
+        & mvn -B -ntp verify
+    }
     $taskExitCode=$LASTEXITCODE
 } finally {
     foreach($taskName in $taskIsolationNames){[Environment]::SetEnvironmentVariable($taskName,$taskOriginalEnvironment[$taskName],'Process')}

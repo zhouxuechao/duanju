@@ -66,7 +66,7 @@ if(-not (Test-Path -LiteralPath $ffprobe)){throw 'ffprobe is missing. Run the no
 $env:FFPROBE_PATH=$ffprobe
 Push-Location $root
 try{
-  & (Join-Path $PSScriptRoot 'test.ps1');if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+  & (Join-Path $PSScriptRoot 'test.ps1') -SkipPackage;if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
   if($EnvFile){Import-CanaryEnvironment -Path $EnvFile}
   $env:CANARY_GENERATION_PROFILE='TEST'
   if(-not $env:ARK_IMAGE_MODEL){$env:ARK_IMAGE_MODEL='doubao-seedream-5-0-260128'}
