@@ -40,7 +40,8 @@ public class TestBudgetGuard {
         String run=run(input);double cost=input.path("estimatedCost").asDouble(0);
         if(!Double.isFinite(cost)||cost<0)throw new WorkflowException("TEST_BUDGET_INVALID","真实 Canary 预计成本必须是非负有限数值");
         return transaction(()->{Reservation next=load(run).reserve(category,cost);
-            if(next.reservedCost+next.actualCost>property("TEST_MAX_COST_CNY",5d)||next.llm>property("TEST_MAX_REAL_LLM_REQUESTS",20)||next.images>property("TEST_MAX_REAL_IMAGE_REQUESTS",2)||next.videos>property("TEST_MAX_REAL_VIDEO_REQUESTS",2)||next.tts>property("TEST_MAX_REAL_AUDIO_REQUESTS",5)||next.lipsync>property("TEST_MAX_REAL_LIPSYNC_REQUESTS",2))throw new WorkflowException("TEST_BUDGET_EXCEEDED","真实 Canary 预算或请求次数已达到上限，禁止继续提交付费请求");
+            int lipsyncLimit="PIPELINE".equalsIgnoreCase(input.path("testPhase").asText())?0:property("TEST_MAX_REAL_LIPSYNC_REQUESTS",2);
+            if(next.reservedCost+next.actualCost>limit(input,"TEST_MAX_COST_CNY",5d)||next.llm>limit(input,"TEST_MAX_REAL_LLM_REQUESTS",20)||next.vlm>limit(input,"TEST_MAX_REAL_VLM_REQUESTS",0)||next.images>limit(input,"TEST_MAX_REAL_IMAGE_REQUESTS",2)||next.videos>limit(input,"TEST_MAX_REAL_VIDEO_REQUESTS",2)||next.tts>limit(input,"TEST_MAX_REAL_AUDIO_REQUESTS",5)||next.lipsync>lipsyncLimit)throw new WorkflowException("TEST_BUDGET_EXCEEDED","真实 Canary 预算或请求次数已达到上限，禁止继续提交付费请求");
             save(run,next);return true;});
     }
 
@@ -68,20 +69,27 @@ public class TestBudgetGuard {
         if(changed==0)try{jdbc.update("INSERT INTO \"test_budget_reservation\" (run_id,document,updated_at) VALUES (?,?,?)",run,document,OffsetDateTime.now(ZoneOffset.UTC));}
         catch(DuplicateKeyException race){jdbc.update("UPDATE \"test_budget_reservation\" SET document=?,updated_at=? WHERE run_id=?",document,OffsetDateTime.now(ZoneOffset.UTC),run);}
     }
-    private ObjectNode document(Reservation value){return obj().put("plannedCost",value.plannedCost).put("reservedCost",value.reservedCost).put("actualCost",value.actualCost).put("wasteCost",value.wasteCost).put("llm",value.llm).put("image",value.images).put("video",value.videos).put("tts",value.tts).put("lipsync",value.lipsync);}
-    private Reservation fromDocument(String json){try{JsonNode value=mapper.readTree(json);return new Reservation(value.path("plannedCost").asDouble(),value.path("reservedCost").asDouble(),value.path("actualCost").asDouble(),value.path("wasteCost").asDouble(),value.path("llm").asInt(),value.path("image").asInt(),value.path("video").asInt(),value.path("tts").asInt(),value.path("lipsync").asInt());}catch(Exception error){throw new IllegalStateException("测试预算记录损坏",error);}}
+    private ObjectNode document(Reservation value){return obj().put("plannedCost",value.plannedCost).put("reservedCost",value.reservedCost).put("actualCost",value.actualCost).put("wasteCost",value.wasteCost).put("llm",value.llm).put("vlm",value.vlm).put("image",value.images).put("video",value.videos).put("tts",value.tts).put("lipsync",value.lipsync);}
+    private Reservation fromDocument(String json){try{JsonNode value=mapper.readTree(json);return new Reservation(value.path("plannedCost").asDouble(),value.path("reservedCost").asDouble(),value.path("actualCost").asDouble(),value.path("wasteCost").asDouble(),value.path("llm").asInt(),value.path("vlm").asInt(),value.path("image").asInt(),value.path("video").asInt(),value.path("tts").asInt(),value.path("lipsync").asInt());}catch(Exception error){throw new IllegalStateException("测试预算记录损坏",error);}}
 
     private boolean guarded(JsonNode input){return (input.path("testRun").asBoolean(false)||environment.getProperty("DRAMA_TEST_RUN",Boolean.class,false))&&!"mock".equalsIgnoreCase(environment.getProperty("drama.provider.mode","mock"));}
     private String run(JsonNode input){return input.path("testRunId").asText(environment.getProperty("DRAMA_TEST_RUN_ID","default-canary"));}
-    private String category(String type){if(Set.of("STORY","PREMISE","CORE","OUTLINE_BATCH","EPISODE_SCRIPT","STORY_QA","DIRECTOR_PLAN","SHOT_DETAIL").contains(type))return "LLM";if(Set.of("ASSET_IMAGE","STORYBOARD","KEYFRAME").contains(type))return "IMAGE";if("VIDEO".equals(type))return "VIDEO";if("TTS".equals(type))return "TTS";if("LIPSYNC".equals(type))return "LIPSYNC";return "LOCAL";}
+    private String category(String type){if(Set.of("STORY","PREMISE","CORE","OUTLINE_BATCH","EPISODE_SCRIPT","STORY_QA","DIRECTOR_PLAN","SHOT_DETAIL").contains(type))return "LLM";if(Set.of("KEYFRAME_QC","VIDEO_QC").contains(type))return "VLM";if(Set.of("ASSET_IMAGE","STORYBOARD","KEYFRAME").contains(type))return "IMAGE";if("VIDEO".equals(type))return "VIDEO";if("TTS".equals(type))return "TTS";if("LIPSYNC".equals(type))return "LIPSYNC";return "LOCAL";}
     private int property(String key,int fallback){return environment.getProperty(key,Integer.class,fallback);}
     private double property(String key,double fallback){return environment.getProperty(key,Double.class,fallback);}
 
-    private record Reservation(double plannedCost,double reservedCost,double actualCost,double wasteCost,int llm,int images,int videos,int tts,int lipsync){
-        static Reservation empty(){return new Reservation(0,0,0,0,0,0,0,0,0);}
+    private int limit(JsonNode input,String key,int fallback){double value=limit(input,key,(double)fallback);return value>Integer.MAX_VALUE?-1:(int)value;}
+    private double limit(JsonNode input,String key,double fallback){
+        if(!"PIPELINE".equalsIgnoreCase(input.path("testPhase").asText()))return property(key,fallback);
+        String name="PIPELINE_"+key,raw=environment.getProperty(name);if(raw==null||raw.isBlank())throw new WorkflowException("TEST_BUDGET_INVALID",name+" 缺失，禁止 Pipeline Canary 提交付费请求");
+        try{double value=Double.parseDouble(raw);if(!Double.isFinite(value)||value<0)throw new NumberFormatException();return value;}catch(NumberFormatException error){throw new WorkflowException("TEST_BUDGET_INVALID",name+" 必须是非负有限数值");}
+    }
+
+    private record Reservation(double plannedCost,double reservedCost,double actualCost,double wasteCost,int llm,int vlm,int images,int videos,int tts,int lipsync){
+        static Reservation empty(){return new Reservation(0,0,0,0,0,0,0,0,0,0);}
         Reservation reserve(String category,double cost){return change(category,1,plannedCost+cost,reservedCost+cost,actualCost,wasteCost);}
         Reservation release(String category,double cost){return change(category,-1,plannedCost,Math.max(0,reservedCost-cost),actualCost,wasteCost);}
-        Reservation settle(double cost,boolean wasted){return new Reservation(plannedCost,Math.max(0,reservedCost-cost),actualCost+cost,wasteCost+(wasted?cost:0),llm,images,videos,tts,lipsync);}
-        private Reservation change(String category,int delta,double planned,double reserved,double actual,double waste){return new Reservation(planned,reserved,actual,waste,llm+("LLM".equals(category)?delta:0),images+("IMAGE".equals(category)?delta:0),videos+("VIDEO".equals(category)?delta:0),tts+("TTS".equals(category)?delta:0),lipsync+("LIPSYNC".equals(category)?delta:0));}
+        Reservation settle(double cost,boolean wasted){return new Reservation(plannedCost,Math.max(0,reservedCost-cost),actualCost+cost,wasteCost+(wasted?cost:0),llm,vlm,images,videos,tts,lipsync);}
+        private Reservation change(String category,int delta,double planned,double reserved,double actual,double waste){return new Reservation(planned,reserved,actual,waste,llm+("LLM".equals(category)?delta:0),vlm+("VLM".equals(category)?delta:0),images+("IMAGE".equals(category)?delta:0),videos+("VIDEO".equals(category)?delta:0),tts+("TTS".equals(category)?delta:0),lipsync+("LIPSYNC".equals(category)?delta:0));}
     }
 }
