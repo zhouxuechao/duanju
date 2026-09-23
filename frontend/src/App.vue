@@ -3,9 +3,10 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import StoryReview from './components/StoryReview.vue'
 import AssetViews from './components/AssetViews.vue'
 import ScriptWorkspace from './components/ScriptWorkspace.vue'
+import NovelUpload from './components/NovelUpload.vue'
 import { canAcceptObservedDeviation, canResumePipeline, creativeQaCanRelease, directorStageForScene, keyframePrimaryAction, pipelineStageLabel, productionDashboard, reconciliationChoices, storyboardPrimaryAction, taskRuntimeLabel, timelinePreviewLabel } from './ui-policy.js'
 
-const tabs=[['create','创作'],['review','审查台'],['script','剧本工作台'],['assets','素材多视图'],['director','导演台'],['edit','剪辑台'],['health','系统自检']]
+const tabs=[['create','创作'],['novel','小说导入'],['review','审查台'],['script','剧本工作台'],['assets','素材多视图'],['director','导演台'],['edit','剪辑台'],['health','系统自检']]
 const active=ref('create'), system=ref(null), projects=ref([]), projectId=ref(localStorage.getItem('drama.projectId')||''), workspace=ref(null), selectedShotId=ref(''), busy=ref(false), toast=ref(''), error=ref(''), editingStory=ref(false), preflight=ref(null), pipelineRun=ref(null), qualityMetrics=ref(null), regression=ref(null)
 const debugMode=new URLSearchParams(window.location.search).get('debug')==='1'
 const soundPlans=reactive({}), soundItems=reactive({}), voiceDrafts=reactive({}), previewLoad=reactive({}), reviewedEndStates=reactive({}), finalReviewDrafts=reactive({}), videoPreviews=reactive({})
@@ -109,6 +110,8 @@ onBeforeUnmount(()=>{events?.close();clearTimeout(refreshTimer)})
     <section v-if="project" class="panel production-dashboard"><h3>制作进度</h3><div class="production-stages"><div v-for="stage in dashboard.stages" :key="stage.key"><span>{{dashboardLabels[stage.key]}}</span><b>{{stage.done}} / {{stage.total}}</b><progress :value="stage.progress" max="100"/></div></div><div v-if="dashboard.blockers.length" class="dashboard-blockers"><b>当前阻塞</b><p v-for="blocker in dashboard.blockers" :key="blocker.jobId">{{blocker.type}} · {{blocker.status}} · {{blocker.reason}} · 任务 {{blocker.jobId}}</p></div><p v-else class="muted">当前没有失败、状态未知或等待人工处理的任务。</p></section>
     <section v-if="jobs.length||archivedLegacyJobs.length" class="panel jobs"><h3>最近任务</h3><div v-for="job in jobs.slice(0,6)" :key="job.id" class="job"><span>{{job.type}}</span><i :class="job.status.toLowerCase()">{{jobLabel(job.status)}}</i><small>{{job.progress||0}}%</small><small class="task-runtime">{{taskRuntimeLabel(job)}}</small><p v-if="job.failureReason" class="job-failure">{{job.failureReason}}<span v-if="job.submissionUncertain||job.reconciliationRequired"> · 请先核对服务商记录，避免重复提交。</span></p><small v-if="providerTrace(job)" class="provider-trace">三方记录：{{providerTrace(job)}}</small><div v-if="reconciliationChoices(job).length" class="button-row"><button v-if="reconciliationChoices(job).includes('CONFIRMED_SUBMITTED')" class="tiny" @click="reconcileJob(job,'CONFIRMED_SUBMITTED')">控制台显示已有任务</button><button v-if="reconciliationChoices(job).includes('CONFIRMED_NOT_SUBMITTED')" class="tiny" @click="reconcileJob(job,'CONFIRMED_NOT_SUBMITTED')">确认没有提交</button><button v-if="reconciliationChoices(job).includes('UNRESOLVED')" class="tiny" @click="reconcileJob(job,'UNRESOLVED')">仍无法确认</button></div></div><p v-if="archivedLegacyJobs.length" class="muted">已归档 {{archivedLegacyJobs.length}} 条旧流程任务，不参与当前生产。</p></section>
   </main>
+
+  <NovelUpload v-else-if="active==='novel'" :project="project" :workspace="workspace" @refresh="refresh" @message="(message, isError) => { (isError ? error = message : toast = message) }" />
 
   <StoryReview v-else-if="active==='review'" :project="project" :workspace="workspace" :busy="busy" @refresh="refresh" @editing="editingStory=$event" @message="(message, isError) => { (isError ? error = message : toast = message) }" />
 

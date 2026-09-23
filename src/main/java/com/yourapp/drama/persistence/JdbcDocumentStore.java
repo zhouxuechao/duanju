@@ -56,6 +56,11 @@ public class JdbcDocumentStore implements DocumentStore {
         m.get(IMPACT_PLAN).addAll(List.of(col("sourceVersionId","uuid"),col("targetVersionId","uuid"),col("impactType","text"),col("changeScope","text")));
         m.get(REBUILD_PLAN).addAll(List.of(col("impactPlanId","uuid"),col("status","text"),col("requiresUserConfirmation","bool")));
         m.get(PLATFORM_REVIEW_ISSUE).addAll(List.of(col("scriptVersionId","uuid"),col("platform","text"),col("reasonCode","text"),col("status","text"),col("resolutionVersionId","uuid")));
+        m.get(NOVEL_UPLOAD_SESSION).addAll(List.of(col("uploadId","uuid"),col("status","text"),col("fileSha256","text"),col("storageKey","text")));
+        m.get(NOVEL_SOURCE).addAll(List.of(col("format","text"),col("fileHash","text"),col("status","text"),col("storageKey","text")));
+        m.get(NOVEL_CHAPTER).addAll(List.of(col("chapterNo","int"),col("contentHash","text"),col("sourceStart","int"),col("sourceEnd","int")));
+        m.get(NOVEL_CHUNK).addAll(List.of(col("novelId","uuid"),col("chunkNo","int"),col("contentHash","text"),col("sourceStart","int"),col("sourceEnd","int")));
+        m.get(SOURCE_REFERENCE).addAll(List.of(col("novelId","uuid"),col("sourceType","text"),col("startOffset","int"),col("endOffset","int"),col("contentHash","text")));
         m.get(PROMPT_VERSION).addAll(List.of(col("shotId","uuid"),col("version","int"),col("promptTemplateId","uuid")));
         m.get(STORYBOARD).add(col("version","int"));
         m.get(DIALOGUE_LINE).addAll(List.of(col("characterId","uuid"),col("semanticText","text"),col("spokenText","text"),col("subtitleText","text")));

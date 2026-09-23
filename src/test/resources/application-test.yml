@@ -14,3 +14,6 @@ drama:
     enabled: false
   storage:
     root: ./target/test-media
+novel:
+  storage:
+    root: ./target/test-novels
