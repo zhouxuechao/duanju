@@ -362,9 +362,14 @@ class HandoffIntegrationTest {
     @Test void imageRequestLocksTheProjectAspectRatio(){
         ObjectNode frame=generateFrame(),job=store.get(GENERATION_JOB,required(frame,"generationJobId"));
         assertThat(job.path("inputSnapshot").path("ratio").asText()).isEqualTo("9:16");
+        assertThat(job.path("inputSnapshot").path("imageQuality").asText()).isEqualTo("2K");
+        assertThat(job.path("inputSnapshot").path("aspectRatioIntent").asText()).isEqualTo("9:16");
+        assertThat(job.path("inputSnapshot").path("providerSize").asText()).isEqualTo("2K");
+        assertThat(job.path("inputSnapshot").path("providerAspectRatioVerified").asBoolean()).isFalse();
         assertThat(job.path("inputSnapshot").path("providerOptions").path("size").asText()).isEqualTo("2K");
         assertThat(job.path("inputSnapshot").path("providerOptions").path("watermark").isBoolean()).isTrue();
         assertThat(job.path("inputSnapshot").path("providerOptions").path("watermark").asBoolean()).isFalse();
+        assertThat(job.path("inputSnapshot").path("providerOptions").has("ratio")).isFalse();
     }
     @Test void newImageRevisionUsesTheLatestFailedVisualReview(){
         ObjectNode frame=generateFrame();
@@ -445,6 +450,20 @@ class HandoffIntegrationTest {
         ObjectNode repair=workflow.repairKeyframe(id(frame),obj().put("requestKey","automatic-safe-retry"));
         assertThat(text(repair,"type")).isEqualTo("KEYFRAME");assertThat(text(repair.path("inputSnapshot"),"regeneratedFromId")).isEqualTo(id(frame));
     }
+    @Test void automaticPromptRebuildKeepsTheSourceImageProfileWhileUsingTheLatestPrompt(){
+        ObjectNode frame=generateFrame(),sourceJob=store.get(GENERATION_JOB,required(frame,"generationJobId"));
+        ObjectNode project=store.get(PROJECT,projectId);store.update(PROJECT,projectId,revision(project),project.deepCopy().put("generationProfile","STANDARD").put("videoResolution","720p"));
+        workflow.review(KEYFRAME,id(frame),obj().put("passed",false).put("notes","提示词遗漏了门的位置").put("failureOrigin","PROMPT_BUILD"));
+
+        ObjectNode repair=workflow.repairKeyframe(id(frame),obj().put("requestKey","automatic-rebuild-original-profile"));
+        JsonNode input=repair.path("inputSnapshot"),source=sourceJob.path("inputSnapshot");
+        assertThat(text(input,"promptMode")).isEqualTo("REBUILD_LATEST");
+        assertThat(text(input,"profileMode")).isEqualTo("ORIGINAL");
+        assertThat(text(input,"generationProfile")).isEqualTo(text(source,"generationProfile"));
+        assertThat(text(input,"modelId")).isEqualTo(text(source,"modelId"));
+        assertThat(text(input,"imageSize")).isEqualTo(text(source,"imageSize"));
+        assertThat(text(repair,"generationProfile")).isEqualTo("TEST");
+    }
     @Test void automaticRepairDoesNotPayForKnownStateErrors(){
         ObjectNode frame=generateFrame();workflow.review(KEYFRAME,id(frame),obj().put("passed",false).put("notes","服装状态错误").put("failureOrigin","STORY_STATE"));
         ObjectNode repair=workflow.repairKeyframe(id(frame),obj());
@@ -514,6 +533,7 @@ class HandoffIntegrationTest {
         ObjectNode frame=generateFrame();workflow.review(KEYFRAME,id(frame),obj().put("passed",true));workflow.lock(KEYFRAME,id(frame),obj().put("generateVideo",false));
         workflow.video(id(frame),obj().put("requestKey","video-vlm-repair-source"));worker.tick();worker.tick();worker.tick();
         ObjectNode take=store.list(VIDEO_TAKE,projectId,shotId).getFirst();
+        ObjectNode project=store.get(PROJECT,projectId);store.update(PROJECT,projectId,revision(project),project.deepCopy().put("generationProfile","STANDARD").put("videoResolution","720p"));
         doAnswer(call->{
             ObjectNode result=(ObjectNode)new FakeVideoQualityReviewer(mapper).review(call.getArgument(0),call.getArgument(1));
             result.set("actionAccuracy",obj().put("pass",false).put("score",25).put("confidence",.97).put("reason","动作方向与剧本相反").put("evidence","采样帧中的手臂运动方向与计划相反"));
@@ -523,6 +543,14 @@ class HandoffIntegrationTest {
         ObjectNode request=obj().put("apply",true).put("requestKey","video-vlm-repair-once");int before=store.list(GENERATION_JOB,projectId,null).size();
         ObjectNode reviewed=automaticVideoReview.review(id(take),request);
         assertThat(text(reviewed.path("automaticRepairJob"),"type")).isEqualTo("VIDEO");
+        JsonNode repairJob=reviewed.path("automaticRepairJob"),repairInput=repairJob.path("inputSnapshot");
+        assertThat(text(repairInput,"regenerationMode")).isEqualTo("REPLAY_ORIGINAL");
+        assertThat(text(repairInput,"sourceVideoTakeId")).isEqualTo(id(take));
+        assertThat(text(repairInput,"generationProfile")).isEqualTo("TEST");
+        assertThat(text(repairInput,"resolution")).isEqualTo("480p");
+        assertThat(text(repairInput,"modelId")).isEqualTo(text(take,"modelId"));
+        assertThat(text(repairJob,"generationProfile")).isEqualTo("TEST");
+        assertThat(text(repairJob,"resolution")).isEqualTo("480p");
         JsonNode retake=reviewed.path("automaticRepairJob").path("inputSnapshot").path("context").path("retake");
         assertThat(retake.path("repairPlan").path("repairDimensions")).extracting(node->node.asText()).containsExactly("ACTION");
         assertThat(retake.path("repairPlan").path("preserveDimensions")).extracting(node->node.asText()).contains("IDENTITY","COSTUME","BACKGROUND","CAMERA");
@@ -532,6 +560,10 @@ class HandoffIntegrationTest {
         assertThat(store.list(GENERATION_JOB,projectId,null)).hasSize(before+1);
         automaticVideoReview.review(id(take),obj().put("apply",true).put("requestKey","video-vlm-repair-same-take-different-client-key"));
         assertThat(store.list(GENERATION_JOB,projectId,null)).hasSize(before+1);
+        when(videos.submit(any())).thenReturn(new VideoGenerator.Submission("video-task-repair","request-repair",false));
+        String repairJobId=id((ObjectNode)repairJob);for(int i=0;i<8&&!"SUCCESS".equals(text(store.get(GENERATION_JOB,repairJobId),"status"));i++)worker.tickProject(projectId);
+        ObjectNode completedRepair=store.get(GENERATION_JOB,repairJobId);assertThat(text(completedRepair,"status")).as(completedRepair.toPrettyString()).isEqualTo("SUCCESS");
+        assertThat(store.list(COST_RECORD,projectId,null).stream().filter(cost->repairJobId.equals(text(cost,"generationJobId"))).toList()).singleElement().satisfies(cost->{assertThat(text(cost,"generationProfile")).isEqualTo("TEST");assertThat(text(cost,"resolution")).isEqualTo("480p");});
     }
     @Test void thirdConsecutiveVideoFailureWithSameCodeEscalatesToHumanWithoutAnotherPaidJob(){
         ObjectNode frame=generateFrame();workflow.review(KEYFRAME,id(frame),obj().put("passed",true));workflow.lock(KEYFRAME,id(frame),obj().put("generateVideo",false));

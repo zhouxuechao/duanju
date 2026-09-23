@@ -35,7 +35,7 @@ public class AutomaticVideoReviewService {
         if(route==VisualQualityPolicy.Decision.AUTO_REGENERATE){
             ObjectNode response=reviewed.deepCopy();
             String repairKey="vlm-video-repair:"+assessmentKey;
-            response.set("automaticRepairJob",workflow.video(required(take,"sourceKeyframeId"),obj().put("requestKey",repairKey)));
+            response.set("automaticRepairJob",workflow.repairVideo(takeId,obj().put("requestKey",repairKey)));
             return response;
         }
         return reviewed;

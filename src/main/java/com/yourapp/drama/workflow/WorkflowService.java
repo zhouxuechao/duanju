@@ -129,8 +129,16 @@ public class WorkflowService {
         if(!Set.of("KEYFRAME","STORYBOARD").contains(type))throw new IllegalArgumentException("图片任务类型无效");
         return store.transaction(()->{
             ObjectNode shot=store.getForUpdate(SHOT,shotId);ObjectNode existing=existingJob(project(shot),type,shotId,body);if(existing!=null)return existing; noActiveGeneration(shotId);
+            String promptMode=imagePromptMode(body),profileMode=imageProfileMode(body);ObjectNode sourceFrame=null;JsonNode sourceInput=MissingNode.getInstance();
+            if(body.hasNonNull("regenerateFromId")){
+                sourceFrame=store.get(KEYFRAME,body.path("regenerateFromId").asText());if(!shotId.equals(text(sourceFrame,"shotId")))throw new IllegalArgumentException("重画来源不属于此镜头");checkReferenceSnapshot(sourceFrame);
+                sourceInput=store.get(GENERATION_JOB,required(sourceFrame,"generationJobId")).path("inputSnapshot");
+            }
+            if(("ORIGINAL".equals(promptMode)||"ORIGINAL".equals(profileMode))&&!sourceInput.isObject())throw new WorkflowException("REGENERATION_SOURCE_REQUIRED","原始提示词或生成档位回放必须提供来源关键帧");
             MediaPurpose mediaPurpose="STORYBOARD".equals(type)?MediaPurpose.PREVIS:MediaPurpose.KEYFRAME;
-            ObjectNode settings=generationProfiles.resolved(store.get(PROJECT,project(shot)));ObjectNode context=context(shot);context.put("providerMediaType","IMAGE").put("imageTaskType",mediaPurpose.name()).put("mediaPurpose",mediaPurpose.name()).put("generationProfile",text(settings,"generationProfile"));context.set("providerCapabilities",production.imageCapabilities(text(settings,"imageModel")));context.set("outputProfile",outputProfile(project(shot)));validateCharacters(context.path("assets"),shot);
+            ObjectNode projectDocument=store.get(PROJECT,project(shot)),settings=generationProfiles.resolved(projectDocument);if("ORIGINAL".equals(profileMode))settings=imageReplaySettings(settings,sourceInput);String ratio="ORIGINAL".equals(profileMode)?sourceInput.path("aspectRatioIntent").asText(sourceInput.path("ratio").asText("9:16")):projectDocument.path("ratio").asText("9:16");if(!Set.of("9:16","16:9","1:1").contains(ratio))throw new WorkflowException("UNSUPPORTED_RATIO","项目画幅必须为 9:16、16:9 或 1:1");
+            JsonNode imageOutput="ORIGINAL".equals(profileMode)&&sourceInput.hasNonNull("aspectRatioIntent")?obj().put("imageQuality",sourceInput.path("imageQuality").asText(sourceInput.path("imageSize").asText())).put("aspectRatioIntent",sourceInput.path("aspectRatioIntent").asText()).put("providerSize",sourceInput.path("providerSize").asText(sourceInput.path("providerOptions").path("size").asText())).put("providerAspectRatioVerified",sourceInput.path("providerAspectRatioVerified").asBoolean(false)).put("verificationStatus",sourceInput.path("imageOutputVerificationStatus").asText("STATIC_UNVERIFIED")):production.imageOutputProfile(text(settings,"imageModel"),text(settings,"imageSize"),ratio);
+            ObjectNode context=context(shot);context.put("providerMediaType","IMAGE").put("imageTaskType",mediaPurpose.name()).put("mediaPurpose",mediaPurpose.name()).put("generationProfile",text(settings,"generationProfile"));JsonNode imageCapabilities="ORIGINAL".equals(profileMode)&&sourceInput.path("context").path("providerCapabilities").isObject()?sourceInput.path("context").path("providerCapabilities"):production.imageCapabilities(text(settings,"imageModel"));context.set("providerCapabilities",imageCapabilities.deepCopy());context.set("imageOutputProfile",imageOutput.deepCopy());context.set("outputProfile",outputProfile(project(shot)));validateCharacters(context.path("assets"),shot);
             if(!text(body,"revisionFeedback").isBlank())context.put("revisionFeedback",text(body,"revisionFeedback"));
             if("KEYFRAME".equals(type))for(ObjectNode storyboard:store.list(STORYBOARD,project(shot),shotId))if(storyboard.path("selected").asBoolean()&&storyboard.path("locked").asBoolean()&&"PASSED".equals(text(storyboard,"qcStatus"))&&!storyboard.path("stale").asBoolean()){context.set("approvedStoryboard",storyboard.deepCopy());break;}
             List<ObjectNode> reviews=store.list(QC_RESULT,project(shot),null);
@@ -144,12 +152,11 @@ public class WorkflowService {
             JsonNode compiled=production.compileImage(context);
             int version=store.list(type.equals("KEYFRAME")?KEYFRAME:STORYBOARD,project(shot),shotId).size()+1;
             ObjectNode prompt=savePrompt(shot,type,compiled,context);
-            String ratio=store.get(PROJECT,project(shot)).path("ratio").asText("9:16");if(!Set.of("9:16","16:9","1:1").contains(ratio))throw new WorkflowException("UNSUPPORTED_RATIO","项目画幅必须为 9:16、16:9 或 1:1");
-            ObjectNode input=obj().put("shotId",shotId).put("sceneId",required(shot,"sceneId")).put("episodeId",required(store.get(SCENE,required(shot,"sceneId")),"episodeId")).put("version",version).put("promptVersionId",id(prompt)).put("prompt",compiled.path("prompt").asText()).put("assetDependencyLevel",assetDependency(shot).name()).put("mediaPurpose",mediaPurpose.name()).put("generationProfile",text(settings,"generationProfile")).put("modelId",text(settings,"imageModel")).put("imageSize",text(settings,"imageSize")).put("ratio",ratio);copyPromptAudit(input,compiled,context);
+            ObjectNode input=obj().put("shotId",shotId).put("sceneId",required(shot,"sceneId")).put("episodeId",required(store.get(SCENE,required(shot,"sceneId")),"episodeId")).put("version",version).put("promptVersionId",id(prompt)).put("prompt",compiled.path("prompt").asText()).put("assetDependencyLevel",assetDependency(shot).name()).put("mediaPurpose",mediaPurpose.name()).put("generationProfile",text(settings,"generationProfile")).put("modelId",text(settings,"imageModel")).put("imageSize",text(settings,"imageSize")).put("ratio",ratio).put("imageQuality",imageOutput.path("imageQuality").asText()).put("aspectRatioIntent",imageOutput.path("aspectRatioIntent").asText()).put("providerSize",imageOutput.path("providerSize").asText()).put("providerAspectRatioVerified",imageOutput.path("providerAspectRatioVerified").asBoolean()).put("imageOutputVerificationStatus",imageOutput.path("verificationStatus").asText()).put("promptMode",promptMode).put("profileMode",profileMode);copyPromptAudit(input,compiled,context);
             String semanticRole="STORYBOARD".equals(type)?KeyframeSemanticRole.STORYBOARD_GRID.name():body.path("semanticRole").asText(KeyframeSemanticRole.START_FRAME.name());KeyframeSemanticRole role=KeyframeSemanticRole.from(semanticRole);input.put("semanticRole",role.name()).put("providerFrameMode",role.nativeBoundary()?ProviderFrameMode.NATIVE_BOUNDARY.name():ProviderFrameMode.SEMANTIC_REFERENCE.name()).put("timeSec",body.path("timeSec").asDouble(role==KeyframeSemanticRole.END_FRAME?shot.path("duration").asDouble(0):0)).put("stateVersion",body.path("stateVersion").asInt(shot.path("shotPlanVersion").asInt(1)));
             input.set("context",context);
             ObjectNode imageOptions=body.path("providerOptions").isObject()?(ObjectNode)body.path("providerOptions").deepCopy():obj();
-            imageOptions.put("size",text(settings,"imageSize"));
+            imageOptions.put("size",imageOutput.path("providerSize").asText(text(settings,"imageSize")));
             imageOptions.putIfAbsent("watermark",BooleanNode.FALSE);
             input.set("providerOptions",imageOptions);
             ArrayNode imageRefs=input.putArray("referenceImageUrls");
@@ -161,23 +168,18 @@ public class WorkflowService {
             if(body.hasNonNull("parentKeyframeId")) input.put("parentKeyframeId",body.path("parentKeyframeId").asText());
             ObjectNode pinned=shot.deepCopy();pinned.set("assetViewIds",viewIds.deepCopy());pinned.put("assetReferencesStale",false);shot=store.update(SHOT,id(shot),revision(shot),pinned);
             if(body.hasNonNull("regenerateFromId")){
-                ObjectNode old=store.get(KEYFRAME,body.path("regenerateFromId").asText()); if(!shotId.equals(text(old,"shotId")))throw new IllegalArgumentException("重画来源不属于此镜头");
-                checkReferenceSnapshot(old);
-                ObjectNode sourceJob=store.get(GENERATION_JOB,required(old,"generationJobId"));
-                JsonNode previous=sourceJob.path("inputSnapshot");
-                input.put("promptVersionId",required(previous,"promptVersionId"));input.put("prompt",required(previous,"prompt"));
-                input.set("providerOptions",previous.path("providerOptions").deepCopy());input.set("referenceImageUrls",previous.path("referenceImageUrls").deepCopy());input.set("context",previous.path("context").deepCopy());
-                for(String field:List.of("generationProfile","modelId","imageSize","ratio","compilerVersion","normalizedPromptHash","referenceBindingsHash","referenceAuthorityFingerprint","continuitySnapshotHash","providerCapabilitiesVersion","capabilityFingerprint","sequenceCompilerVersion"))if(previous.has(field))input.set(field,previous.path(field).deepCopy());
+                if("ORIGINAL".equals(promptMode)){input.put("promptVersionId",required(sourceInput,"promptVersionId"));input.put("prompt",required(sourceInput,"prompt"));input.set("context",sourceInput.path("context").deepCopy());for(String field:List.of("compilerVersion","normalizedPromptHash","referenceBindingsHash","referenceAuthorityFingerprint","continuitySnapshotHash","providerCapabilitiesVersion","sequenceCompilerVersion"))if(sourceInput.has(field))input.set(field,sourceInput.path(field).deepCopy());}
+                if("ORIGINAL".equals(profileMode)){input.set("providerOptions",sourceInput.path("providerOptions").deepCopy());input.set("referenceImageUrls",sourceInput.path("referenceImageUrls").deepCopy());for(String field:List.of("generationProfile","modelId","imageSize","ratio","imageQuality","aspectRatioIntent","providerSize","providerAspectRatioVerified","imageOutputVerificationStatus","capabilityFingerprint"))if(sourceInput.has(field))input.set(field,sourceInput.path(field).deepCopy());}
                 // A regeneration is a new take of the same approved visual setup. Keep
                 // the exact reference view/version snapshot used by the source frame;
                 // the shot may have been edited since that frame was created.
-                if(previous.path("assetViewIds").isArray()&&!previous.path("assetViewIds").isEmpty()){
-                    input.set("assetViewIds",previous.path("assetViewIds").deepCopy());
-                    input.set("assetReferences",previous.path("assetReferences").deepCopy());
-                    ObjectNode repinned=shot.deepCopy();repinned.set("assetViewIds",previous.path("assetViewIds").deepCopy());repinned.put("assetReferencesStale",false);
+                if("ORIGINAL".equals(profileMode)&&sourceInput.path("assetViewIds").isArray()&&!sourceInput.path("assetViewIds").isEmpty()){
+                    input.set("assetViewIds",sourceInput.path("assetViewIds").deepCopy());
+                    input.set("assetReferences",sourceInput.path("assetReferences").deepCopy());
+                    ObjectNode repinned=shot.deepCopy();repinned.set("assetViewIds",sourceInput.path("assetViewIds").deepCopy());repinned.put("assetReferencesStale",false);
                     shot=store.update(SHOT,id(shot),revision(shot),repinned);
                 }
-                input.put("regeneratedFromId",id(old));
+                input.put("regeneratedFromId",id(sourceFrame));
             }
             input.set("clientRequestSnapshot",body.deepCopy());
             ObjectNode job=jobs.enqueue(project(shot),shotId,type,input,key(body));
@@ -187,7 +189,7 @@ public class WorkflowService {
     public ObjectNode regenerateKeyframe(String keyframeId,ObjectNode body){
         ObjectNode frame=store.get(KEYFRAME,keyframeId),request=body.deepCopy();
         preventRepeatedVisualFailure(frame,promptCompilerVersion(frame),frame.path("assetViewIds"));
-        request.put("regenerateFromId",keyframeId).put("regenerationMode","REPLAY_ORIGINAL").put("parentKeyframeId",keyframeId);
+        request.put("regenerateFromId",keyframeId).put("regenerationMode","REPLAY_ORIGINAL").put("promptMode","ORIGINAL").put("profileMode","ORIGINAL").put("parentKeyframeId",keyframeId);
         request.putIfAbsent("requestKey",TextNode.valueOf("keyframe-regenerate-"+keyframeId+"-"+UUID.randomUUID()));
         return image(required(frame,"shotId"),"KEYFRAME",request);
     }
@@ -196,9 +198,16 @@ public class WorkflowService {
         ObjectNode frame=store.get(KEYFRAME,keyframeId),request=body.deepCopy();
         ObjectNode shot=store.get(SHOT,required(frame,"shotId"));
         preventRepeatedVisualFailure(frame,production.imageCompilerVersion(),shot.path("assetViewIds"));
-        request.put("regenerationMode","LATEST").put("parentKeyframeId",keyframeId);
+        request.put("regenerationMode","LATEST").put("promptMode","REBUILD_LATEST").put("profileMode","CURRENT").put("parentKeyframeId",keyframeId);
         request.putIfAbsent("requestKey",TextNode.valueOf("keyframe-latest-"+keyframeId+"-"+UUID.randomUUID()));
         return image(required(frame,"shotId"),"KEYFRAME",request);
+    }
+    private String imagePromptMode(JsonNode body){String value=text(body,"promptMode");if(value.isBlank())value="REPLAY_ORIGINAL".equals(text(body,"regenerationMode"))?"ORIGINAL":"REBUILD_LATEST";if(!Set.of("ORIGINAL","REBUILD_LATEST").contains(value))throw new WorkflowException("IMAGE_PROMPT_MODE_INVALID","promptMode 只能为 ORIGINAL 或 REBUILD_LATEST");return value;}
+    private String imageProfileMode(JsonNode body){String value=text(body,"profileMode");if(value.isBlank())value="REPLAY_ORIGINAL".equals(text(body,"regenerationMode"))?"ORIGINAL":"CURRENT";if(!Set.of("ORIGINAL","CURRENT").contains(value))throw new WorkflowException("IMAGE_PROFILE_MODE_INVALID","profileMode 只能为 ORIGINAL 或 CURRENT");return value;}
+    private ObjectNode imageReplaySettings(ObjectNode current,JsonNode source){
+        String profile=required(source,"generationProfile"),model=required(source,"modelId"),size=required(source,"imageSize");if(!Set.of("TEST","STANDARD","FINAL").contains(profile))throw new WorkflowException("GENERATION_PROFILE_INVALID","原图片的生成档位无效");
+        JsonNode capabilities=production.imageCapabilities(model);boolean supported=false;for(JsonNode candidate:capabilities.path("supportedSizes"))if(size.equals(candidate.asText())){supported=true;break;}if(!supported)throw new WorkflowException("IMAGE_SIZE_UNSUPPORTED_BY_PROFILE","原图片尺寸不再受该模型能力档案支持");
+        return current.deepCopy().put("generationProfile",profile).put("imageModel",model).put("imageSize",size);
     }
     private void preventRepeatedVisualFailure(ObjectNode source,String targetCompilerVersion,JsonNode targetViewIds){
         String shotId=required(source,"shotId");
@@ -224,7 +233,7 @@ public class WorkflowService {
         ObjectNode frame=store.get(KEYFRAME,keyframeId),request=body.deepCopy();
         String instruction=body.path("revisionFeedback").asText(body.path("instruction").asText(body.path("notes").asText())).trim();if(instruction.isBlank())throw new WorkflowException("EDIT_INSTRUCTION_REQUIRED","编辑生成必须说明要修正的可见偏差");
         request.put("revisionFeedback",instruction);
-        request.put("regenerationMode","EDIT").put("parentKeyframeId",keyframeId);
+        request.put("regenerationMode","EDIT").put("promptMode","REBUILD_LATEST").put("profileMode","CURRENT").put("parentKeyframeId",keyframeId);
         request.putIfAbsent("requestKey",TextNode.valueOf("keyframe-edit-"+keyframeId+"-"+UUID.randomUUID()));
         return image(required(frame,"shotId"),"KEYFRAME",request);
     }
@@ -235,22 +244,32 @@ public class WorkflowService {
         if(latest==null||latest.path("passed").asBoolean())throw new WorkflowException("DIAGNOSIS_REQUIRED","关键帧没有未通过的质量诊断");
         String action=text(latest.path("diagnosis"),"recommendedRepair");
         if("RETRY_SAME_INPUT".equals(action))return regenerateKeyframe(keyframeId,body);
-        if("REBUILD_PROMPT".equals(action))return regenerateLatestKeyframe(keyframeId,body);
+        if("REBUILD_PROMPT".equals(action)){ObjectNode request=body.deepCopy();request.put("regenerateFromId",keyframeId).put("regenerationMode","REPAIR").put("promptMode","REBUILD_LATEST").put("profileMode","ORIGINAL").put("parentKeyframeId",keyframeId);request.putIfAbsent("requestKey",TextNode.valueOf("keyframe-repair-"+keyframeId+"-"+UUID.randomUUID()));return image(required(frame,"shotId"),"KEYFRAME",request);}
         return obj().put("status","ACTION_REQUIRED").put("keyframeId",keyframeId).put("recommendedRepair",action)
             .put("failureOrigin",text(latest.path("diagnosis"),"failureOrigin")).set("failureCodes",latest.path("diagnosis").path("failureCodes").deepCopy());
     }
     private record VideoPreparation(ObjectNode keyframeSnapshot,ObjectNode context,JsonNode previous,ObjectNode requestPlan,JsonNode compiled){}
     private VideoPreparation prepareVideoRequest(ObjectNode keyframe,ObjectNode shot,ObjectNode body){
-        ObjectNode keyframeSnapshot=compactKeyframeSnapshot(keyframe),settings=generationProfiles.resolved(store.get(PROJECT,project(shot)));
+        JsonNode replayInput=videoReplayInput(keyframe,shot,body);ObjectNode keyframeSnapshot=compactKeyframeSnapshot(keyframe),settings=generationProfiles.resolved(store.get(PROJECT,project(shot)));if(replayInput.isObject())settings=videoReplaySettings(settings,replayInput);
         ObjectNode context=context(shot);context.put("providerMediaType","VIDEO").put("generationProfile",text(settings,"generationProfile"));context.set("keyframe",keyframeSnapshot.deepCopy());context.set("providerCapabilities",production.videoCapabilities(text(settings,"videoModel")));context.set("videoOutputProfile",outputProfile(project(shot)).put("resolution",text(settings,"videoResolution")));attachRetake(context,shot);
         ObjectNode contextShot=(ObjectNode)context.path("shot");if(text(contextShot,"sequenceRelation").isBlank())contextShot.put("sequenceRelation",text(shot,"relationToPrevious"));
         JsonNode previous=context.path("previousTake");int maxDepth=context.path("sceneContinuityPolicy").path("maxContinuationDepth").asInt(2);if("CONTINUOUS".equals(text(shot,"relationToPrevious"))&&previous.path("continuationDepth").asInt(0)>=maxDepth){context.set("reanchorPlan",obj().put("reason","达到连续生成深度上限 "+maxDepth).put("useCanonicalReferences",true).put("source","SCENE_CONTINUITY_POLICY"));contextShot.put("sequenceRelation","REANCHOR_AFTER_DRIFT");}else if(context.path("retake").isObject())contextShot.put("sequenceRelation","REPAIR_TAIL");validateCharacters(context.path("assets"),shot);
         ObjectNode planningBody=body.deepCopy(),options=obj().put("duration",shot.path("duration").asDouble(3)).put("ratio",store.get(PROJECT,project(shot)).path("ratio").asText("9:16")).put("resolution",text(settings,"videoResolution")).put("watermark",false);
-        if(body.path("providerOptions").isObject())body.path("providerOptions").fields().forEachRemaining(e->options.set(e.getKey(),e.getValue()));planningBody.set("providerOptions",options);
+        JsonNode frozenOptions=replayInput.isObject()?replayInput.path("providerOptions"):body.path("providerOptions");if(frozenOptions.isObject())frozenOptions.fields().forEachRemaining(e->options.set(e.getKey(),e.getValue()));planningBody.set("providerOptions",options);
         JsonNode prepared=production.prepareVideo(context);ObjectNode requestPlan=videoPlanner.plan(prepared,context,keyframeSnapshot,previous,planningBody);
         ObjectNode preparedForPrompt=obj().put("strategy",prepared.path("strategy").asText());preparedForPrompt.set("references",requestPlan.path("activatedMaterials").deepCopy());context.set("preparedVideo",preparedForPrompt);context.put("videoTaskType",requestPlan.path("taskType").asText()).put("providerTaskLockMode",requestPlan.path("lockMode").asText()).put("runtimeProviderRules",requestPlan.path("runtimeRules").asText()).put("providerRulePackFingerprint",requestPlan.path("rulePackFingerprint").asText());
         JsonNode compiled=production.compileVideo(context);videoPlanner.validatePrompt(compiled.path("prompt").asText(),requestPlan.path("referenceMapping"));
         return new VideoPreparation(keyframeSnapshot,context,previous,requestPlan,compiled);
+    }
+    private JsonNode videoReplayInput(ObjectNode keyframe,ObjectNode shot,JsonNode body){
+        if(!"REPLAY_ORIGINAL".equals(text(body,"regenerationMode")))return MissingNode.getInstance();String sourceId=required(body,"sourceVideoTakeId");ObjectNode take=store.get(VIDEO_TAKE,sourceId);
+        if(!project(shot).equals(project(take))||!id(shot).equals(text(take,"shotId"))||!id(keyframe).equals(text(take,"sourceKeyframeId")))throw new WorkflowException("VIDEO_REPAIR_SOURCE_MISMATCH","自动返修来源必须属于同一项目、镜头和关键帧");
+        if(!"SUCCEEDED".equals(text(take,"providerStatus")))throw new WorkflowException("VIDEO_REPAIR_SOURCE_NOT_READY","自动返修来源视频尚未成功");JsonNode input=take.path("inputSnapshot");if(!input.isObject())throw new WorkflowException("VIDEO_REPAIR_SOURCE_MISSING","来源视频缺少生成快照");return input;
+    }
+    private ObjectNode videoReplaySettings(ObjectNode current,JsonNode source){
+        String profile=required(source,"generationProfile"),model=required(source,"modelId"),resolution=required(source,"resolution");if(!Set.of("TEST","STANDARD","FINAL").contains(profile))throw new WorkflowException("GENERATION_PROFILE_INVALID","原视频的生成档位无效");
+        JsonNode capabilities=production.videoCapabilities(model);boolean supported=false;for(JsonNode candidate:capabilities.path("supportedResolutions"))if(resolution.equals(candidate.asText())){supported=true;break;}if(!supported)throw new WorkflowException("VIDEO_RESOLUTION_UNSUPPORTED_BY_PROFILE","原视频分辨率不再受该模型能力档案支持");
+        return current.deepCopy().put("generationProfile",profile).put("videoModel",model).put("videoResolution",resolution);
     }
     public ObjectNode videoPreview(String keyframeId,ObjectNode body){
         return store.transaction(()->{
@@ -278,15 +297,19 @@ public class WorkflowService {
             input.set("references",requestPlan.path("references").deepCopy());input.set("providerOptions",requestPlan.path("providerParameters").deepCopy());input.set("providerParameters",requestPlan.path("providerParameters").deepCopy());
             for(String field:List.of("modelId","modelProfileVersion","capabilityFingerprint","taskType","lockMode","route","activatedMaterials","excludedMaterials","referenceMapping","referenceAuthority","referenceBudget","rulePackFingerprint","rulePackUpstreamCommit","runtimeRuleIds","audioGenerationPolicy","modelProfile","preflight","resolution","ratio","desiredDuration","providerDuration","durationAdaptationReason","nativeAudio","watermark"))if(requestPlan.has(field))input.set(field,requestPlan.path(field).deepCopy());
             input.put("generationProfile",context.path("generationProfile").asText("TEST"));
+            input.put("regenerationMode",body.path("regenerationMode").asText("LATEST"));if(body.hasNonNull("sourceVideoTakeId"))input.put("sourceVideoTakeId",body.path("sourceVideoTakeId").asText());if(body.path("automaticRepair").asBoolean())input.put("automaticRepair",true);
             input.set("assetReferences",requestPlan.path("activatedMaterials").deepCopy());input.set("assetViewIds",shot.path("assetViewIds").deepCopy());
             input.set("clientRequestSnapshot",body.deepCopy());
             ObjectNode job=jobs.enqueue(project(shot),id(shot),"VIDEO",input,key(body));
             setShot(shot,"VIDEO_GENERATING");return job;
         });
     }
+    public ObjectNode repairVideo(String videoTakeId,ObjectNode body){
+        ObjectNode source=store.get(VIDEO_TAKE,videoTakeId),request=obj().put("regenerationMode","REPLAY_ORIGINAL").put("sourceVideoTakeId",videoTakeId).put("automaticRepair",true);String requestKey=text(body,"requestKey");if(!requestKey.isBlank())request.put("requestKey",requestKey);else request.put("requestKey","video-repair-"+videoTakeId+"-"+UUID.randomUUID());return video(required(source,"sourceKeyframeId"),request);
+    }
     private ObjectNode compactKeyframeSnapshot(ObjectNode source){
         ObjectNode snapshot=obj();
-        for(String field:List.of("id","projectId","shotId","version","attemptNo","provider","sourceModel","providerUrl","providerUrlExpiresAt","archiveUrl","generationJobId","providerRequestId","promptVersionId","handoffStatus","qcStatus","qcScore","locked","selected","simulated","generationProfile","imageSize","assetViewIds","assetReferences","regeneratedFromId","regenerationMode","directorPlanVersion","dramaticBeatVersion","shotPlanVersion","semanticRole","timeSec","stateVersion","providerFrameMode"))
+        for(String field:List.of("id","projectId","shotId","version","attemptNo","provider","sourceModel","providerUrl","providerUrlExpiresAt","archiveUrl","generationJobId","providerRequestId","promptVersionId","handoffStatus","qcStatus","qcScore","locked","selected","simulated","generationProfile","imageSize","imageQuality","aspectRatioIntent","providerSize","providerAspectRatioVerified","imageOutputVerificationStatus","assetViewIds","assetReferences","regeneratedFromId","regenerationMode","directorPlanVersion","dramaticBeatVersion","shotPlanVersion","semanticRole","timeSec","stateVersion","providerFrameMode"))
             if(source.has(field))snapshot.set(field,source.get(field).deepCopy());
         return snapshot;
     }

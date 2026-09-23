@@ -91,7 +91,7 @@ public class GenerationWorker {
                 .put("provider","VOLCENGINE").put("sourceModel",result.model()).put("generationProfile",input.path("generationProfile").asText("TEST")).put("providerUrl",result.providerUrl())
                 .put("generationJobId",id(job)).put("providerRequestId",result.requestId()).put("promptVersionId",required(input,"promptVersionId"))
                 .put("handoffStatus","READY").put("qcStatus","PENDING").put("locked",false).put("selected",false).put("simulated",result.simulated());
-            if(input.hasNonNull("imageSize"))asset.set("imageSize",input.path("imageSize").deepCopy());
+            for(String field:List.of("imageSize","imageQuality","aspectRatioIntent","providerSize","providerAspectRatioVerified","imageOutputVerificationStatus"))if(input.has(field))asset.set(field,input.path(field).deepCopy());
             if(result.expiresAt()!=null)asset.put("providerUrlExpiresAt",result.expiresAt().toString());
             if(result.simulated())asset.put("previewUrl","/demo/keyframe.png");
             JsonNode plannedShot=input.path("context").path("shot");for(String field:List.of("directorPlanVersion","dramaticBeatVersion","shotPlanVersion"))if(plannedShot.has(field))asset.set(field,plannedShot.path(field).deepCopy());
@@ -143,7 +143,7 @@ public class GenerationWorker {
                 take.set("inputSnapshot",input.deepCopy());take.set("assetViewIds",frame.path("assetViewIds").deepCopy());take.set("assetReferences",frame.path("assetReferences").deepCopy()); ObjectNode saved=store.create(VIDEO_TAKE,take);
                 if(!lipsync){ObjectNode current=store.getForUpdate(KEYFRAME,id(frame));store.update(KEYFRAME,id(current),revision(current),current.deepCopy().put("handoffStatus","HANDED_OFF").put("handedOffAt",Instant.now().toString()));}
                 jobs.mutate(id(job),j->{j.put("providerTaskId",submission.taskId()).put("providerRequestId",submission.requestId()).put("progress",20).put("simulated",submission.simulated());j.set("outputSnapshot",obj().put("takeId",id(saved)));});
-                if(!lipsync)jobs.enqueue(project(job),required(job,"shotId"),"ARCHIVE",obj().put("targetKind","keyframes").put("targetId",id(frame)).put("providerUrl",required(frame,"providerUrl")).put("simulated",submission.simulated()),"archive:keyframe:"+id(frame));
+                if(!lipsync&&text(frame,"archiveUrl").isBlank())jobs.enqueue(project(job),required(job,"shotId"),"ARCHIVE",obj().put("targetKind","keyframes").put("targetId",id(frame)).put("providerUrl",required(frame,"providerUrl")).put("simulated",submission.simulated()),"archive:keyframe:"+id(frame));
                 return null;
             });
         }catch(Exception e){jobs.fail(id(job),"ACCEPTED_PERSISTENCE_FAILED","服务商已接受视频任务，任务号 "+submission.taskId()+"；本地保存失败，请核对后恢复",false,true);throw new WorkflowException("SUBMISSION_UNCERTAIN","服务商已接单，本地记录保存失败，禁止自动重复提交");}

@@ -22,13 +22,14 @@ public class ProductionService {
     private final PromptCompiler prompts;
     private final ProductionStateMachine states;
     private final ProviderCapabilityRegistry capabilities;
+    private final ImageOutputSizeResolver imageOutputs;
 
     public ProductionService(ObjectMapper mapper, ContinuityEngine continuity, PromptCompiler prompts, ProductionStateMachine states) {
         this(mapper,continuity,prompts,states,new ProviderCapabilityRegistry());
     }
     @Autowired
     public ProductionService(ObjectMapper mapper, ContinuityEngine continuity, PromptCompiler prompts, ProductionStateMachine states,ProviderCapabilityRegistry capabilities) {
-        this.mapper = mapper; this.continuity = continuity; this.prompts = prompts; this.states = states;this.capabilities=capabilities;
+        this.mapper = mapper; this.continuity = continuity; this.prompts = prompts; this.states = states;this.capabilities=capabilities;this.imageOutputs=new ImageOutputSizeResolver(capabilities);
     }
     public JsonNode planContinuity(JsonNode request) { return value(continuity.plan(request)); }
     public JsonNode applyLockedTake(JsonNode request) { return continuity.applyLockedTake(request); }
@@ -39,6 +40,7 @@ public class ProductionService {
     public JsonNode routeVideo(JsonNode request) { return prompts.routeVideo(request); }
     public JsonNode imageCapabilities(){return capabilities.image();}
     public JsonNode imageCapabilities(String modelId){return capabilities.image(modelId);}
+    public JsonNode imageOutputProfile(String modelId,String imageQuality,String aspectRatio){return imageOutputs.resolve(modelId,imageQuality,aspectRatio).toJson();}
     public JsonNode videoCapabilities(){return capabilities.video();}
     public JsonNode videoCapabilities(String modelId){return capabilities.video(modelId);}
     public JsonNode transitionShot(JsonNode request) { return states.transitionShot(request); }

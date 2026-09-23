@@ -91,7 +91,7 @@ class VolcengineAdaptersTest {
         assertThat(defaults.getVideoResolution()).isEqualTo("480p");
         assertThat(defaults.getImageSize()).isEqualTo("2K");
         var image=new VolcengineImageGenerator(new ArkHttpClient(mapper,properties),properties).requestBodySnapshot(new ImageGenerator.ImageRequest(ProviderCapabilityRegistry.SEEDREAM_50,"测试",List.of(),Map.of()));
-        assertThat(image).containsEntry("size",properties.getImageSize()).doesNotContainKey("resolution");
+        assertThat(image).containsEntry("size",properties.getImageSize()).doesNotContainKeys("resolution","ratio");
     }
     @Test void rejectsReservedOverridesAndOnlyCancelsQueuedTasks(){
         ArkHttpClient client=new ArkHttpClient(mapper,properties);VideoGenerator videos=new VolcengineVideoGenerator(client,properties);

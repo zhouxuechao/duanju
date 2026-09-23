@@ -81,8 +81,9 @@ public class ProviderCapabilityRegistry {
     }
     private ImageModelProfile buildSeedream50(){
         String profileVersion="seedream-5.0-profile-v1",verification="STATIC_UNVERIFIED";List<String> sizes=List.of("2K"),ratios=List.of("9:16","16:9","1:1");
-        String fingerprint=sha256(SEEDREAM_50+"|"+profileVersion+"|"+sizes+"|"+ratios+"|10|true|true|false|false");
-        return new ImageModelProfile(SEEDREAM_50,"SEEDREAM_5_0",profileVersion,fingerprint,verification,sizes,"2K",ratios,true,true,10,false,true,false);
+        List<ImageOutputProfile> outputs=ratios.stream().map(ratio->new ImageOutputProfile("2K",ratio,"2K",false,verification)).toList();
+        String fingerprint=sha256(SEEDREAM_50+"|"+profileVersion+"|"+sizes+"|"+ratios+"|"+outputs+"|10|true|true|false|false");
+        return new ImageModelProfile(SEEDREAM_50,"SEEDREAM_5_0",profileVersion,fingerprint,verification,sizes,"2K",ratios,outputs,true,true,10,false,true,false);
     }
     private static String blank(String value,String fallback){return value==null||value.isBlank()?fallback:value.trim();}
     private String sha256(String value){try{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));}catch(Exception e){throw new IllegalStateException(e);}}

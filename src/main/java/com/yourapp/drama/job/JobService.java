@@ -27,7 +27,7 @@ public class JobService {
         try{JobType.valueOf(type);}catch(IllegalArgumentException error){throw new WorkflowException("JOB_TYPE_INVALID","当前流程不支持任务类型："+type);}
         ObjectNode job=store.transaction(()->{
             ObjectNode projectDocument=store.getForUpdate(PROJECT,projectId);
-            ObjectNode settings=generationProfiles.resolved(projectDocument),frozen=input.isObject()?((ObjectNode)input).deepCopy():obj();String generationProfile=settings.path("generationProfile").asText("TEST");frozen.putIfAbsent("generationProfile",com.fasterxml.jackson.databind.node.TextNode.valueOf(generationProfile));
+            ObjectNode settings=generationProfiles.resolved(projectDocument),frozen=input.isObject()?((ObjectNode)input).deepCopy():obj();String currentProfile=settings.path("generationProfile").asText("TEST");frozen.putIfAbsent("generationProfile",com.fasterxml.jackson.databind.node.TextNode.valueOf(currentProfile));String generationProfile=frozen.path("generationProfile").asText(currentProfile);
             if(Set.of("STORYBOARD","KEYFRAME","ASSET_IMAGE").contains(type)){frozen.putIfAbsent("modelId",settings.path("imageModel"));frozen.putIfAbsent("imageSize",settings.path("imageSize"));}
             if(Set.of("VIDEO","LIPSYNC").contains(type)){frozen.putIfAbsent("modelId",settings.path("videoModel"));frozen.putIfAbsent("resolution",settings.path("videoResolution"));}
             if(requestKey!=null&&!requestKey.isBlank())for(ObjectNode old:store.list(GENERATION_JOB,projectId,null))if(requestKey.equals(text(old,"requestKey"))){
