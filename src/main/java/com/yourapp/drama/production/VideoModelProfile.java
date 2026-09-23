@@ -18,10 +18,11 @@ public record VideoModelProfile(
         ReferenceLimits hardLimits, ReferenceLimits recommendedLimits,
         double maxReferenceVideoSeconds,double maxReferenceAudioSeconds,
         String durationMode,int minDuration,int maxDuration,int durationStep,
-        List<Integer> supportedDurations,List<String> supportedRatios,List<String> supportedResolutions,List<String> supportedOutputFormats, Set<VideoTaskType> supportedTaskTypes) {
+        List<Integer> supportedDurations,List<String> supportedRatios,List<String> supportedResolutions,List<String> supportedOutputFormats,
+        Set<VideoTaskType> supportedTaskTypes,List<VideoOutputProfile> outputProfiles) {
     public record ReferenceLimits(int images,int videos,int audios,int total) {}
     public VideoModelProfile {
-        supportedDurations=List.copyOf(supportedDurations);supportedRatios=List.copyOf(supportedRatios);supportedResolutions=List.copyOf(supportedResolutions);supportedOutputFormats=List.copyOf(supportedOutputFormats);supportedTaskTypes=Set.copyOf(supportedTaskTypes);
+        supportedDurations=List.copyOf(supportedDurations);supportedRatios=List.copyOf(supportedRatios);supportedResolutions=List.copyOf(supportedResolutions);supportedOutputFormats=List.copyOf(supportedOutputFormats);supportedTaskTypes=Set.copyOf(supportedTaskTypes);outputProfiles=List.copyOf(outputProfiles);
     }
     public ObjectNode toJson(){
         ObjectNode n=obj().put("version",profileVersion).put("modelId",modelId).put("modelFamily",family)

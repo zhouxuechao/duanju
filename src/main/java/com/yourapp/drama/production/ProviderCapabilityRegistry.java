@@ -70,14 +70,15 @@ public class ProviderCapabilityRegistry {
         String taskFingerprint=tasks.stream().map(Enum::name).sorted().reduce((a,b)->a+","+b).orElse("");
         String fingerprint=sha256(id+"|"+version+"|"+hard+"|"+recommended+"|"+maxVideoSeconds+"|"+maxAudioSeconds+"|"+outputFormats+"|"+taskFingerprint);
         return new VideoModelProfile(id,family,version,fingerprint,true,true,true,true,true,seedance25,seedance25,seedance25,seedance25,seedance25,seedance25,hard,recommended,
-                maxVideoSeconds,maxAudioSeconds,"ENUM",0,0,0,seedance25?List.of(5,10,15,30):List.of(4,8,12),seedance25?List.of("adaptive","16:9","9:16","1:1","4:3","3:4","21:9"):List.of("16:9","9:16","1:1"),List.of("480p","720p","1080p"),outputFormats,tasks);
+                maxVideoSeconds,maxAudioSeconds,"ENUM",0,0,0,seedance25?List.of(5,10,15,30):List.of(4,8,12),seedance25?List.of("adaptive","16:9","9:16","1:1","4:3","3:4","21:9"):List.of("16:9","9:16","1:1"),List.of("480p","720p","1080p"),outputFormats,tasks,List.of());
     }
     private VideoModelProfile buildFast(int min,int max,int step){
         if(min<1||max<min||step<1)throw new IllegalArgumentException("Fast 模型时长范围配置无效");
         var hard=new VideoModelProfile.ReferenceLimits(30,10,10,50);var recommended=new VideoModelProfile.ReferenceLimits(8,5,5,18);
         Set<VideoTaskType> tasks=Set.of(VideoTaskType.REFERENCE_GENERATE,VideoTaskType.FIRST_FRAME_GENERATE,VideoTaskType.FIRST_LAST_FRAME_GENERATE,VideoTaskType.KEYFRAME_GENERATE,VideoTaskType.STORYBOARD_GUIDED);
-        String version="seedance-2.0-fast-profile-v1",fingerprint=sha256(SEEDANCE_20_FAST+"|"+version+"|"+min+"|"+max+"|"+step+"|480p,720p|"+tasks);
-        return new VideoModelProfile(SEEDANCE_20_FAST,"SEEDANCE_2_0_FAST",version,fingerprint,true,true,true,true,true,true,true,true,true,true,true,hard,recommended,30,30,"RANGE",min,max,step,List.of(),List.of("adaptive","16:9","9:16","1:1","4:3","3:4","21:9"),List.of("480p","720p"),List.of("mp4"),tasks);
+        var outputs=List.of(new VideoOutputProfile("480p","9:16",496,864,0,"LIVE_OBSERVED"));
+        String version="seedance-2.0-fast-profile-v1",fingerprint=sha256(SEEDANCE_20_FAST+"|"+version+"|"+min+"|"+max+"|"+step+"|480p,720p|"+tasks+"|"+outputs);
+        return new VideoModelProfile(SEEDANCE_20_FAST,"SEEDANCE_2_0_FAST",version,fingerprint,true,true,true,true,true,true,true,true,true,true,true,hard,recommended,30,30,"RANGE",min,max,step,List.of(),List.of("adaptive","16:9","9:16","1:1","4:3","3:4","21:9"),List.of("480p","720p"),List.of("mp4"),tasks,outputs);
     }
     private ImageModelProfile buildSeedream50(){
         String profileVersion="seedream-5.0-profile-v1",verification="STATIC_UNVERIFIED";List<String> sizes=List.of("2K"),ratios=List.of("9:16","16:9","1:1");

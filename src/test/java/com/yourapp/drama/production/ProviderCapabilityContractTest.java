@@ -54,7 +54,7 @@ class ProviderCapabilityContractTest {
                 .put("providerReturnedWidth", 1152).put("providerReturnedHeight", 2048));
         evidence.set("video", obj().put("modelId", video.modelId()).put("providerRequestId", "video-request-1")
                 .put("providerTaskId", "video-task-1").put("requestedResolution", "480p").put("requestedDuration", 5)
-                .put("actualWidth", 480).put("actualHeight", 854).put("actualDurationMs", 5040)
+                .put("ratio","9:16").put("actualWidth", 496).put("actualHeight", 864).put("actualDurationMs", 5040)
                 .put("providerUrlHandoff", true).put("firstFrameFingerprint", "same-fingerprint")
                 .put("sourceImageFingerprint", "same-fingerprint"));
 
@@ -79,7 +79,7 @@ class ProviderCapabilityContractTest {
                 .put("providerReturnedWidth", 2048).put("providerReturnedHeight", 2048));
         evidence.set("video", obj().put("modelId", video.modelId()).put("providerRequestId", "video-request-1")
                 .put("providerTaskId", "video-task-1").put("requestedResolution", "480p").put("requestedDuration", 5)
-                .put("actualWidth", 720).put("actualHeight", 1280).put("actualDurationMs", 9000)
+                .put("ratio","9:16").put("actualWidth", 720).put("actualHeight", 1280).put("actualDurationMs", 9000)
                 .put("providerUrlHandoff", false).put("firstFrameFingerprint", "a").put("sourceImageFingerprint", "b"));
 
         ObjectNode snapshot = new ProviderCapabilityContract().verifyCanary(image, video, evidence);
@@ -89,5 +89,38 @@ class ProviderCapabilityContractTest {
         assertThat(snapshot.path("videoOutputs").path("480p").path("5s").path("status").asText()).isEqualTo("STATIC_UNVERIFIED");
         assertThat(snapshot.path("failures")).extracting(com.fasterxml.jackson.databind.JsonNode::asText)
                 .contains("IMAGE_ASPECT_RATIO_MISMATCH", "VIDEO_RESOLUTION_MISMATCH", "VIDEO_DURATION_MISMATCH", "PROVIDER_URL_HANDOFF_MISMATCH");
+    }
+
+    @Test void seedanceFastAcceptsTheObservedVertical480pGeometry() {
+        ObjectNode snapshot=verifyFastVideoGeometry(496,864,"9:16");
+
+        assertThat(snapshot.path("verificationStatus").asText()).isEqualTo("PARTIAL_LIVE_VERIFIED");
+        assertThat(snapshot.path("videoOutputs").path("480p").path("5s").path("status").asText()).isEqualTo("LIVE_VERIFIED");
+    }
+
+    @Test void seedanceFastOutputProfileDoesNotOvermatchOtherSizesOrOrientation() {
+        for(int[] geometry:new int[][]{{500,900},{540,960},{720,1280},{864,496}}){
+            ObjectNode snapshot=verifyFastVideoGeometry(geometry[0],geometry[1],"9:16");
+            assertThat(snapshot.path("videoOutputs").path("480p").path("5s").path("status").asText())
+                    .as(geometry[0]+"x"+geometry[1]).isEqualTo("STATIC_UNVERIFIED");
+            assertThat(snapshot.path("failures")).extracting(com.fasterxml.jackson.databind.JsonNode::asText)
+                    .contains("VIDEO_RESOLUTION_MISMATCH");
+        }
+        ObjectNode unverifiedLandscape=verifyFastVideoGeometry(864,496,"16:9");
+        assertThat(unverifiedLandscape.path("videoOutputs").path("480p").path("5s").path("status").asText()).isEqualTo("STATIC_UNVERIFIED");
+    }
+
+    private ObjectNode verifyFastVideoGeometry(int width,int height,String ratio){
+        ImageModelProfile image=registry.imageProfile(ProviderCapabilityRegistry.SEEDREAM_50);
+        VideoModelProfile video=registry.profile(ProviderCapabilityRegistry.SEEDANCE_20_FAST);
+        ObjectNode evidence=obj().put("provider","VOLCENGINE").put("evidenceSource","LIVE_CANARY").put("checkedAt","2026-09-23T00:00:00Z");
+        evidence.set("image",obj().put("modelId",image.modelId()).put("providerRequestId","image-request-1")
+                .put("requestedImageQuality","2K").put("aspectRatioIntent","9:16").put("providerSize","2K")
+                .put("providerReturnedWidth",1600).put("providerReturnedHeight",2848));
+        evidence.set("video",obj().put("modelId",video.modelId()).put("providerRequestId","video-request-1")
+                .put("providerTaskId","video-task-1").put("requestedResolution","480p").put("requestedDuration",5)
+                .put("ratio",ratio).put("actualWidth",width).put("actualHeight",height).put("actualDurationMs",5042)
+                .put("providerUrlHandoff",true).put("firstFrameFingerprint","same-fingerprint").put("sourceImageFingerprint","same-fingerprint"));
+        return new ProviderCapabilityContract().verifyCanary(image,video,evidence);
     }
 }

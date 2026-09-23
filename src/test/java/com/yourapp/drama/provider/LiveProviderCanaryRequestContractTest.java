@@ -50,4 +50,17 @@ class LiveProviderCanaryRequestContractTest {
         for(JsonNode item:body.path("content"))if("first_frame".equals(item.path("role").asText()))return item.path("image_url").path("url").asText();
         return "";
     }
+
+    @Test void providerSuccessIsPersistedBeforeLocalMediaValidation() throws Exception {
+        String source=Files.readString(Path.of("src","test","java","com","yourapp","drama","provider","LiveProviderCanaryIT.java"));
+        int wait=source.indexOf("video=waitFor(videoGenerator,submission.taskId())");
+        int succeeded=source.indexOf("state.advance(\"VIDEO_SUCCEEDED\"");
+        int download=source.indexOf("download(video.providerUrl())");
+        int capability=source.indexOf("verifyCanary(");
+
+        assertThat(wait).isGreaterThanOrEqualTo(0);
+        assertThat(succeeded).isGreaterThan(wait);
+        assertThat(download).isGreaterThan(succeeded);
+        assertThat(capability).isGreaterThan(download);
+    }
 }
